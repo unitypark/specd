@@ -1,0 +1,79 @@
+/* Hairline graphics. Decoration only — never in the way of anything. */
+
+.line {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+  color: var(--line-2);
+  z-index: 0;
+}
+
+/*
+ * The draw. 1200 comfortably exceeds every path length here, so one number
+ * serves them all; getTotalLength() would need JavaScript for no visible gain.
+ */
+.draw,
+.tip {
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+}
+
+.pathlabel {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.14em;
+  fill: var(--ink-3);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .draw {
+      animation: draw linear both;
+      animation-timeline: view();
+      animation-range: entry 10% entry 70%;
+    }
+    .tip {
+      animation: draw linear both;
+      animation-timeline: view();
+      animation-range: entry 55% entry 80%;
+    }
+    .pathlabel {
+      animation: fadein linear both;
+      animation-timeline: view();
+      animation-range: entry 45% entry 75%;
+    }
+    @keyframes draw {
+      to {
+        stroke-dashoffset: 0;
+      }
+    }
+    @keyframes fadein {
+      to {
+        opacity: 1;
+      }
+    }
+  }
+
+  /* Without scroll-driven animation the lines would stay invisible, since the
+     dash offset never resolves. Draw them once on load instead. */
+  @supports not (animation-timeline: view()) {
+    .draw,
+    .tip {
+      animation: draw 1.6s ease-out 0.2s both;
+    }
+    .pathlabel {
+      animation: fadein 0.8s ease-out 1.2s both;
+    }
+  }
+}
+
+/* Reduced motion: present, but already drawn. */
+@media (prefers-reduced-motion: reduce) {
+  .draw,
+  .tip {
+    stroke-dashoffset: 0;
+  }
+  .pathlabel {
+    opacity: 1;
+  }
+}

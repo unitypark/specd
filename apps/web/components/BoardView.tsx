@@ -174,7 +174,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                           spec v{card.spec.version}
                         </span>
                         {card.spec.unverifiedCount > 0 && (
-                          <span className="pill warn">{card.spec.unverifiedCount} UNVERIFIED</span>
+                          <span className="pill unverified">{card.spec.unverifiedCount} UNVERIFIED</span>
                         )}
                         {card.spec.approvedBy && (
                           <span className="pill on">✓ {card.spec.approvedBy}</span>
@@ -217,7 +217,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                         </span>
                         <span className="pill">{spec.citationCount} citations</span>
                         {spec.unverifiedCount > 0 && (
-                          <span className="pill warn">{spec.unverifiedCount} UNVERIFIED</span>
+                          <span className="pill unverified">{spec.unverifiedCount} UNVERIFIED</span>
                         )}
                         {spec.approvedBy && (
                           <span className="pill on">

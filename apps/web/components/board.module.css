@@ -214,9 +214,9 @@
 .unv {
   display: inline-block;
   font: 600 0.63rem/1 var(--mono);
-  color: var(--warn);
-  background: rgba(217, 196, 112, 0.08);
-  border: 1px solid rgba(217, 196, 112, 0.4);
+  color: var(--unverified);
+  background: var(--unverified-soft);
+  border: 1px solid var(--unverified-line);
   border-radius: 4px;
   padding: 0.16em 0.4em;
 }

@@ -1,0 +1,337 @@
+/* §02 — FROM TICKET TO SPEC. Jira on the left, the drafted spec on the right,
+   the agent and its knowledge base between them. */
+
+.conv {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 0.8rem 0.9rem 0.7rem;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.1rem 0.6rem;
+}
+.flex {
+  flex: 1;
+}
+.state {
+  font: 700 0.56rem/1 var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--ink-3);
+  transition: color 0.3s;
+}
+.state[data-phase='reading'],
+.state[data-phase='drafting'] {
+  color: var(--accent);
+}
+.state[data-phase='done'] {
+  color: var(--ink);
+}
+.replay {
+  font: 700 0.58rem/1 var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  padding: 0.34rem 0.55rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.replay:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 8.5rem 1.25fr;
+  gap: 0.9rem;
+  align-items: start;
+}
+@media (max-width: 880px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tlabel {
+  font: 700 0.52rem/1 var(--mono);
+  letter-spacing: 0.18em;
+  color: var(--ink-3);
+  margin-bottom: 0.4rem;
+}
+
+/* ─── the ticket ──────────────────────────────────────────────────────────── */
+
+.ticket {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  padding: 0.7rem 0.8rem;
+  /* Rotated away until the agent picks it up — it arrives, it is not just there. */
+  transform: rotateY(14deg) translateX(-16px);
+  opacity: 0;
+  transition: transform 0.5s ease, opacity 0.5s ease;
+}
+.ticket.on {
+  transform: none;
+  opacity: 1;
+}
+.thead {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: 600 0.6rem/1 var(--mono);
+  color: var(--ink-2);
+  margin-bottom: 0.5rem;
+}
+.tchip,
+.tstatus {
+  font: 700 0.5rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.24em 0.36em;
+  color: var(--ink-3);
+}
+.ticket h4 {
+  font: 600 0.9rem/1.3 var(--serif);
+  color: #fff;
+  margin: 0 0 0.45rem;
+}
+.ticket p {
+  font-size: 0.74rem;
+  line-height: 1.65;
+  color: var(--ink-2);
+  margin: 0 0 0.45rem;
+}
+.comment {
+  border-left: 2px solid var(--line-2);
+  padding-left: 0.6rem;
+  font-style: italic;
+}
+.who {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: 500 0.58rem/1 var(--mono);
+  color: var(--ink-3);
+  margin-top: 0.6rem;
+}
+.av {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #3b3b3b;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font: 700 0.52rem/1 var(--mono);
+  flex: none;
+}
+
+/* ─── the agent + knowledge ───────────────────────────────────────────────── */
+
+.middle {
+  display: grid;
+  place-items: center;
+  gap: 0.7rem;
+  padding-top: 1.4rem;
+}
+.agent {
+  width: 3.4rem;
+  height: 3.4rem;
+  border: 1.5px solid var(--line-2);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-2);
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.agent.work {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(0, 190, 44, 0.1);
+}
+.cursor {
+  width: 10px;
+  height: 18px;
+  background: var(--accent);
+  animation: blink 1.1s infinite;
+}
+.agent.work .cursor {
+  animation-duration: 0.3s;
+}
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.kb {
+  position: relative;
+  width: 100%;
+  text-align: center;
+  min-height: 3.4rem;
+}
+.kblabel {
+  font: 700 0.52rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+  display: block;
+  padding-top: 1.6rem;
+}
+.kchip {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  font: 500 0.5rem/1 var(--mono);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  padding: 0.2em 0.35em;
+  white-space: nowrap;
+  opacity: 0;
+}
+/* Chips fly from the knowledge base up into the agent — the grounding, shown. */
+.kchip.fly {
+  animation: kfly 1.25s ease-in both;
+}
+@keyframes kfly {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.7);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -74px) scale(1);
+  }
+}
+
+/* ─── the spec ────────────────────────────────────────────────────────────── */
+
+.spec {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  padding: 0.7rem 0.8rem;
+}
+.shead {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
+  font: 700 0.62rem/1.3 var(--mono);
+  color: var(--ink);
+}
+.draft {
+  font: 600 0.52rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+.sline {
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 0.3s, transform 0.3s;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin: 0.26rem 0;
+}
+.sline.on {
+  opacity: 1;
+  transform: none;
+}
+.sfoot {
+  border-top: 1px dashed var(--line);
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  font: 500 0.58rem/1.7 var(--mono);
+  color: var(--ink-3);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.sfoot.on {
+  opacity: 1;
+}
+
+/* ─── traceability marks ──────────────────────────────────────────────────── */
+
+.mk {
+  display: inline-grid;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #06130a;
+  font: 800 0.5rem/1 var(--mono);
+  vertical-align: 0.08em;
+  margin: 0 0.12em;
+  padding: 0 0.2em;
+  opacity: 0.3;
+  transform: scale(0.85);
+  transition: 0.25s;
+}
+.mk.lit {
+  opacity: 1;
+  transform: scale(1);
+}
+.sline .mk {
+  opacity: 1;
+  transform: none;
+}
+.cite {
+  font: 500 0.54rem/1 var(--mono);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  padding: 0.16em 0.34em;
+  margin-left: 0.3em;
+  white-space: nowrap;
+}
+/* An unverified claim must not look like a citation. Same shape, different
+   reading: it is a question, not an answer. */
+.unv {
+  font: 500 0.54rem/1 var(--mono);
+  color: var(--unverified);
+  background: var(--unverified-soft);
+  border: 1px solid var(--unverified-line);
+  border-radius: 3px;
+  padding: 0.16em 0.34em;
+  margin-left: 0.3em;
+  white-space: nowrap;
+}
+
+.legend {
+  font: 500 0.58rem/1.9 var(--mono);
+  color: var(--ink-3);
+  margin: 0.9rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticket,
+  .sline,
+  .sfoot {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .kchip,
+  .cursor {
+    animation: none;
+  }
+}

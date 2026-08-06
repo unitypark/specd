@@ -96,6 +96,59 @@ function stripWrappingFence(text: string): string {
   return text.slice(firstNewline + 1, closing).trim();
 }
 
+/**
+ * Escapes raw control characters that appear *inside* string literals.
+ *
+ * Without `output_config.format` there is no guarantee the reply is valid
+ * JSON, and the failure we actually see is a model writing markdown with real
+ * newlines inside a string value. JSON forbids literal control characters
+ * there, so the intent is unambiguous and the repair is lossless: a raw
+ * newline between quotes can only have meant `\n`.
+ *
+ * Structural characters outside strings are untouched, so this can never
+ * change the shape of otherwise-valid JSON.
+ */
+export function repairControlCharacters(json: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+
+  for (const ch of json) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+
+    const code = ch.charCodeAt(0);
+    if (inString && code < 0x20) {
+      out +=
+        ch === '\n'
+          ? '\\n'
+          : ch === '\r'
+            ? '\\r'
+            : ch === '\t'
+              ? '\\t'
+              : `\\u${code.toString(16).padStart(4, '0')}`;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
 export class SchemaMismatch extends Error {
   constructor(readonly missing: string[]) {
     super(`Model reply is missing required field(s): ${missing.join(', ')}`);
@@ -121,7 +174,7 @@ export function parseAgainstSchema<T>(raw: string, schema: Record<string, unknow
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(json);
+    parsed = JSON.parse(repairControlCharacters(json));
   } catch (err) {
     throw new Error(
       `Model reply was not valid JSON (${err instanceof Error ? err.message : String(err)}). ` +

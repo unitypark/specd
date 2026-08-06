@@ -151,7 +151,7 @@ metadata, run history. Delete a project and nothing you would miss is gone.
 ### Tests
 
 ```bash
-pnpm test        # 97 tests
+pnpm test        # 116 tests
 ```
 
 The gate tests run against real Postgres and skip themselves if none is
@@ -181,6 +181,37 @@ It fetches, registers and reports. It never authors, reviews or approves.
 
 ---
 
+## The Build station
+
+An approved spec can be handed to the hosted runner (§8 stage 5, mode (a)):
+
+```
+POST /projects/:slug/board/specs/:specId/build     # or "▶ Build it" in the spec drawer
+```
+
+It implements the tasks in order, one commit each, and leaves a branch for you
+to review. Three properties are enforced rather than hoped for:
+
+- **The gate is re-checked at the point of use.** A build is the first moment
+  agent output reaches code, so "is this approved?" is asked again — an
+  unapproved spec gets the same 409 the CLI gets.
+- **The agent gets editing tools only — never a shell.** specd runs the repo's
+  own verify command itself, so nothing a model emits becomes a shell command.
+- **It never touches your working tree.** The build runs in a throwaway git
+  worktree on `spec/<id>-<slug>`; the branch survives, the worktree does not.
+  An interrupted build cannot leave you on an unexpected branch.
+
+The as-built spec is written by specd, not the model — it is a verbatim record
+of what was approved, and asking a model to reproduce it would invite drift in
+the one document meant to be exact.
+
+Builds run for minutes, so the request returns a `runId` immediately and the
+work streams to the run log. Verify results distinguish **failed** (your tests
+ran and did not pass) from **could not run** (the toolchain or dependencies are
+missing) — those mean very different things to a reviewer.
+
+Hosted builds currently require a local repository and the Claude Code CLI.
+
 ## Knowledge and retrieval
 
 `knowledge/` lives in your repos. specd indexes merged docs into pgvector plus a
@@ -208,8 +239,6 @@ otherwise:
   and opens real PRs, but needs a GitHub App registration and token. The wizard
   says so rather than pretending.
 - **GitLab** (P2), **Jira sync** (P3) — interface-ready, adapters absent.
-- **Hosted build runners** (P2) — the Build station currently hands off via
-  `specd spec pull` or a human. Handoff modes (b) and (c) of §8 stage 5.
 - **Remote runner pairing** (P2) — subscription mode works when specd runs on
   the same machine as Claude Code (above). Pairing a *separate* runner over the
   network, so a hosted specd can dispatch to your infrastructure, is not built.

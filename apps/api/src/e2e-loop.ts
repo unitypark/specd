@@ -276,6 +276,66 @@ async function main(): Promise<void> {
     skip('CLI handoff', 'no approved spec — no AI configured');
   }
 
+  // ─── 05b BUILD (hosted runner) ────────────────────────────────────────────
+  if (specId && AI_MODE === 'subscription_runner') {
+    const started = await call<{ runId: string; branch: string }>(
+      'POST',
+      `/projects/${slug}/board/specs/${specId}/build`,
+      {},
+    );
+    step(`hosted build started → run ${started.runId.slice(0, 8)}, branch ${started.branch}`);
+
+    // Builds run for minutes; follow the run rather than holding a request open.
+    const deadline = Date.now() + 30 * 60_000;
+    let finished: { run: { status: string; error: string | null; result: Record<string, unknown> | null } } | null = null;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5_000));
+      const detail = await call<{ run: { status: string; error: string | null; result: Record<string, unknown> | null } }>(
+        'GET',
+        `/projects/${slug}/runs/${started.runId}`,
+      );
+      if (detail.run.status !== 'running' && detail.run.status !== 'queued') {
+        finished = detail;
+        break;
+      }
+    }
+    if (!finished) throw new Error('build did not finish within 30 minutes');
+    if (finished.run.status !== 'succeeded') {
+      throw new Error(`build ${finished.run.status}: ${finished.run.error}`);
+    }
+
+    const built = finished.run.result as unknown as {
+      branch: string;
+      tasksAttempted: number;
+      tasksCommitted: number;
+      commits: number;
+      verifyPassed: boolean | null;
+      asBuiltPath: string;
+    };
+    step(
+      `build finished · ${built.tasksCommitted}/${built.tasksAttempted} tasks committed · ` +
+        `${built.commits} commit(s)` +
+        (built.verifyPassed === null ? '' : built.verifyPassed ? ' · verify passed' : ' · verify FAILED'),
+    );
+
+    // The as-built spec must be on the branch — that is what closes the loop.
+    const { simpleGit: sg } = await import('simple-git');
+    const onBranch = await sg({ baseDir: fixture }).raw([
+      'show', `${built.branch}:${built.asBuiltPath}`,
+    ]).catch(() => '');
+    if (!onBranch.includes('THE SYSTEM SHALL')) {
+      throw new Error(`as-built spec missing or malformed at ${built.asBuiltPath}`);
+    }
+    step(`as-built spec on the branch: ${built.asBuiltPath}`);
+
+    // The user's working tree must be untouched by the build.
+    const wt = await sg({ baseDir: fixture }).status();
+    if (!wt.isClean()) throw new Error('build left the working tree dirty');
+    step(`working tree still clean on ${wt.current} — build ran in an isolated worktree`);
+  } else if (specId) {
+    skip('hosted build', 'needs SPECD_AI_MODE=subscription_runner (drives the local Claude Code)');
+  }
+
   // ─── 06 LEARN ─────────────────────────────────────────────────────────────
   section('06', 'LEARN');
 

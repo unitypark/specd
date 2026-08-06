@@ -115,6 +115,97 @@ export class ClaudeCodeProvider {
     }
   }
 
+  /**
+   * A coding run: the agent may edit files inside `workspaceDir` and nothing
+   * else. Deliberately narrower than what Claude Code can do —
+   *
+   *   - Bash is NOT granted. specd runs the verify command itself, so there is
+   *     no path from a model's output to an arbitrary shell command.
+   *   - `acceptEdits` lets file writes through without prompting, which is
+   *     required for a non-interactive run and is bounded by the tool list.
+   *   - cwd is the throwaway worktree, so the user's checkout is untouchable.
+   */
+  async code(input: {
+    model: ModelId;
+    system: string;
+    user: string;
+    workspaceDir: string;
+    timeoutMs?: number;
+  }): Promise<{ text: string; usage: TokenUsage; model: ModelId | null }> {
+    if (!(await this.isAvailable())) {
+      throw new AiNotConfigured(
+        'Hosted builds drive the Claude Code CLI, and `claude` is not on PATH on this machine.',
+      );
+    }
+
+    const args = [
+      '--print',
+      '--output-format',
+      'json',
+      '--model',
+      input.model,
+      '--append-system-prompt',
+      input.system,
+      '--permission-mode',
+      'acceptEdits',
+      // Editing tools only. No Bash, no network, no task spawning.
+      '--allowedTools',
+      'Read',
+      'Write',
+      'Edit',
+      'Glob',
+      'Grep',
+      '--disallowed-tools',
+      'Bash',
+      'WebFetch',
+      'WebSearch',
+      'Task',
+      'NotebookEdit',
+    ];
+
+    const { stdout, stderr, code, timedOut } = await this.exec(
+      args,
+      input.user,
+      input.timeoutMs ?? 900_000,
+      input.workspaceDir,
+    );
+
+    if (timedOut) throw new Error('The build agent did not finish in time; the run was cancelled.');
+    if (code !== 0) {
+      throw new Error(
+        `Claude Code exited ${code}: ${(stderr || stdout).slice(0, 400).trim() || 'no output'}`,
+      );
+    }
+
+    let envelope: ClaudeCodeEnvelope;
+    try {
+      envelope = JSON.parse(stdout) as ClaudeCodeEnvelope;
+    } catch {
+      throw new Error(`Could not read Claude Code's JSON envelope: ${stdout.slice(0, 300).trim()}`);
+    }
+    if (envelope.is_error || envelope.api_error_status) {
+      throw new Error(
+        `Claude Code reported an error: ${envelope.api_error_status ?? envelope.subtype ?? 'unknown'}`,
+      );
+    }
+
+    const modelKey = Object.keys(envelope.modelUsage ?? {})[0];
+    const canonical = modelKey
+      ? (envelope.modelUsage?.[modelKey]?.canonicalModel ?? modelKey)
+      : null;
+
+    return {
+      text: envelope.result ?? '',
+      usage: {
+        inputTokens: envelope.usage?.input_tokens ?? 0,
+        outputTokens: envelope.usage?.output_tokens ?? 0,
+        cacheReadInputTokens: envelope.usage?.cache_read_input_tokens ?? 0,
+        cacheCreationInputTokens: envelope.usage?.cache_creation_input_tokens ?? 0,
+      },
+      model: (canonical as ModelId | null) ?? null,
+    };
+  }
+
   private async invoke(
     opts: ModelCallOptions,
     system: string,

@@ -30,6 +30,8 @@ import { ClaudeCodeProvider } from './agents/claude-code.provider.js';
 import { ModelRouter } from './agents/model.router.js';
 import { OnboardingAgent } from './agents/onboarding.agent.js';
 import { SpecAgent } from './agents/spec.agent.js';
+import { BuildAgent } from './agents/build.agent.js';
+import { WorkspaceService } from './vcs/workspace.js';
 import { PipelineService } from './agents/pipeline.service.js';
 
 import { CliController } from './cli/cli.controller.js';
@@ -67,6 +69,8 @@ import { CliController } from './cli/cli.controller.js';
     ModelRouter,
     OnboardingAgent,
     SpecAgent,
+    BuildAgent,
+    WorkspaceService,
     PipelineService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

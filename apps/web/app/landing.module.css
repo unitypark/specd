@@ -1,0 +1,399 @@
+/* Landing — the Matrix register (D12 / rev 14). Deep-green field, one
+   phosphor accent, white type, serif headlines. */
+
+.page {
+  min-height: 100vh;
+  background: var(--bg);
+  border: 10px solid var(--field);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1.4rem;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--field);
+  z-index: 6;
+}
+.logo {
+  font: 700 1.08rem/1 var(--serif);
+  color: #fff;
+}
+.logo i {
+  color: var(--accent);
+  font-style: normal;
+}
+.flex {
+  flex: 1;
+}
+.rev {
+  font: 600 0.58rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+.navlink {
+  font: 600 0.6rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--ink-2);
+}
+.navlink:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.cta {
+  font: 750 0.74rem/1 var(--sans);
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #06130a;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+.cta:hover {
+  background: #4ff086;
+  text-decoration: none;
+}
+.ghost {
+  font: 650 0.74rem/1 var(--sans);
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+}
+.ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* ─── hero ────────────────────────────────────────────────────────────────── */
+
+.hero {
+  display: grid;
+  grid-template-columns: 1fr 0.98fr;
+  gap: 2rem;
+  padding: 3rem 2rem 3.5rem;
+  max-width: 66rem;
+  margin: 0 auto;
+  align-items: center;
+  background: var(--field);
+}
+@media (max-width: 860px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.h1 {
+  font: 600 clamp(2rem, 5vw, 3.4rem)/1.05 var(--serif);
+  color: #fff;
+  margin: 0 0 0.9rem;
+  display: flex;
+  flex-direction: column;
+}
+.h1 em {
+  color: var(--accent);
+  font-style: italic;
+}
+
+.sub {
+  color: var(--ink-2);
+  font-size: 0.92rem;
+  line-height: 1.75;
+  margin: 0 0 1.2rem;
+  max-width: 46ch;
+}
+.sub b {
+  color: var(--ink);
+}
+.ctas {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+.trust {
+  font: 500 0.64rem/1.7 var(--mono);
+  color: var(--ink-3);
+  margin: 0;
+}
+
+/* ─── sections ────────────────────────────────────────────────────────────── */
+
+.sec {
+  border-top: 1px solid var(--line);
+  padding: 3rem 2rem 3.2rem;
+}
+.in {
+  max-width: 66rem;
+  margin: 0 auto;
+}
+.h2 {
+  font: 600 1.5rem/1.25 var(--serif);
+  color: #fff;
+  margin: 0.55rem 0 0.4rem;
+}
+.h2 em {
+  color: var(--accent);
+  font-style: italic;
+}
+.lede {
+  color: var(--ink-2);
+  font-size: 0.86rem;
+  line-height: 1.7;
+  margin: 0 0 1.4rem;
+  max-width: 68ch;
+}
+.lede b {
+  color: var(--ink);
+}
+
+.cmp {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 760px) {
+  .cmp {
+    grid-template-columns: 1fr;
+  }
+}
+.cmpcard {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 1rem 1.1rem;
+  background: var(--panel);
+}
+.cmpcard h4 {
+  font: 600 0.95rem/1.3 var(--serif);
+  color: #fff;
+  margin: 0 0 0.55rem;
+}
+.cmpcard ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.76rem;
+  color: var(--ink-2);
+}
+.cmpcard li {
+  padding: 0.36rem 0 0.36rem 1.2rem;
+  position: relative;
+  line-height: 1.6;
+  border-bottom: 1px dashed rgba(43, 226, 106, 0.09);
+}
+.cmpcard li:last-child {
+  border-bottom: none;
+}
+.them h4 {
+  color: var(--ink-2);
+}
+.them li::before {
+  content: '✕';
+  color: var(--ink-3);
+  position: absolute;
+  left: 0;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+}
+.us {
+  border-color: var(--line-2);
+  background: var(--accent-soft);
+}
+.us li::before {
+  content: '▸';
+  color: var(--accent);
+  position: absolute;
+  left: 0;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+}
+.us li b,
+.us li code {
+  color: var(--ink);
+}
+
+.note {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--accent-soft);
+  padding: 0.85rem 1rem;
+  margin-top: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+.note b {
+  color: #fff;
+  font-family: var(--serif);
+  font-weight: 600;
+}
+
+/* ─── automation split ────────────────────────────────────────────────────── */
+
+.resp {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.rrow {
+  display: grid;
+  grid-template-columns: 5.2rem 1fr 16rem;
+  gap: 0.8rem;
+  align-items: baseline;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.8rem;
+}
+.rrow:last-child {
+  border-bottom: none;
+}
+@media (max-width: 760px) {
+  .rrow {
+    grid-template-columns: 5.2rem 1fr;
+  }
+  .why {
+    display: none;
+  }
+}
+.human,
+.auto {
+  font: 800 0.56rem/1 var(--mono);
+  letter-spacing: 0.12em;
+  padding: 0.3em 0.45em;
+  border-radius: 3px;
+  text-align: center;
+}
+/* The accent marks the human moments — that is the whole point of the split. */
+.human {
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  background: var(--accent-soft);
+}
+.auto {
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+}
+.what {
+  color: var(--ink);
+}
+.why {
+  color: var(--ink-3);
+  font: 500 0.7rem/1.5 var(--mono);
+  text-align: right;
+}
+
+/* ─── terminal ────────────────────────────────────────────────────────────── */
+
+.term {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  max-width: 42rem;
+}
+.termhead {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.termhead i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.termhead span {
+  margin-left: 0.5rem;
+  font: 700 0.56rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+}
+.termbody {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  font: 500 0.74rem/1.9 var(--mono);
+  color: var(--ink-2);
+  background: var(--bg-2);
+  overflow-x: auto;
+}
+.prompt {
+  color: var(--ink-3);
+}
+.ok {
+  color: var(--accent);
+}
+
+/* ─── the giant word ──────────────────────────────────────────────────────── */
+
+.approvedwrap {
+  border-top: 1px solid var(--line);
+  padding: 2.5rem 2rem 0;
+  overflow: hidden;
+}
+.approvedmeta {
+  max-width: 66rem;
+  margin: 0 auto 1.2rem;
+  font: 500 0.66rem/1.6 var(--mono);
+  color: var(--ink-3);
+}
+.approved {
+  font: 600 clamp(3rem, 17vw, 13rem)/0.92 var(--serif);
+  color: var(--accent);
+  text-align: center;
+  letter-spacing: -0.02em;
+  padding-bottom: 1.5rem;
+}
+
+.finale {
+  background: var(--field);
+  padding: 4rem 2rem 3rem;
+  text-align: center;
+  border-top: 1px solid var(--line);
+}
+.tiers {
+  font: 700 0.6rem/1 var(--mono);
+  letter-spacing: 0.24em;
+  color: var(--ink-3);
+  margin: 0 0 1.6rem;
+}
+.finword {
+  font: 600 clamp(2.4rem, 8vw, 4.6rem)/1 var(--serif);
+  color: #fff;
+}
+.finword span {
+  color: var(--accent);
+}
+.findesc {
+  font: 500 0.66rem/2 var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--ink-2);
+  margin: 1.4rem 0 1.8rem;
+}
+.finbtn {
+  display: inline-block;
+  background: var(--paper);
+  color: var(--paper-ink);
+  font: 750 0.72rem/1 var(--sans);
+  letter-spacing: 0.06em;
+  padding: 0.85rem 1.6rem;
+  border-radius: 6px;
+}
+.finbtn:hover {
+  background: #fff;
+  text-decoration: none;
+}
+.finmeta {
+  margin-top: 2.5rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--line);
+  font: 600 0.58rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}

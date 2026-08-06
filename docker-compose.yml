@@ -1,0 +1,39 @@
+services:
+  postgres:
+    # pgvector ships on top of the official postgres image — one store for
+    # tenancy + the knowledge index at MVP scale (§9 "boring on purpose").
+    image: pgvector/pgvector:pg17
+    container_name: specd-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: specd
+      POSTGRES_PASSWORD: specd
+      POSTGRES_DB: specd
+    ports:
+      - "5433:5432"
+    volumes:
+      - specd-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U specd -d specd"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: specd-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - specd-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  specd-pgdata:
+  specd-redisdata:

@@ -1,0 +1,29 @@
+{
+  "name": "specd",
+  "version": "0.1.0",
+  "private": true,
+  "description": "specd — spec-driven delivery platform. Connect, Ground, Spec, human gate, Build, Learn.",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter \"./packages/*\" build && pnpm --filter @specd/api build && pnpm --filter @specd/web build",
+    "dev": "pnpm --parallel --filter @specd/api --filter @specd/web dev",
+    "dev:api": "pnpm --filter @specd/api dev",
+    "dev:web": "pnpm --filter @specd/web dev",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "db:migrate": "pnpm --filter @specd/db migrate",
+    "db:seed": "pnpm --filter @specd/api seed",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "cli:build": "cd cli && go build -o ../bin/specd ./cmd/specd"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

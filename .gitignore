@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+bin/
+*.tsbuildinfo
+
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# local agent workspaces (hosted-runner clones + local-mode scratch)
+.specd-work/

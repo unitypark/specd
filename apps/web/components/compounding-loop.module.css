@@ -1,0 +1,174 @@
+/* The hero loop. Plain language, one moving part, and a pile that grows. */
+
+.wrap {
+  display: grid;
+  gap: 1.1rem;
+  justify-items: center;
+}
+
+.stage {
+  position: relative;
+  width: min(16.5rem, 100%);
+  aspect-ratio: 1;
+}
+
+.ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.track {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+/*
+ * A quarter-circle that rotates to the active step. Drawn with a dash pattern
+ * rather than an arc path so it can be repositioned by transform alone — no
+ * path maths, and the browser tweens the rotation for free.
+ */
+.progress {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 186 556;
+  transform-origin: center;
+  transition: transform 0.75s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.node {
+  fill: var(--bg);
+  stroke: var(--line-2);
+  stroke-width: 1.5;
+  transition: r 0.4s, fill 0.4s, stroke 0.4s;
+}
+.nodeOn {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.marker {
+  fill: var(--accent);
+  opacity: 0.16;
+  transition: cx 0.75s cubic-bezier(0.65, 0, 0.35, 1), cy 0.75s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* ─── the knowledge base at the centre ────────────────────────────────────── */
+
+.core {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.stack {
+  position: relative;
+  width: 62px;
+  height: 54px;
+  margin: 0 auto 0.4rem;
+}
+/* Each doc is a layer in the pile. New ones arrive at the top and settle. */
+.doc {
+  position: absolute;
+  left: 0;
+  width: 62px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: settle 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes settle {
+  from {
+    transform: translateY(-12px) scaleX(0.8);
+    opacity: 0;
+  }
+}
+
+.count b {
+  display: block;
+  font: 400 2rem/1 var(--serif);
+  color: #fff;
+}
+.count span {
+  font: 500 0.62rem/1.5 var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  display: block;
+  max-width: 9rem;
+}
+
+/* ─── the four steps ──────────────────────────────────────────────────────── */
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+  max-width: 26rem;
+  counter-reset: s;
+}
+.steps li {
+  counter-increment: s;
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  gap: 0.2rem 0.7rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  transition: background 0.4s, border-color 0.4s;
+}
+.steps li::before {
+  content: counter(s);
+  grid-row: span 2;
+  font: 500 0.68rem/1.5 var(--mono);
+  color: var(--ink-3);
+  transition: color 0.4s;
+}
+.steps li b {
+  font-weight: 600;
+  font-size: 0.98rem;
+  color: var(--ink-2);
+  transition: color 0.4s;
+}
+.steps li span {
+  font: 500 0.72rem/1.5 var(--mono);
+  color: var(--ink-3);
+}
+.steps li.on {
+  background: var(--accent-soft);
+  border-color: var(--line-2);
+}
+.steps li.on b {
+  color: #fff;
+}
+.steps li.on::before {
+  color: var(--accent);
+}
+
+.foot {
+  font: 500 0.72rem/1.7 var(--mono);
+  color: var(--ink-3);
+  margin: 0;
+  text-align: center;
+  max-width: 34ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress,
+  .marker,
+  .doc,
+  .steps li {
+    transition: none;
+    animation: none;
+  }
+}

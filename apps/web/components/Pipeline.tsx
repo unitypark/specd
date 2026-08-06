@@ -160,7 +160,7 @@ export function Pipeline({ light = false }: { light?: boolean }) {
           border-color: var(--accent);
         }
         .stn.sel {
-          box-shadow: 0 0 0 3px rgba(43, 226, 106, 0.13);
+          box-shadow: 0 0 0 3px rgba(0, 190, 44, 0.13);
         }
         .stn .no {
           display: block;

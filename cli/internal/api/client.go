@@ -162,6 +162,9 @@ type Me struct {
 	Email    string `json:"email"`
 	Name     string `json:"name"`
 	Audience string `json:"audience"`
+	// Where the web app lives. The CLI cannot derive this from the API URL —
+	// they are different origins — so the server reports it.
+	WebOrigin string `json:"webOrigin"`
 }
 
 func (c *Client) Me() (*Me, error) {

@@ -109,6 +109,7 @@ Environment:
   SPECD_API                      API base URL (default http://localhost:4000/api)
   SPECD_PROJECT                  default project slug
   SPECD_TOKEN                    token to use instead of the stored one
+  SPECD_WEB                      web app origin (learned at login; used by open)
 
 Specs are pulled only when approved. That is enforced by the server, not here.
 `)
@@ -129,17 +130,43 @@ func client() (*api.Client, *config.Config, error) {
 }
 
 // flag pulls "--name value" out of args, returning the value and the remainder.
+//
+// Single-letter names also match the single-dash form, because that is how
+// they are documented and typed (`-o out.md`). Accepting only `--o` meant the
+// flag was silently ignored and the output went to stdout instead of the file.
 func flag(args []string, name string) (string, []string) {
+	forms := []string{"--" + name}
+	if len(name) == 1 {
+		forms = append(forms, "-"+name)
+	}
+
+	matches := func(arg string) bool {
+		for _, f := range forms {
+			if arg == f {
+				return true
+			}
+		}
+		return false
+	}
+	prefixed := func(arg string) (string, bool) {
+		for _, f := range forms {
+			if strings.HasPrefix(arg, f+"=") {
+				return strings.TrimPrefix(arg, f+"="), true
+			}
+		}
+		return "", false
+	}
+
 	out := make([]string, 0, len(args))
 	value := ""
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--"+name && i+1 < len(args) {
+		if matches(args[i]) && i+1 < len(args) {
 			value = args[i+1]
 			i++
 			continue
 		}
-		if strings.HasPrefix(args[i], "--"+name+"=") {
-			value = strings.TrimPrefix(args[i], "--"+name+"=")
+		if v, ok := prefixed(args[i]); ok {
+			value = v
 			continue
 		}
 		out = append(out, args[i])
@@ -225,6 +252,13 @@ func cmdLogin(args []string) error {
 		fmt.Println()
 		if err != nil {
 			return err
+		}
+		// Remember where the app lives so `specd open` goes to the right place.
+		if me.WebOrigin != "" {
+			cfg.WebOrigin = me.WebOrigin
+			if err := cfg.Save(); err != nil {
+				return err
+			}
 		}
 		fmt.Printf("\n  Signed in as %s <%s>.\n", me.Name, me.Email)
 		fmt.Printf("  Token stored%s.\n\n", keychainNote())
@@ -480,7 +514,7 @@ func cmdConnect(args []string) error {
 	if !res.Clean {
 		fmt.Println("  note: working tree is dirty — commit or stash before running setup")
 	}
-	fmt.Println("\nCode never leaves this machine. Setup lands on a branch for you to diff.")
+	fmt.Println("\nCode never leaves this machine. Run setup from the app to scaffold knowledge/.")
 	return nil
 }
 
@@ -494,7 +528,24 @@ func cmdOpen(args []string) error {
 		return err
 	}
 
-	web := strings.TrimSuffix(strings.TrimSuffix(cfg.API, "/api"), "/")
+	web := cfg.WebOrigin
+	if web == "" {
+		// Not learned yet (config predates login, or SPECD_TOKEN was used
+		// directly). Ask the server rather than guessing from the API URL —
+		// they are different origins.
+		if token, err := config.LoadToken(); err == nil {
+			if me, err := api.New(cfg.API, token).Me(); err == nil && me.WebOrigin != "" {
+				web = me.WebOrigin
+				cfg.WebOrigin = web
+				_ = cfg.Save()
+			}
+		}
+	}
+	if web == "" {
+		return errors.New("don't know where the web app is — run `specd login`, or set SPECD_WEB")
+	}
+	web = strings.TrimSuffix(web, "/")
+
 	target := fmt.Sprintf("%s/p/%s/board", web, project)
 	if len(args) > 0 {
 		target = fmt.Sprintf("%s/p/%s/board?spec=%s", web, project, args[0])

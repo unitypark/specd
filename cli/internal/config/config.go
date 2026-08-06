@@ -27,6 +27,9 @@ const (
 type Config struct {
 	API     string `json:"api"`
 	Project string `json:"project,omitempty"`
+	// Learned from the server at login; `specd open` needs it because the web
+	// app and the API are not the same origin.
+	WebOrigin string `json:"webOrigin,omitempty"`
 }
 
 func dir() (string, error) {
@@ -60,6 +63,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("SPECD_PROJECT"); v != "" {
 		cfg.Project = v
+	}
+	if v := os.Getenv("SPECD_WEB"); v != "" {
+		cfg.WebOrigin = v
 	}
 	if cfg.API == "" {
 		cfg.API = DefaultAPI

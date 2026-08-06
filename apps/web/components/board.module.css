@@ -9,7 +9,7 @@
   margin-bottom: 0.9rem;
 }
 .hint {
-  font: 500 0.72rem/1.5 var(--mono);
+  font: 500 0.998rem/1.5 var(--mono);
   color: var(--ink-3);
 }
 
@@ -20,36 +20,61 @@
 
 .board {
   display: grid;
-  grid-template-columns: repeat(6, minmax(11rem, 1fr));
-  gap: 0.7rem;
+  grid-template-columns: repeat(6, minmax(13rem, 1fr));
+  gap: 0;
   overflow-x: auto;
   padding-bottom: 0.5rem;
 }
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   .board {
-    grid-template-columns: repeat(6, 12rem);
+    grid-template-columns: repeat(6, 14rem);
   }
 }
 
+/* A rule between states, so the six lanes read as lanes rather than as one
+   field of cards. On the column rather than in the gap, so it runs the full
+   height of the tallest column automatically. */
+.col {
+  padding: 0 0.75rem;
+  min-width: 0;
+}
+.col + .col {
+  border-left: 1px solid var(--line);
+}
+
 .col h5 {
-  font: 600 0.7rem/1 var(--mono);
+  font: 600 0.958rem/1 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--ink-3);
-  margin: 0 0 0.6rem;
+  color: var(--ink-2);
+  /* Room under the header — the cards were nearly touching it. */
+  margin: 0 0 1.15rem;
   display: flex;
-  justify-content: space-between;
+  gap: 0.5rem;
   align-items: center;
 }
+/* The count reads as a tag on the header, not as a number floated to the far
+   edge where it belonged to nothing. */
 .count {
+  font: 700 0.978rem/1 var(--mono);
   font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.24em 0.55em;
+  min-width: 1.7em;
+  text-align: center;
+}
+.count.zero {
   color: var(--ink-3);
+  opacity: 0.55;
 }
 .colempty {
   color: var(--ink-3);
-  font-size: 0.8rem;
+  font-size: 1.058rem;
   text-align: center;
-  padding: 0.8rem 0;
+  padding: 1rem 0;
 }
 
 .card {
@@ -58,24 +83,24 @@
   text-align: left;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 0.6rem 0.7rem;
-  margin-bottom: 0.5rem;
-  cursor: pointer;
+  border-radius: 9px;
+  padding: 0.8rem 0.9rem;
+  margin-bottom: 0.6rem;
+  cursor: grab;
   color: inherit;
 }
 .card:hover {
   border-color: var(--accent);
 }
 .cid {
-  font: 700 0.62rem/1 var(--mono);
+  font: 700 1.028rem/1 var(--mono);
   color: var(--ink-3);
   margin-bottom: 0.3rem;
 }
 .ctitle {
-  font-size: 0.8rem;
-  line-height: 1.4;
-  margin-bottom: 0.45rem;
+  font-size: 1.08rem;
+  line-height: 1.45;
+  margin-bottom: 0.6rem;
 }
 .cfoot {
   display: flex;
@@ -114,7 +139,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font: 700 0.7rem/1 var(--mono);
+  font: 700 0.978rem/1 var(--mono);
   color: var(--ink-3);
   margin-bottom: 0.4rem;
 }
@@ -123,7 +148,7 @@
   border: none;
   color: var(--ink-3);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 1.038rem;
 }
 .close:hover {
   color: var(--ink);
@@ -150,7 +175,7 @@
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--ink-3);
-  font: 600 0.76rem/1 var(--sans);
+  font: 600 1.048rem/1 var(--sans);
   padding: 0.65rem 0.7rem;
   cursor: pointer;
 }
@@ -163,12 +188,12 @@
   flex: 1;
   overflow-y: auto;
   padding: 1rem 1.2rem;
-  font-size: 0.83rem;
+  font-size: 1.0rem;
   line-height: 1.7;
   color: var(--ink-2);
 }
 .dbody h6 {
-  font: 700 0.62rem/1 var(--mono);
+  font: 700 0.902rem/1 var(--mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ink-3);
@@ -190,10 +215,10 @@
   padding: 0.45rem 0.7rem;
   margin: 0.4rem 0;
   border-radius: 0 5px 5px 0;
-  font-size: 0.79rem;
+  font-size: 1.05rem;
 }
 .ears b {
-  font: 700 0.66rem/1 var(--mono);
+  font: 700 0.953rem/1 var(--mono);
   color: var(--accent);
 }
 
@@ -202,7 +227,7 @@
 }
 .cite {
   display: inline-block;
-  font: 600 0.63rem/1 var(--mono);
+  font: 600 0.922rem/1 var(--mono);
   color: var(--accent);
   background: var(--accent-soft);
   border: 1px solid var(--accent-dim);
@@ -213,7 +238,7 @@
 /* An unverified claim must never wear the accent — the accent means grounded. */
 .unv {
   display: inline-block;
-  font: 600 0.63rem/1 var(--mono);
+  font: 600 0.922rem/1 var(--mono);
   color: var(--unverified);
   background: var(--unverified-soft);
   border: 1px solid var(--unverified-line);
@@ -227,7 +252,7 @@
   align-items: baseline;
   padding: 0.45rem 0;
   border-bottom: 1px dashed var(--line);
-  font-size: 0.8rem;
+  font-size: 1.06rem;
 }
 .task:last-child {
   border-bottom: none;
@@ -239,7 +264,7 @@
 }
 .sz {
   margin-left: auto;
-  font: 500 0.66rem/1 var(--mono);
+  font: 500 0.953rem/1 var(--mono);
   color: var(--ink-3);
   flex: none;
   white-space: nowrap;
@@ -258,7 +283,7 @@
 }
 .nospec {
   color: var(--ink-3);
-  font-size: 0.78rem;
+  font-size: 1.04rem;
 }
 
 .dfoot {
@@ -268,4 +293,35 @@
   padding: 0.9rem 1.2rem;
   border-top: 1px solid var(--line);
   background: var(--panel);
+}
+
+/* ─── drag between states ─────────────────────────────────────────────────── */
+
+.card:active {
+  cursor: grabbing;
+}
+.dragging {
+  opacity: 0.4;
+  border-color: var(--accent);
+}
+
+/* The lane you are over says whether the drop will be accepted before you let
+   go — a refusal after the fact reads as a bug. */
+.dropOk {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-dim);
+  border-radius: 10px;
+}
+.dropNo {
+  background: rgba(255, 0, 128, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 0, 128, 0.3);
+  border-radius: 10px;
+}
+.col {
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+/* A card with no spec cannot move, so it should not offer to. */
+.card:not([draggable='true']) {
+  cursor: pointer;
 }

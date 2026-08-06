@@ -133,11 +133,11 @@ export function AgentsView({ slug }: { slug: string }) {
           font: 600 1.3rem/1 var(--serif);
         }
         .cap {
-          font: 500 0.7rem/1 var(--mono);
+          font: 500 0.862rem/1 var(--mono);
           color: var(--ink-3);
         }
         .note {
-          font-size: 0.74rem;
+          font-size: 0.902rem;
           color: var(--ink-3);
           margin: 0.6rem 0 0;
         }
@@ -187,13 +187,13 @@ export function AgentsView({ slug }: { slug: string }) {
           }
         }
         .kind {
-          font: 600 0.78rem/1 var(--mono);
+          font: 600 0.943rem/1 var(--mono);
         }
         .flex {
           flex: 1;
         }
         .meta {
-          font: 500 0.68rem/1 var(--mono);
+          font: 500 0.868rem/1 var(--mono);
           color: var(--ink-3);
         }
         .log {
@@ -201,7 +201,7 @@ export function AgentsView({ slug }: { slug: string }) {
           padding: 0.8rem 0.9rem;
           border-top: 1px solid var(--line);
           background: var(--bg);
-          font: 500 0.72rem/1.75 var(--mono);
+          font: 500 0.882rem/1.75 var(--mono);
           color: var(--ink-2);
           white-space: pre-wrap;
           max-height: 22rem;

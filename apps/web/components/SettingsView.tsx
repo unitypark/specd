@@ -166,11 +166,11 @@ export function SettingsView({
           flex: 1;
         }
         h5 {
-          font: 600 0.92rem/1.2 var(--sans);
+          font: 600 1.058rem/1.2 var(--sans);
           margin: 0 0 0.2rem;
         }
         p {
-          font-size: 0.78rem;
+          font-size: 0.943rem;
           color: var(--ink-3);
           margin: 0;
           line-height: 1.6;
@@ -184,7 +184,7 @@ export function SettingsView({
           gap: 0.5rem;
         }
         .inline select {
-          font: 400 0.84rem/1 var(--sans);
+          font: 400 0.978rem/1 var(--sans);
           padding: 0.45rem 0.6rem;
           border-radius: 6px;
           border: 1px solid var(--line-2);
@@ -193,7 +193,7 @@ export function SettingsView({
         }
         .inline input {
           width: 5rem;
-          font: 400 0.86rem/1 var(--sans);
+          font: 400 0.998rem/1 var(--sans);
           padding: 0.45rem 0.6rem;
           border-radius: 6px;
           border: 1px solid var(--line-2);
@@ -202,12 +202,12 @@ export function SettingsView({
         }
         .pfx,
         .sfx {
-          font: 500 0.8rem/1 var(--mono);
+          font: 500 0.963rem/1 var(--mono);
           color: var(--ink-3);
         }
         .ok {
           color: var(--accent);
-          font: 600 0.74rem/1 var(--mono);
+          font: 600 0.902rem/1 var(--mono);
         }
       `}</style>
     </div>

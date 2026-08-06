@@ -57,7 +57,7 @@ export function AppShell({
   return (
     <div className="shell">
       <header className="top">
-        <Link href="/projects" className="logo">
+        <Link href="/projects" className="applogo">
           spec<i>d</i>
         </Link>
         {crumb && <span className="crumb">{crumb}</span>}
@@ -94,19 +94,8 @@ export function AppShell({
           top: 0;
           z-index: 20;
         }
-        .logo {
-          font: 700 1rem/1 var(--serif);
-          color: #fff;
-        }
-        .logo i {
-          color: var(--accent);
-          font-style: normal;
-        }
-        .logo:hover {
-          text-decoration: none;
-        }
         .crumb {
-          font-size: 0.82rem;
+          font-size: 0.958rem;
           color: var(--ink-2);
         }
         .flex {
@@ -119,7 +108,7 @@ export function AppShell({
           border: 1px solid var(--line-2);
           background: var(--panel-2);
           color: var(--ink-2);
-          font: 700 0.62rem/1 var(--mono);
+          font: 700 0.807rem/1 var(--mono);
           cursor: pointer;
         }
         .avatar:hover {

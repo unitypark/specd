@@ -136,7 +136,7 @@ code,
 
 .btn {
   cursor: pointer;
-  font: 650 0.78rem/1 var(--sans);
+  font: 650 0.9rem/1 var(--sans);
   padding: 0.55rem 1rem;
   border-radius: 6px;
   border: 1px solid var(--line-2);
@@ -177,12 +177,12 @@ code,
 
 .btn.sm {
   padding: 0.38rem 0.7rem;
-  font-size: 0.7rem;
+  font-size: 0.82rem;
 }
 
 .pill {
   display: inline-block;
-  font: 600 0.64rem/1 var(--mono);
+  font: 600 0.902rem/1 var(--mono);
   padding: 0.26rem 0.5rem;
   border-radius: 999px;
   border: 1px solid var(--line-2);
@@ -228,7 +228,7 @@ code,
   margin-bottom: 0.9rem;
 }
 .field label {
-  font: 600 0.68rem/1 var(--mono);
+  font: 600 0.943rem/1 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ink-3);
@@ -236,7 +236,7 @@ code,
 .field input,
 .field select,
 .field textarea {
-  font: 400 0.86rem/1.5 var(--sans);
+  font: 400 0.98rem/1.5 var(--sans);
   padding: 0.55rem 0.7rem;
   border-radius: 6px;
   border: 1px solid var(--line-2);
@@ -250,19 +250,19 @@ code,
   border-color: var(--accent);
 }
 .field .hint {
-  font: 400 0.72rem/1.5 var(--mono);
+  font: 400 0.84rem/1.5 var(--mono);
   color: var(--ink-3);
 }
 
 .tag {
-  font: 700 0.56rem/1 var(--mono);
+  font: 700 0.848rem/1 var(--mono);
   letter-spacing: 0.24em;
   color: var(--accent);
   text-transform: uppercase;
 }
 
 .mutedbox {
-  font: 500 0.74rem/1.7 var(--mono);
+  font: 500 0.86rem/1.7 var(--mono);
   color: var(--ink-2);
   background: var(--bg-2);
   border: 1px solid var(--line);
@@ -304,17 +304,39 @@ code,
 
 .empty {
   color: var(--ink-3);
-  font-size: 0.85rem;
+  font-size: 0.98rem;
   padding: 2rem 0;
   text-align: center;
 }
 
 .err {
   color: var(--danger);
-  font: 500 0.8rem/1.6 var(--sans);
+  font: 500 0.92rem/1.6 var(--sans);
   background: var(--danger-soft);
   border: 1px solid rgba(217, 112, 112, 0.35);
   border-radius: 6px;
   padding: 0.7rem 0.85rem;
   margin: 0.8rem 0;
+}
+
+
+/*
+ * App wordmark. Global rather than scoped, because it is applied to a <Link>:
+ * styled-jsx adds its scoping class to DOM elements it can see in the JSX, and
+ * a component is opaque to it — a `.logo` rule inside `<style jsx>` never
+ * matches the <a> that Link renders.
+ */
+.applogo {
+  font: 700 1.12rem/1 var(--serif);
+  color: #fff;
+}
+.applogo.lg {
+  font-size: 1.55rem;
+}
+.applogo i {
+  color: var(--accent);
+  font-style: normal;
+}
+.applogo:hover {
+  text-decoration: none;
 }

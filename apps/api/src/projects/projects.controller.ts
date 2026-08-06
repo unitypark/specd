@@ -25,6 +25,7 @@ import { ProjectsService } from './projects.service.js';
 import { RepositoriesService } from './repositories.service.js';
 import { ConnectionsService } from './connections.service.js';
 import { KnowledgeService } from '../knowledge/knowledge.service.js';
+import { ModelRouter } from '../agents/model.router.js';
 import { Vault } from '../common/vault.js';
 
 class CreateProjectDto {
@@ -78,6 +79,7 @@ export class ProjectsController {
     private readonly repositories: RepositoriesService,
     private readonly connections: ConnectionsService,
     private readonly knowledge: KnowledgeService,
+    private readonly modelRouter: ModelRouter,
   ) {}
 
   @Get()
@@ -89,6 +91,16 @@ export class ProjectsController {
   async create(@Body() dto: CreateProjectDto, @CurrentUser() user: TokenClaims) {
     const project = await this.projects.create({ userId: user.sub, ...dto });
     return this.projects.summarize(project);
+  }
+
+  /** Can this machine run subscription mode? Asked before the wizard offers it. */
+  @Get('ai-modes')
+  async aiModes() {
+    return {
+      api_key: await this.modelRouter.describeMode('api_key'),
+      subscription_runner: await this.modelRouter.describeMode('subscription_runner'),
+      managed_cloud: await this.modelRouter.describeMode('managed_cloud'),
+    };
   }
 
   @Get('models')
@@ -213,6 +225,14 @@ export class ProjectsController {
     // Validate live before storing — a key that does not work should fail in
     // the wizard, not in the first agent run.
     let validation = { ok: true, detail: 'No key needed for this mode.' };
+
+    if (dto.mode === 'subscription_runner') {
+      // Fail here rather than in the first agent run: subscription mode only
+      // works where specd runs beside the user's Claude Code (D2).
+      validation = await this.modelRouter.describeMode('subscription_runner');
+      if (!validation.ok) return validation;
+    }
+
     if (dto.mode === 'api_key') {
       if (!dto.apiKey) {
         return { ok: false, detail: 'An API key is required for this mode.' };
@@ -226,7 +246,9 @@ export class ProjectsController {
       kind: 'ai',
       provider: 'anthropic',
       label: dto.mode === 'api_key' && dto.apiKey ? Vault.mask(dto.apiKey) : dto.mode,
-      settings: { mode: dto.mode, model: dto.model ?? project.defaultModel },
+      // Deliberately no `model` here — it lives on the project only, so
+      // changing it later actually takes effect.
+      settings: { mode: dto.mode },
       secret: dto.mode === 'api_key' ? dto.apiKey : null,
     });
 

@@ -116,6 +116,65 @@ describe('spec normalization', () => {
     expect(() => normalizeSpecContent(undefined, ctx)).toThrow(/no structured content/);
   });
 
+  it('strips a duplicated "THE SYSTEM SHALL" from the response', () => {
+    // The renderer supplies the connective, so a model that includes it too
+    // produces "THE SYSTEM SHALL THE SYSTEM SHALL …" in the spec handed to a
+    // coding agent. Observed in real output; normalised rather than prompted.
+    const out = normalizeSpecContent(
+      draft({
+        requirements: [
+          {
+            story: 'As a user…',
+            criteria: [
+              { keyword: 'WHEN', trigger: 'x happens,', response: 'THE SYSTEM SHALL do y' },
+              { keyword: 'WHILE', trigger: 'y holds', response: 'the system shall do z' },
+              { keyword: 'IF', trigger: 'z fails', response: 'SHALL retry' },
+              { keyword: 'WHEN', trigger: 'w', response: 'already clean' },
+            ],
+          },
+        ],
+      }),
+      ctx,
+    );
+
+    expect(out.requirements[0]?.criteria.map((c) => c.response)).toEqual([
+      'do y',
+      'do z',
+      'retry',
+      'already clean',
+    ]);
+  });
+
+  it('trims the trailing comma models leave on triggers', () => {
+    const out = normalizeSpecContent(
+      draft({
+        requirements: [
+          {
+            story: 's',
+            criteria: [{ keyword: 'WHEN', trigger: 'a user signs in,  ', response: 'redirect' }],
+          },
+        ],
+      }),
+      ctx,
+    );
+    expect(out.requirements[0]?.criteria[0]?.trigger).toBe('a user signs in');
+  });
+
+  it('drops a keyword the model repeated inside the trigger', () => {
+    const out = normalizeSpecContent(
+      draft({
+        requirements: [
+          {
+            story: 's',
+            criteria: [{ keyword: 'WHEN', trigger: 'WHEN a user signs in', response: 'redirect' }],
+          },
+        ],
+      }),
+      ctx,
+    );
+    expect(out.requirements[0]?.criteria[0]?.trigger).toBe('a user signs in');
+  });
+
   it('always yields the optional sections as arrays', () => {
     const out = normalizeSpecContent(draft(), ctx);
     expect(out.outOfScope).toEqual([]);

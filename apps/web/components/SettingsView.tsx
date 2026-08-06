@@ -31,6 +31,7 @@ export function SettingsView({
 }) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [cap, setCap] = useState((project.spendCapCents / 100).toFixed(0));
+  const [model, setModel] = useState(project.defaultModel);
   const [paused, setPaused] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +76,27 @@ export function SettingsView({
           </div>
         );
       })}
+
+      <div className="card">
+        <h5>Default model</h5>
+        <p className="sub">
+          Used by every agent run in this project. Changing it takes effect on the next run.
+        </p>
+        <div className="inline">
+          <select
+            value={model}
+            onChange={(e) => {
+              setModel(e.target.value);
+              save({ defaultModel: e.target.value });
+            }}
+          >
+            <option value="claude-opus-5">claude-opus-5 · deepest specs</option>
+            <option value="claude-sonnet-5">claude-sonnet-5 · balanced</option>
+            <option value="claude-haiku-4-5">claude-haiku-4-5 · drafts &amp; indexing</option>
+          </select>
+          {saved && <span className="ok">saved ✓</span>}
+        </div>
+      </div>
 
       <div className="card">
         <h5>Spend cap</h5>
@@ -160,6 +182,14 @@ export function SettingsView({
           display: flex;
           align-items: center;
           gap: 0.5rem;
+        }
+        .inline select {
+          font: 400 0.84rem/1 var(--sans);
+          padding: 0.45rem 0.6rem;
+          border-radius: 6px;
+          border: 1px solid var(--line-2);
+          background: var(--bg-2);
+          color: var(--ink);
         }
         .inline input {
           width: 5rem;

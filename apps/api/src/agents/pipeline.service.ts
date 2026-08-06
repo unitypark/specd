@@ -77,6 +77,7 @@ export class PipelineService {
           projectName: project.name,
           apiKey: ai.apiKey,
           model,
+          mode: ai.mode,
           run,
         });
         await this.runs.finish(run.id, {
@@ -157,6 +158,7 @@ export class PipelineService {
         primaryRepo: primary.name,
         apiKey: ai.apiKey,
         model,
+        mode: ai.mode,
         run,
         revisionNotes,
         previousContent,

@@ -173,6 +173,7 @@ export class ProjectsService {
       spendCents: await this.monthlySpendCents(project.id),
       spendCapCents: project.spendCapCents,
       knowledgeHealth: Math.round(health?.score ?? 0),
+      defaultModel: project.defaultModel,
     };
   }
 

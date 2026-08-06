@@ -13,6 +13,12 @@ import { resolve } from 'node:path';
 
 const API = process.env.SPECD_API ?? 'http://localhost:4000/api';
 const HAS_KEY = Boolean(process.env.ANTHROPIC_API_KEY);
+/** Set SPECD_AI_MODE=subscription_runner to drive the local Claude Code (D2). */
+const AI_MODE = (process.env.SPECD_AI_MODE ?? (HAS_KEY ? 'api_key' : '')) as
+  | 'api_key'
+  | 'subscription_runner'
+  | '';
+let aiReady = false;
 
 let token = '';
 let passed = 0;
@@ -58,8 +64,7 @@ function section(n: string, title: string): void {
 async function main(): Promise<void> {
   const stamp = Date.now();
   console.log(`\nspecd end-to-end loop  ·  ${API}`);
-  console.log(HAS_KEY ? 'ANTHROPIC_API_KEY present — agent steps will run.' : 'No ANTHROPIC_API_KEY — agent steps will be skipped.');
-
+  console.log(`AI mode: ${AI_MODE || 'none configured'}`);
   // ─── 01 CONNECT ───────────────────────────────────────────────────────────
   section('01', 'CONNECT');
 
@@ -70,6 +75,23 @@ async function main(): Promise<void> {
   });
   token = auth.token;
   step(`registered ${auth.user.name}`);
+
+  if (AI_MODE === 'subscription_runner') {
+    // Deliberately not wrapped in a catch: a failed preflight must fail the
+    // run, not quietly turn every agent step into a skip.
+    const modes = await call<Record<string, { ok: boolean; detail: string }>>(
+      'GET',
+      '/projects/ai-modes',
+    );
+    aiReady = Boolean(modes.subscription_runner?.ok);
+    step(
+      aiReady
+        ? `subscription mode available — ${modes.subscription_runner?.detail}`
+        : `subscription mode unavailable — ${modes.subscription_runner?.detail}`,
+    );
+  } else {
+    aiReady = HAS_KEY;
+  }
 
   const project = await call<{ slug: string; name: string }>('POST', '/projects', {
     name: `Aurora CRM ${stamp}`,
@@ -82,6 +104,18 @@ async function main(): Promise<void> {
   await call('POST', `/projects/${slug}/connections/vcs`, { provider: 'local' });
   await call('POST', `/projects/${slug}/connections/tracker`, { provider: 'board' });
   step('connected code (local) and tracker (built-in board)');
+
+  if (aiReady) {
+    const ai = await call<{ ok: boolean; detail: string }>(
+      'POST',
+      `/projects/${slug}/connections/ai`,
+      AI_MODE === 'subscription_runner'
+        ? { mode: 'subscription_runner', model: process.env.SPECD_MODEL ?? 'claude-sonnet-5' }
+        : { mode: 'api_key', apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.SPECD_MODEL ?? 'claude-sonnet-5' },
+    );
+    if (!ai.ok) throw new Error(`AI connection refused: ${ai.detail}`);
+    step(`connected AI — ${AI_MODE === 'subscription_runner' ? 'your Claude subscription (local)' : 'API key'}`);
+  }
 
   const fixture = resolve(process.cwd(), '../../.specd-work/fixtures/aurora-api');
   const inspected = await call<{ ok: boolean; clean?: boolean; branch?: string }>(
@@ -111,7 +145,7 @@ async function main(): Promise<void> {
   if (!result) throw new Error('onboarding returned no result');
   if (result.error) throw new Error(`onboarding failed: ${result.error}`);
   step(`onboarding agent wrote ${result.fileCount} files to branch ${result.branch}`);
-  if (!HAS_KEY) {
+  if (!aiReady) {
     skip('AI-drafted architecture/conventions/glossary', 'no ANTHROPIC_API_KEY — template scaffold written instead');
   }
 
@@ -162,7 +196,7 @@ async function main(): Promise<void> {
 
   let specId: string | null = null;
 
-  if (HAS_KEY) {
+  if (aiReady) {
     const drafted = await call<{ spec: { id: string; version: number; citationCount: number; unverifiedCount: number; content: { tasks: { title: string }[] } } }>(
       'POST',
       `/projects/${slug}/board/tickets/${ticket.id}/generate-spec`,
@@ -180,7 +214,7 @@ async function main(): Promise<void> {
     }
     step(`last task files the as-built spec: "${lastTask.title}"`);
   } else {
-    skip('SpecAgent draft', 'needs ANTHROPIC_API_KEY');
+    skip('SpecAgent draft', 'no AI configured');
   }
 
   // ─── 04 THE GATE ──────────────────────────────────────────────────────────
@@ -215,7 +249,7 @@ async function main(): Promise<void> {
     }
     step('approved → draft refused (400): approval is not reversible in place');
   } else {
-    skip('gate enforcement', 'no spec to gate — needs ANTHROPIC_API_KEY');
+    skip('gate enforcement', 'no spec to gate — no AI configured');
   }
 
   // ─── 05 BUILD HANDOFF ─────────────────────────────────────────────────────
@@ -239,7 +273,7 @@ async function main(): Promise<void> {
     );
     step(`\`specd spec status\` → ${status.status}, buildable=${status.buildable}`);
   } else {
-    skip('CLI handoff', 'no approved spec — needs ANTHROPIC_API_KEY');
+    skip('CLI handoff', 'no approved spec — no AI configured');
   }
 
   // ─── 06 LEARN ─────────────────────────────────────────────────────────────
@@ -260,7 +294,7 @@ async function main(): Promise<void> {
 
   console.log(`\n[1m${passed} passed, ${skipped} skipped[0m`);
   if (skipped > 0) {
-    console.log('\nSet ANTHROPIC_API_KEY and re-run to exercise the agent steps.');
+    console.log('\nSet ANTHROPIC_API_KEY, or SPECD_AI_MODE=subscription_runner, and re-run.');
   }
   console.log(`\nFixture repo left at ${fixture} — inspect the merged knowledge/ directory there.\n`);
 }

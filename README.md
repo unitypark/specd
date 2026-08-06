@@ -54,14 +54,34 @@ labelled**, never silently passed.
 
 ### Giving it a model
 
-The onboarding agent and SpecAgent call Claude for real. Set a key and the
-skipped steps light up:
+Three ways in (§P3), and the wizard preflights which of them this machine can
+actually do.
+
+**Your Claude subscription** — no API key. specd drives the Claude Code
+already signed in on this machine:
+
+```bash
+export SPECD_AI_MODE=subscription_runner
+pnpm --filter @specd/api loop        # 22 passed, 0 skipped
+```
+
+This is D2's self-hosted runner path, and the constraint is the architecture,
+not a limitation: specd never sees, stores or proxies a subscription
+credential — it shells out to a CLI that is already logged in. A *hosted*
+specd therefore cannot offer this mode at all. Runs consume your subscription
+quota, so they record tokens but are **not** metered in euros.
+
+Two things it does not inherit from the Messages API, both handled in code:
+there is no schema guarantee (the reply is shape-checked, with one repair
+attempt before giving up), and there is no per-call billing.
+
+**An API key** — works from anywhere, schema-enforced, metered per token:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Without one, specd still runs end to end: onboarding writes the template
+With neither, specd still runs end to end: onboarding writes the template
 scaffold (every claim marked `UNVERIFIED`), and spec generation fails with a
 clear error rather than inventing content.
 
@@ -131,7 +151,7 @@ metadata, run history. Delete a project and nothing you would miss is gone.
 ### Tests
 
 ```bash
-pnpm test        # 76 tests
+pnpm test        # 97 tests
 ```
 
 The gate tests run against real Postgres and skip themselves if none is
@@ -190,8 +210,9 @@ otherwise:
 - **GitLab** (P2), **Jira sync** (P3) — interface-ready, adapters absent.
 - **Hosted build runners** (P2) — the Build station currently hands off via
   `specd spec pull` or a human. Handoff modes (b) and (c) of §8 stage 5.
-- **Self-hosted runner pairing** (P2) — subscription mode is modelled end to end
-  (`AiConnection.mode = subscription_runner`) but the runner daemon is not here.
+- **Remote runner pairing** (P2) — subscription mode works when specd runs on
+  the same machine as Claude Code (above). Pairing a *separate* runner over the
+  network, so a hosted specd can dispatch to your infrastructure, is not built.
 - **Webhooks** — merge detection is manual (`I merged it` / `specd` re-index)
   rather than webhook-driven.
 - **Spend billing** — spend is metered and capped; Stripe is not wired (P3).

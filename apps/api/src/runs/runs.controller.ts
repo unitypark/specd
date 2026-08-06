@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Res, Sse } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Res,
+  Sse,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { Observable } from 'rxjs';
 import { IsArray, IsOptional, IsString } from 'class-validator';
@@ -66,7 +75,7 @@ export class RunsController {
   @Get('runs/:runId')
   async get(
     @Param('slug') slug: string,
-    @Param('runId') runId: string,
+    @Param('runId', ParseUUIDPipe) runId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user);
@@ -82,7 +91,7 @@ export class RunsController {
   @Sse('runs/:runId/stream')
   async stream(
     @Param('slug') slug: string,
-    @Param('runId') runId: string,
+    @Param('runId', ParseUUIDPipe) runId: string,
     @CurrentUser() user: TokenClaims,
     @Res({ passthrough: true }) res: Response,
   ): Promise<Observable<{ data: string }>> {

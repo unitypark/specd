@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -161,7 +162,7 @@ export class ProjectsController {
   @Post(':slug/repositories/:repoId/primary')
   async setPrimary(
     @Param('slug') slug: string,
-    @Param('repoId') repoId: string,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.projects.bySlug(slug);
@@ -172,7 +173,7 @@ export class ProjectsController {
   @Post(':slug/repositories/:repoId/setup-merged')
   async markMerged(
     @Param('slug') slug: string,
-    @Param('repoId') repoId: string,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.projects.bySlug(slug);
@@ -183,7 +184,7 @@ export class ProjectsController {
   @Delete(':slug/repositories/:repoId')
   async removeRepo(
     @Param('slug') slug: string,
-    @Param('repoId') repoId: string,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.projects.bySlug(slug);
@@ -314,7 +315,7 @@ export class ProjectsController {
   @Get(':slug/knowledge/:docId')
   async knowledgeDoc(
     @Param('slug') slug: string,
-    @Param('docId') docId: string,
+    @Param('docId', ParseUUIDPipe) docId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.projects.bySlug(slug);

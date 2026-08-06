@@ -7,6 +7,7 @@ import {
   HttpCode,
   Logger,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -237,7 +238,7 @@ GITHUB_APP_PRIVATE_KEY="${(app.pem ?? '').replace(/\n/g, '\\n')}"`,
    */
   @Post('projects/:projectId/installation')
   async connect(
-    @Param('projectId') projectId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body() body: { installationId?: string },
     @CurrentUser() user: TokenClaims,
   ) {
@@ -271,14 +272,14 @@ GITHUB_APP_PRIVATE_KEY="${(app.pem ?? '').replace(/\n/g, '\\n')}"`,
 
   /** The repo picker's source: exactly what the installation was granted. */
   @Get('projects/:projectId/repositories')
-  async repositories(@Param('projectId') projectId: string) {
+  async repositories(@Param('projectId', ParseUUIDPipe) projectId: string) {
     const adapter = await this.adapterFor(projectId);
     return { repositories: await adapter.listInstallationRepositories() };
   }
 
   /** "Are the webhooks actually arriving?" — the first question when they are not. */
   @Get('projects/:projectId/deliveries')
-  async deliveries(@Param('projectId') projectId: string) {
+  async deliveries(@Param('projectId', ParseUUIDPipe) projectId: string) {
     return { deliveries: await this.webhooks.recent(projectId) };
   }
 

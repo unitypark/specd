@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { SPEC_STATUSES, type SpecStatus } from '@specd/shared';
 import { CurrentUser } from '../auth/current-user.decorator.js';
@@ -73,7 +81,7 @@ export class BoardController {
   @Get('tickets/:ticketId')
   async getTicket(
     @Param('slug') slug: string,
-    @Param('ticketId') ticketId: string,
+    @Param('ticketId', ParseUUIDPipe) ticketId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user);
@@ -87,7 +95,7 @@ export class BoardController {
   @Patch('tickets/:ticketId')
   async updateTicket(
     @Param('slug') slug: string,
-    @Param('ticketId') ticketId: string,
+    @Param('ticketId', ParseUUIDPipe) ticketId: string,
     @Body() dto: UpdateTicketDto,
     @CurrentUser() user: TokenClaims,
   ) {
@@ -102,7 +110,7 @@ export class BoardController {
   @Post('tickets/:ticketId/generate-spec')
   async generateSpec(
     @Param('slug') slug: string,
-    @Param('ticketId') ticketId: string,
+    @Param('ticketId', ParseUUIDPipe) ticketId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user, ['owner', 'maintainer']);
@@ -116,7 +124,7 @@ export class BoardController {
   @Post('specs/:specId/revise')
   async revise(
     @Param('slug') slug: string,
-    @Param('specId') specId: string,
+    @Param('specId', ParseUUIDPipe) specId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user, ['owner', 'maintainer']);
@@ -133,7 +141,7 @@ export class BoardController {
   @Post('specs/:specId/build')
   async build(
     @Param('slug') slug: string,
-    @Param('specId') specId: string,
+    @Param('specId', ParseUUIDPipe) specId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user, ['owner', 'maintainer']);
@@ -147,7 +155,7 @@ export class BoardController {
   @Get('specs/:specId')
   async getSpec(
     @Param('slug') slug: string,
-    @Param('specId') specId: string,
+    @Param('specId', ParseUUIDPipe) specId: string,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user);
@@ -163,7 +171,7 @@ export class BoardController {
   @Post('specs/:specId/transition')
   async transition(
     @Param('slug') slug: string,
-    @Param('specId') specId: string,
+    @Param('specId', ParseUUIDPipe) specId: string,
     @Body() dto: TransitionDto,
     @CurrentUser() user: TokenClaims,
   ) {
@@ -179,7 +187,7 @@ export class BoardController {
   @Post('specs/:specId/comments')
   async comment(
     @Param('slug') slug: string,
-    @Param('specId') specId: string,
+    @Param('specId', ParseUUIDPipe) specId: string,
     @Body() dto: CommentDto,
     @CurrentUser() user: TokenClaims,
   ) {

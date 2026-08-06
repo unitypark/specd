@@ -9,11 +9,11 @@ import {
   renderSetupPrBody,
   type DetectedStack,
 } from '@specd/templates';
-import type { ModelId } from '@specd/shared';
+import type { AiMode, ModelId } from '@specd/shared';
 import { DB } from '../db/db.module.js';
 import { VcsService } from '../vcs/vcs.service.js';
 import { IGNORED_DIRS, type RepoSnapshot } from '../vcs/vcs.types.js';
-import { AnthropicService } from './anthropic.service.js';
+import { ModelRouter } from './model.router.js';
 import type { RunHandle } from '../runs/runs.service.js';
 
 /** What we ask the model for. Everything else is rendered from templates. */
@@ -67,7 +67,7 @@ export class OnboardingAgent {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly vcs: VcsService,
-    private readonly anthropic: AnthropicService,
+    private readonly models: ModelRouter,
   ) {}
 
   async run(input: {
@@ -75,9 +75,10 @@ export class OnboardingAgent {
     projectName: string;
     apiKey: string | null;
     model: ModelId;
+    mode: AiMode;
     run: RunHandle;
   }): Promise<{ branch: string; url: string | null; reviewHint: string; fileCount: number }> {
-    const { repo, projectName, apiKey, model, run } = input;
+    const { repo, projectName, apiKey, model, mode, run } = input;
 
     await run.log(`clone (read-only) · ${repo.name}`);
     const adapter = await this.vcs.adapterFor(repo);
@@ -94,10 +95,10 @@ export class OnboardingAgent {
     // other files are deterministic templates — no reason to spend tokens or
     // risk hallucination on a runbook stub.
     let drafted: DraftedDocs | null = null;
-    if (apiKey) {
+    if (apiKey || mode === 'subscription_runner') {
       await run.log('drafting architecture · conventions · glossary');
-      const result = await this.anthropic.call<DraftedDocs>({
-        apiKey,
+      const result = await this.models.call<DraftedDocs>(mode, {
+        apiKey: apiKey ?? '',
         model,
         maxTokens: 16_000,
         effort: 'high',
@@ -105,7 +106,13 @@ export class OnboardingAgent {
         user: buildUserPrompt({ repo, projectName, stack, snapshot, topLevelDirs, entryPoints }),
         schema: DRAFT_SCHEMA as unknown as Record<string, unknown>,
       });
-      await run.meter(result.model, result.usage);
+      if (result.model !== model) {
+        await run.log(
+          `requested ${model} but the provider served ${result.model}`,
+          'warn',
+        );
+      }
+      await run.meter(result.model, result.usage, result.billable);
       drafted = result.parsed ?? null;
       const unverified = countUnverified(drafted);
       await run.log(

@@ -47,7 +47,13 @@
 
   --ink: #f2f5f1;
   --ink-2: #9fb3a6;
-  --ink-3: #7d9186;
+  /*
+   * Muted labels. Chosen to clear AA (4.5) on the *lightest* surface, not the
+   * darkest — at #7d9186 it passed on --bg (4.75) and failed on --panel (4.41)
+   * and --panel-2 (4.11), which is where most of the app's small labels
+   * actually sit. Every surface must pass, so the ceiling sets the colour.
+   */
+  --ink-3: #8ea297;
 
   /*
    * Brand triad — black, green, red.
@@ -66,7 +72,15 @@
    * agent could not ground and a human still has to answer. Distinct from
    * --danger (destructive) and from --warn (something is merely off).
    */
-  --unverified: var(--pink);
+  /*
+   * The marker text is --pink-soft, not --pink. Markers render at 9–10px, and
+   * uppercase does NOT count as "large text" under WCAG — that needs 18.66px
+   * bold or 24px. Over its own chip (--unverified-soft composited on --panel,
+   * rgb(64,35,54)) --pink scores 3.67 and fails; --pink-soft scores 6.17.
+   * The chip fill and border keep the full-strength pink, so the marker still
+   * reads as pink at a glance.
+   */
+  --unverified: var(--pink-soft);
   --unverified-soft: rgba(255, 0, 128, 0.12);
   --unverified-line: rgba(255, 0, 128, 0.45);
 

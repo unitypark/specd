@@ -5,7 +5,10 @@ import { AppModule } from './app.module.js';
 import { Config } from './config.js';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  // rawBody: the GitHub webhook signature is an HMAC over the exact bytes
+  // GitHub sent. Re-serialising the parsed JSON changes key order and
+  // whitespace, and the signature would never verify again.
+  const app = await NestFactory.create(AppModule, { bufferLogs: false, rawBody: true });
   const config = app.get(Config);
 
   app.setGlobalPrefix('api');
@@ -28,6 +31,19 @@ async function bootstrap(): Promise<void> {
     logger.warn(
       'ANTHROPIC_API_KEY is not set — agent runs will fail until a project supplies its own key.',
     );
+  }
+  if (config.githubAppConfigured) {
+    logger.log(`GitHub App ${config.githubAppSlug} (id ${config.githubAppId})`);
+    if (!config.githubWebhookSecret) {
+      // Without a secret every delivery fails the signature check, so the App
+      // looks connected while nothing it sends is ever acted on.
+      logger.warn(
+        'GITHUB_WEBHOOK_SECRET is not set — webhook deliveries will be rejected. ' +
+          'Merges will not re-index until it is.',
+      );
+    }
+  } else {
+    logger.log('GitHub App not configured — local git mode only. See docs/github-app.md.');
   }
 }
 

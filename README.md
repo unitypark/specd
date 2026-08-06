@@ -141,8 +141,18 @@ per call from the model rate card in EUR cents — integers, so spend never
 accumulates float drift.
 
 **Agents never push.**
-The write path is a branch plus a pull request on hosted providers, or a branch
-you diff in local mode. Nothing writes to a default branch.
+The build agent gets editing tools only; specd pushes what it produced, and
+only ever to the spec's own branch. The write path is that branch plus a pull
+request on hosted providers, or a branch you diff in local mode. Nothing writes
+to a default branch.
+
+**GitHub cannot be impersonated.**
+The webhook endpoint has to be unauthenticated — GitHub has no specd session —
+so every delivery is HMAC-verified over the raw bytes in constant time before
+the payload is parsed, and an unset secret rejects everything rather than
+waving it through. Deliveries are deduplicated by GitHub's delivery id, and an
+event is acted on only when its repository *and* installation match a
+registered project.
 
 **Leaving is free.**
 Git holds the knowledge. The platform holds a derived index — embeddings,
@@ -151,11 +161,14 @@ metadata, run history. Delete a project and nothing you would miss is gone.
 ### Tests
 
 ```bash
-pnpm test        # 116 tests
+pnpm test        # 183 tests
 ```
 
-The gate tests run against real Postgres and skip themselves if none is
-reachable, so the suite still works on a laptop with nothing running.
+The gate and webhook tests run against real Postgres and skip themselves if
+none is reachable, so the suite still works on a laptop with nothing running.
+Webhook signatures are tested with real HMAC and App JWTs with real RSA keys —
+a mocked signer would prove nothing about the only property that matters, which
+is that GitHub can verify what we send.
 
 ---
 
@@ -250,9 +263,10 @@ to review. Three properties are enforced rather than hoped for:
   unapproved spec gets the same 409 the CLI gets.
 - **The agent gets editing tools only — never a shell.** specd runs the repo's
   own verify command itself, so nothing a model emits becomes a shell command.
-- **It never touches your working tree.** The build runs in a throwaway git
-  worktree on `spec/<id>-<slug>`; the branch survives, the worktree does not.
-  An interrupted build cannot leave you on an unexpected branch.
+- **It never touches your working tree.** Local builds run in a throwaway git
+  worktree on `spec/<id>-<slug>`; GitHub builds run in a shallow clone in a
+  scratch directory. The branch survives, the workspace does not — an
+  interrupted build cannot leave you on an unexpected branch.
 
 The as-built spec is written by specd, not the model — it is a verbatim record
 of what was approved, and asking a model to reproduce it would invite drift in
@@ -263,7 +277,65 @@ work streams to the run log. Verify results distinguish **failed** (your tests
 ran and did not pass) from **could not run** (the toolchain or dependencies are
 missing) — those mean very different things to a reviewer.
 
-Hosted builds currently require a local repository and the Claude Code CLI.
+On GitHub the branch is pushed and a PR opened, described with what was
+approved, by whom, and whether verify actually ran. In local mode the branch is
+simply left in your repository. Hosted builds need the Claude Code CLI either
+way.
+
+## GitHub
+
+specd talks to GitHub as an **App**, not as a user with a token. An App's
+credential mints repository-scoped tokens that expire within the hour and reach
+only the repositories someone explicitly granted; a PAT carries its creator's
+full authority over everything they can see, forever.
+
+Register it in one click with the API running:
+
+```
+open http://localhost:4000/api/github/app/register     # add ?org=your-org for an org
+```
+
+It asks for `contents:write`, `pull_requests:write` and `metadata:read`. That is
+the whole list — no workflows, no packages, no org administration. **specd never
+pushes to your default branch.** Every change an agent makes arrives as a branch
+and a PR, and stops there until you merge it.
+
+Full walkthrough, including webhook forwarding for local dev:
+[`docs/github-app.md`](docs/github-app.md).
+
+### Merging is adopting
+
+Once the webhook is delivering, the merge *is* the signal — there is no button
+to press afterwards:
+
+| What merged | What specd does |
+|---|---|
+| The setup branch | Records adoption, indexes `knowledge/` |
+| A `spec/…` branch | Marks the spec **delivered**, re-indexes so the as-built spec grounds the next one |
+| Anything touching `knowledge/` on the default branch | Re-indexes |
+
+Closing a PR without merging is a rejection and changes nothing. That
+asymmetry is deliberate: adoption should require the same act as any other
+change to your codebase.
+
+The webhook endpoint is unauthenticated by necessity — GitHub has no specd
+session — so its signature check is the only thing guarding it. Every delivery
+is HMAC-verified over the raw bytes in constant time before the payload is
+parsed, deliveries are deduplicated by GitHub's delivery id so a retry cannot
+re-run an index, and an event is acted on only if its repository *and*
+installation match a registered project. **An unset `GITHUB_WEBHOOK_SECRET`
+rejects everything** — it never means "skip the check", so a forgotten variable
+cannot become an open write endpoint.
+
+Every delivery is recorded with what specd decided and why, including the ones
+it ignored:
+
+```
+GET /github/projects/:projectId/deliveries
+```
+
+"The webhook arrived and specd chose not to act" and "the webhook never
+arrived" are different problems, and this says which one you have.
 
 ## Knowledge and retrieval
 
@@ -288,15 +360,10 @@ nobody can reason about gets ignored.
 Stated plainly, because the plan phases these and the UI should not imply
 otherwise:
 
-- **GitHub** — the adapter is written against the same interface as local mode
-  and opens real PRs, but needs a GitHub App registration and token. The wizard
-  says so rather than pretending.
 - **GitLab** (P2), **Jira sync** (P3) — interface-ready, adapters absent.
 - **Remote runner pairing** (P2) — subscription mode works when specd runs on
   the same machine as Claude Code (above). Pairing a *separate* runner over the
   network, so a hosted specd can dispatch to your infrastructure, is not built.
-- **Webhooks** — merge detection is manual (`I merged it` / `specd` re-index)
-  rather than webhook-driven.
 - **Spend billing** — spend is metered and capped; Stripe is not wired (P3).
 
 ---

@@ -385,6 +385,35 @@ export const knowledgeHealth = pgTable('knowledge_health', {
   computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Every webhook delivery we accepted, keyed by the id GitHub assigned it.
+ *
+ * The primary key is the deduplication: GitHub retries, and someone hitting
+ * "Redeliver" in the Advanced tab must not re-run an index or re-log a merge.
+ * It doubles as the answer to "why did specd move that spec at 03:00" (§10).
+ */
+export const webhookDeliveries = pgTable(
+  'webhook_deliveries',
+  {
+    /** X-GitHub-Delivery. Deliberately not defaulted — it comes from GitHub. */
+    id: uuid('id').primaryKey(),
+    provider: text('provider').notNull().default('github'),
+    event: text('event').notNull(),
+    action: text('action'),
+    installationId: text('installation_id'),
+    repoFullName: text('repo_full_name'),
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    /** What we did: ignored | setup-merged | spec-merged | reindex | unmatched… */
+    outcome: text('outcome').notNull(),
+    detail: text('detail'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('webhook_deliveries_received_idx').on(t.receivedAt),
+    index('webhook_deliveries_project_idx').on(t.projectId, t.receivedAt),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Repository = typeof repositories.$inferSelect;

@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { Injectable } from '@nestjs/common';
 import { DEFAULT_MODEL, isModelId, type ModelId } from '@specd/shared';
 
@@ -40,6 +41,28 @@ export class Config {
    * configured root means a bad `localPath` cannot reach outside it.
    */
   readonly localRepoRoot = process.env.SPECD_LOCAL_REPO_ROOT || null;
+
+  // ─── GitHub App (§11) ──────────────────────────────────────────────────────
+  // Absent by default: the whole product works in local mode without an App,
+  // and every code path that needs one says so by name rather than failing
+  // with an undefined.
+  readonly githubAppId = process.env.GITHUB_APP_ID ?? '';
+  readonly githubAppSlug = process.env.GITHUB_APP_SLUG ?? 'specd';
+  readonly githubPrivateKey = process.env.GITHUB_APP_PRIVATE_KEY ?? '';
+  readonly githubWebhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? '';
+  readonly githubApiBase = process.env.GITHUB_API_BASE ?? 'https://api.github.com';
+  readonly githubBase = process.env.GITHUB_BASE ?? 'https://github.com';
+  readonly githubCloneBase = process.env.GITHUB_CLONE_BASE ?? 'https://github.com';
+
+  /**
+   * Scratch root for hosted build clones. Each build gets its own directory
+   * under it and deletes it afterwards — nothing here is meant to outlive a run.
+   */
+  readonly buildRoot = process.env.SPECD_BUILD_ROOT || tmpdir();
+
+  get githubAppConfigured(): boolean {
+    return Boolean(this.githubAppId && this.githubPrivateKey);
+  }
 
   get defaultModel(): ModelId {
     const raw = process.env.SPECD_DEFAULT_MODEL;

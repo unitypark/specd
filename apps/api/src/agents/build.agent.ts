@@ -25,6 +25,8 @@ export interface BuildResult {
   verifyPassed: boolean | null;
   verifyOutput: string | null;
   asBuiltPath: string;
+  /** Where to review it. A PR on hosted providers; null in local mode. */
+  reviewUrl: string | null;
 }
 
 /**
@@ -159,10 +161,21 @@ export class BuildAgent {
       }
 
       const commits = await this.workspaces.commitCount(workspace.dir, workspace.baseBranch);
-      await run.log(
-        `branch ${branch} ready · ${commits} commit(s) · review with ` +
-          `\`git diff ${workspace.baseBranch}..${branch}\``,
-      );
+
+      // Hand the branch to wherever this team reviews. On a hosted provider the
+      // workspace is a temporary clone about to be deleted, so a branch that is
+      // never pushed is a build that produced nothing.
+      const published = await workspace.publish({
+        title: `${spec.ticketKey}: ${spec.title}`,
+        body: buildPrBody(spec, {
+          commits,
+          verifyPassed,
+          verifyCommand: typeof stack.verifyCommand === 'string' ? stack.verifyCommand : null,
+          asBuilt,
+        }),
+      });
+
+      await run.log(`branch ${branch} ready · ${commits} commit(s) · ${published.reviewHint}`);
 
       return {
         branch,
@@ -172,6 +185,7 @@ export class BuildAgent {
         verifyPassed,
         verifyOutput,
         asBuiltPath: asBuilt,
+        reviewUrl: published.url,
       };
     } finally {
       // The worktree goes; the branch it produced stays.
@@ -343,4 +357,60 @@ function runShell(
       if (!settled) resolve({ code, output });
     });
   });
+}
+
+/**
+ * The PR description a reviewer actually reads first.
+ *
+ * It leads with what was approved and by whom, because that is the question a
+ * reviewer has about agent-written code: not "is this clever" but "is this
+ * what we agreed to". Verify status is stated plainly, including the case
+ * where it could not run — a reviewer told "passed" when nothing ran has been
+ * misled.
+ */
+export function buildPrBody(
+  spec: SpecView,
+  meta: {
+    commits: number;
+    verifyPassed: boolean | null;
+    verifyCommand: string | null;
+    asBuilt: string;
+  },
+): string {
+  const verify =
+    meta.verifyCommand === null
+      ? 'No verify command is configured for this repository — nothing was run.'
+      : meta.verifyPassed === true
+        ? `\`${meta.verifyCommand}\` passed.`
+        : meta.verifyPassed === false
+          ? `\`${meta.verifyCommand}\` **failed**. The branch is here for you to inspect.`
+          : `\`${meta.verifyCommand}\` could not run in the build environment ` +
+            '(toolchain or dependencies missing). This is not a passing verify.';
+
+  const approval = spec.approvedBy
+    ? `Approved by **${spec.approvedBy}**${spec.approvedAt ? ` on ${new Date(spec.approvedAt).toISOString().slice(0, 10)}` : ''}.`
+    : 'No approval is recorded for this spec.';
+
+  return [
+    `Built from **${spec.ticketKey} v${spec.version}** — ${spec.title}`,
+    '',
+    approval,
+    '',
+    `- ${meta.commits} commit(s), one per task`,
+    `- As-built spec filed at \`${meta.asBuilt}\``,
+    `- ${verify}`,
+    '',
+    '---',
+    '',
+    '### Acceptance criteria',
+    '',
+    ...spec.content.requirements.flatMap((req) =>
+      req.criteria.map((c) => `- [ ] ${c.keyword} ${c.trigger} THE SYSTEM SHALL ${c.response}`),
+    ),
+    '',
+    '---',
+    '',
+    'Merging adopts this: the as-built spec becomes part of the knowledge base and grounds ' +
+      'the next spec. Closing without merging rejects it and changes nothing.',
+  ].join('\n');
 }

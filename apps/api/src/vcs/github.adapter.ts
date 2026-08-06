@@ -193,6 +193,48 @@ export class GitHubAdapter implements VcsAdapter {
     };
   }
 
+  /**
+   * Open a PR for a branch that is *already pushed*.
+   *
+   * `propose` builds its commit through the API because it has file contents
+   * and no checkout. The build station is the other way round: it has a real
+   * clone with real commits, pushes them with git, and needs only the review
+   * surface. Re-running a build must update the existing PR rather than fail,
+   * so an already-open PR for the branch is returned as-is.
+   */
+  async openPullRequest(
+    slug: string,
+    pr: { branch: string; base: string; title: string; body: string },
+  ): Promise<{ url: string; number: number; existing: boolean }> {
+    try {
+      const created = await this.api<{ html_url: string; number: number }>(
+        `/repos/${slug}/pulls`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            title: pr.title,
+            head: pr.branch,
+            base: pr.base,
+            body: pr.body,
+          }),
+        },
+      );
+      return { url: created.html_url, number: created.number, existing: false };
+    } catch (err) {
+      // 422 is what GitHub returns when a PR for this head already exists.
+      // Finding it is the correct outcome, not a fallback.
+      const owner = slug.split('/')[0];
+      const open = await this.api<{ html_url: string; number: number }[]>(
+        `/repos/${slug}/pulls?head=${encodeURIComponent(`${owner}:${pr.branch}`)}&state=open`,
+      ).catch(() => []);
+
+      if (open.length > 0) {
+        return { url: open[0]!.html_url, number: open[0]!.number, existing: true };
+      }
+      throw err;
+    }
+  }
+
   /** Repo picker source: exactly what the installation was granted (§6 step 2). */
   async listInstallationRepositories(): Promise<
     { id: string; fullName: string; defaultBranch: string; language: string | null }[]

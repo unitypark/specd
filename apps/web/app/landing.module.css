@@ -312,7 +312,7 @@
   display: grid;
   grid-template-columns: 1fr 0.98fr;
   gap: clamp(2rem, 4vw, 4rem);
-  padding: clamp(1.25rem, 2.5vw, 2.25rem) 2rem clamp(2.5rem, 4vw, 3.5rem);
+  padding: clamp(2.5rem, 4.5vw, 4rem) 2rem clamp(3rem, 4.5vw, 4rem);
   max-width: var(--shell);
   margin: 0 auto;
   align-items: start;

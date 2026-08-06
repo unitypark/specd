@@ -162,24 +162,77 @@ reachable, so the suite still works on a laptop with nothing running.
 ## The CLI
 
 ```bash
-pnpm cli:build        # → bin/specd
-
-specd login           # device flow; a human confirms in the browser
-specd use <project>
-specd spec pull CRM-131      # approved specs only
-specd spec status CRM-131    # exit 3 when unapproved — gate your CI on it
-specd specs list
-specd connect .              # register a local repo (code stays local)
+pnpm cli:build      # → ./bin/specd, run it as ./bin/specd
+pnpm cli:install    # → $(go env GOPATH)/bin/specd, and tells you if that is not on PATH
 ```
 
-It fetches, registers and reports. It never authors, reviews or approves.
+`cli:install` uses `go install`, so the binary lands in your Go bin directory.
+That directory is often not on `PATH`; the script checks and prints the exact
+`export` line if it is missing. Everything below assumes `specd` is runnable —
+otherwise substitute `./bin/specd`.
+
+```bash
+specd login                  # device flow — confirm in the browser
+specd use <project>          # set the default project for this machine
+specd projects               # list projects you can see
+specd whoami                 # who this machine is signed in as
+specd logout                 # forget the stored token
+
+specd spec pull CRM-131      # print an approved spec as markdown
+specd spec pull CRM-131 -o spec.md
+specd spec status CRM-131    # lifecycle state; exit 3 when unapproved
+specd specs list             # every spec and its state
+specd specs list --status approved
+
+specd connect .              # register a local repo (code stays on your machine)
+specd open CRM-131           # open the spec in the web app
+```
+
+`specd login` needs the **web app running**, because a human confirms the code
+at `/cli-login` — a machine cannot mint its own token. The token is stored in
+your login keychain on macOS, or `0600` under your config directory elsewhere.
+
+It fetches, registers and reports. It never authors, reviews or approves —
+those live in the app, and the server refuses them for CLI tokens regardless of
+what this binary asks for.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | fine |
+| `1` | something went wrong |
+| `2` | usage error |
+| `3` | the spec exists but is **not approved** |
+
+Exit `3` is deliberately distinct from `1`, so a pipeline can tell "not stamped
+yet" from "something broke":
 
 ```yaml
-# Block a build until its spec is approved
-- run: specd spec status "$SPEC_ID" || exit 1
+env:
+  SPECD_API: https://specd.example.com/api
+  SPECD_TOKEN: ${{ secrets.SPECD_TOKEN }}
+  SPECD_PROJECT: aurora-crm
+
+steps:
+  - name: Require an approved spec
+    run: |
+      specd spec status "$SPEC_ID"
+      case $? in
+        0) echo "approved — building" ;;
+        3) echo "::error::$SPEC_ID is not approved yet"; exit 1 ;;
+        *) echo "::error::could not reach specd"; exit 1 ;;
+      esac
 ```
 
----
+### Environment
+
+| Variable | Purpose |
+| --- | --- |
+| `SPECD_API` | API base URL (default `http://localhost:4000/api`) |
+| `SPECD_PROJECT` | default project slug, overriding `specd use` |
+| `SPECD_TOKEN` | token to use instead of the stored one — for CI |
+| `SPECD_WEB` | web app origin; normally learned at login, used by `specd open` |
 
 ## Knowledge and retrieval
 

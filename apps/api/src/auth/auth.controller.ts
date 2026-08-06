@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { IsEmail, IsString, MinLength } from 'class-validator';
 import { AuthService } from './auth.service.js';
+import { Config } from '../config.js';
 import { CliAllowed, Public } from './auth.guard.js';
 import { CurrentUser } from './current-user.decorator.js';
 import type { TokenClaims } from './auth.service.js';
@@ -26,7 +27,10 @@ class DeviceApproveDto {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly config: Config,
+  ) {}
 
   @Public()
   @Post('register')
@@ -47,7 +51,15 @@ export class AuthController {
   @Get('me')
   @CliAllowed()
   me(@CurrentUser() user: TokenClaims) {
-    return { id: user.sub, email: user.email, name: user.name, audience: user.aud };
+    return {
+      id: user.sub,
+      email: user.email,
+      name: user.name,
+      audience: user.aud,
+      // The CLI cannot derive this: the web app and the API are different
+      // origins, so `specd open` has to be told where the app is.
+      webOrigin: this.config.webOrigin,
+    };
   }
 
   // ─── CLI device flow ────────────────────────────────────────────────────────

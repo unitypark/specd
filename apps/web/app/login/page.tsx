@@ -33,7 +33,7 @@ export default function LoginPage() {
 
   return (
     <main className="wrap">
-      <Link href="/" className="logo">
+      <Link href="/" className="applogo lg">
         spec<i>d</i>
       </Link>
 
@@ -115,17 +115,6 @@ export default function LoginPage() {
           gap: 1.6rem;
           padding: 2rem;
           background: var(--field);
-        }
-        .logo {
-          font: 700 1.4rem/1 var(--serif);
-          color: #fff;
-        }
-        .logo i {
-          color: var(--accent);
-          font-style: normal;
-        }
-        .logo:hover {
-          text-decoration: none;
         }
         .box {
           width: 100%;

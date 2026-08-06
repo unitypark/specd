@@ -159,7 +159,7 @@ export function KnowledgeView({ slug }: { slug: string }) {
           align-items: center;
           padding: 0.6rem 0.9rem;
           border-bottom: 1px solid var(--line);
-          font: 600 0.7rem/1 var(--mono);
+          font: 600 0.862rem/1 var(--mono);
           letter-spacing: 0.06em;
           color: var(--ink-3);
           background: var(--panel-2);
@@ -170,7 +170,7 @@ export function KnowledgeView({ slug }: { slug: string }) {
           gap: 0.5rem;
           padding: 0.5rem 0.9rem;
           border-bottom: 1px solid var(--line);
-          font-size: 0.8rem;
+          font-size: 0.963rem;
         }
         .row:last-child {
           border-bottom: none;
@@ -180,20 +180,20 @@ export function KnowledgeView({ slug }: { slug: string }) {
         }
         .path {
           font-family: var(--mono);
-          font-size: 0.76rem;
+          font-size: 0.922rem;
           color: var(--ink);
         }
         .pad {
           padding: 0.9rem;
         }
         .small {
-          font-size: 0.79rem;
+          font-size: 0.953rem;
           color: var(--ink-2);
           line-height: 1.7;
         }
         .small p {
           color: var(--ink-3);
-          font-size: 0.75rem;
+          font-size: 0.912rem;
           margin: 0.6rem 0 0;
         }
         .score {
@@ -204,7 +204,7 @@ export function KnowledgeView({ slug }: { slug: string }) {
         .note {
           display: flex;
           gap: 0.5rem;
-          font-size: 0.77rem;
+          font-size: 0.932rem;
           line-height: 1.6;
           color: var(--ink-2);
           margin: 0.7rem 0 0;

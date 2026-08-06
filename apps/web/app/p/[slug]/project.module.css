@@ -10,7 +10,7 @@
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--ink-3);
-  font: 600 0.8rem/1 var(--sans);
+  font: 600 0.963rem/1 var(--sans);
   padding: 0.7rem 0.85rem;
   cursor: pointer;
   white-space: nowrap;
@@ -40,7 +40,7 @@
   color: var(--ink);
 }
 .l {
-  font: 500 0.68rem/1.4 var(--mono);
+  font: 500 0.868rem/1.4 var(--mono);
   letter-spacing: 0.06em;
   color: var(--ink-3);
   margin-top: 0.35rem;
@@ -63,11 +63,11 @@
   font: 600 1.3rem/1 var(--serif);
 }
 .cap {
-  font: 500 0.7rem/1 var(--mono);
+  font: 500 0.862rem/1 var(--mono);
   color: var(--ink-3);
 }
 .spendnote {
-  font-size: 0.74rem;
+  font-size: 0.902rem;
   color: var(--ink-3);
   margin: 0.6rem 0 0;
   line-height: 1.6;

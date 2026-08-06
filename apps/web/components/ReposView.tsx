@@ -142,11 +142,11 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
           border: 1px solid var(--line);
           border-radius: var(--radius);
           overflow: hidden;
-          font-size: 0.82rem;
+          font-size: 0.958rem;
         }
         th {
           text-align: left;
-          font: 600 0.66rem/1 var(--mono);
+          font: 600 0.848rem/1 var(--mono);
           letter-spacing: 0.08em;
           text-transform: uppercase;
           color: var(--ink-3);
@@ -170,12 +170,12 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
           margin-left: 0.35rem;
         }
         .path {
-          font: 500 0.68rem/1.5 var(--mono);
+          font: 500 0.868rem/1.5 var(--mono);
           color: var(--ink-3);
           margin-top: 0.25rem;
         }
         .foot {
-          font-size: 0.77rem;
+          font-size: 0.932rem;
           color: var(--ink-3);
           line-height: 1.7;
           margin-top: 1rem;

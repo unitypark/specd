@@ -1,8 +1,52 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { canTransition, isHumanOnlyStatus, type SpecStatus } from '@specd/shared';
 import { get, post } from '@/lib/api';
 import styles from './board.module.css';
+
+/**
+ * Which spec status a board column represents. `backlog` has none — a ticket
+ * with no spec yet cannot be transitioned anywhere.
+ */
+const COLUMN_STATUS: Record<string, SpecStatus | null> = {
+  backlog: null,
+  draft: 'draft',
+  review: 'in_review',
+  approved: 'approved',
+  building: 'building',
+  done: 'delivered',
+};
+
+/**
+ * Whether a card may be dragged into a column, and why not if it may not.
+ *
+ * The important case is `approved`. Dragging is a cheap, easily mistaken
+ * gesture, and approval is the one act this product exists to make deliberate
+ * and attributable — so the gate is closed to drag entirely and stays behind
+ * the explicit button in the drawer. The server would refuse an unattributed
+ * approval anyway; refusing here means the user gets a reason instead of a 403.
+ */
+function dropCheck(card: Card, toColumn: string): { ok: boolean; reason?: string } {
+  const to = COLUMN_STATUS[toColumn];
+  if (!card.spec) return { ok: false, reason: `${card.key} has no spec yet — generate one first.` };
+  if (to === null) return { ok: false, reason: 'A spec cannot go back to the backlog.' };
+  if (to === undefined) return { ok: false, reason: 'Unknown column.' };
+
+  const from = card.spec.status as SpecStatus;
+  if (from === to) return { ok: true };
+
+  if (isHumanOnlyStatus(to)) {
+    return {
+      ok: false,
+      reason: 'Approving is not a drag. Open the spec and stamp it — the approval is recorded against you.',
+    };
+  }
+  if (!canTransition(from, to)) {
+    return { ok: false, reason: `${card.key} cannot move from "${from}" to "${to}".` };
+  }
+  return { ok: true };
+}
 
 interface Card {
   id: string;
@@ -74,6 +118,33 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
   useEffect(() => {
     load().catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed'));
   }, [load]);
+
+  // ─── drag between states ──────────────────────────────────────────────────
+  const [dragging, setDragging] = useState<Card | null>(null);
+  const [hoverCol, setHoverCol] = useState<string | null>(null);
+
+  async function moveCard(card: Card, toColumn: string) {
+    const check = dropCheck(card, toColumn);
+    if (!check.ok) {
+      setError(check.reason ?? 'That move is not allowed.');
+      return;
+    }
+    const to = COLUMN_STATUS[toColumn];
+    if (!to || !card.spec || card.spec.status === to) return;
+
+    setError(null);
+    // Optimistic: the card lands where it was dropped, and snaps back if the
+    // server disagrees. A board that waits for a round-trip feels broken.
+    const previous = cards;
+    setCards((cs) => cs.map((c) => (c.id === card.id ? { ...c, columnKey: toColumn } : c)));
+    try {
+      await post(`/projects/${slug}/board/specs/${card.spec.id}/transition`, { to });
+      await load();
+    } catch (err) {
+      setCards(previous);
+      setError(err instanceof Error ? err.message : 'Could not move that card.');
+    }
+  }
 
   const openCard = useCallback(
     async (ticketId: string) => {
@@ -154,15 +225,53 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
         {columns.map((col) => {
           const colCards = cards.filter((c) => c.columnKey === col.key);
           return (
-            <div key={col.key} className={styles.col}>
+            <div
+              key={col.key}
+              className={`${styles.col} ${
+                hoverCol === col.key
+                  ? dragging && dropCheck(dragging, col.key).ok
+                    ? styles.dropOk
+                    : styles.dropNo
+                  : ''
+              }`}
+              onDragOver={(e) => {
+                if (!dragging) return;
+                // preventDefault is what marks this a valid drop target; without
+                // it the browser refuses the drop and shows a "no entry" cursor.
+                e.preventDefault();
+                e.dataTransfer.dropEffect = dropCheck(dragging, col.key).ok ? 'move' : 'none';
+                setHoverCol(col.key);
+              }}
+              onDragLeave={() => setHoverCol((h) => (h === col.key ? null : h))}
+              onDrop={(e) => {
+                e.preventDefault();
+                setHoverCol(null);
+                if (dragging) void moveCard(dragging, col.key);
+                setDragging(null);
+              }}
+            >
               <h5>
-                {col.name} <span className={styles.count}>{colCards.length}</span>
+                {col.name}
+                <span className={`${styles.count} ${colCards.length === 0 ? styles.zero : ''}`}>
+                  {colCards.length}
+                </span>
               </h5>
               {colCards.map((card) => (
                 <button
                   key={card.id}
                   type="button"
-                  className={styles.card}
+                  className={`${styles.card} ${dragging?.id === card.id ? styles.dragging : ''}`}
+                  draggable={Boolean(card.spec)}
+                  onDragStart={(e) => {
+                    setDragging(card);
+                    e.dataTransfer.effectAllowed = 'move';
+                    // Firefox will not begin a drag unless the event carries data.
+                    e.dataTransfer.setData('text/plain', card.id);
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null);
+                    setHoverCol(null);
+                  }}
                   onClick={() => openCard(card.id)}
                 >
                   <div className={styles.cid}>{card.key}</div>

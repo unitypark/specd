@@ -19,7 +19,7 @@ import { Public, type RequestWithUser } from '../auth/auth.guard.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { TokenClaims } from '../auth/auth.service.js';
 import { ConnectionsService } from '../projects/connections.service.js';
-import { GitHubAppService } from './github-app.service.js';
+import { GitHubAppService, isPubliclyReachable } from './github-app.service.js';
 import { GitHubWebhookService } from './github-webhook.service.js';
 import { GitHubAdapter } from './github.adapter.js';
 import { VcsService } from './vcs.service.js';
@@ -129,26 +129,38 @@ export class GitHubController {
   @Public()
   @Get('app/register')
   register(@Query('org') org: string | undefined, @Res() res: Response) {
-    const manifest = this.app.manifest(
-      this.config.apiPublicUrl,
-      `${this.config.apiPublicUrl}/api/github/webhook`,
-    );
+    const webhookUrl = `${this.config.apiPublicUrl}/api/github/webhook`;
+    const manifest = this.app.manifest(this.config.apiPublicUrl, webhookUrl);
     const action = org
       ? `${this.config.githubBase}/organizations/${encodeURIComponent(org)}/settings/apps/new`
       : `${this.config.githubBase}/settings/apps/new`;
 
+    // Say so rather than let someone discover it when merges are not detected.
+    const noWebhook = !isPubliclyReachable(webhookUrl);
+    const warning = noWebhook
+      ? `<p style="background:#fff5e6;border-left:3px solid #e8a33d;padding:.75rem 1rem">
+           <strong>Registering without a webhook.</strong> GitHub cannot deliver to
+           <code>${escapeHtml(webhookUrl)}</code> — it is not reachable from the public internet, and
+           GitHub rejects a manifest that says otherwise. The App will work for branches and PRs;
+           merges will not be detected until you give it a public URL. Point
+           <code>API_PUBLIC_URL</code> at a tunnel and re-register, or add the webhook URL later in
+           the App's settings. See <code>docs/github-app.md</code>.
+         </p>`
+      : '';
+
     res.type('html').send(`<!doctype html>
 <meta charset="utf-8">
 <title>Register the specd GitHub App</title>
-<body style="font-family:system-ui;margin:3rem auto;max-width:34rem">
+<body style="font-family:system-ui;margin:3rem auto;max-width:38rem;line-height:1.5">
   <h1>Registering the specd GitHub App…</h1>
   <p>GitHub will ask you to confirm. Permissions requested:
      <code>contents:write</code>, <code>pull_requests:write</code>, <code>metadata:read</code>.</p>
+  ${warning}
   <form id="f" method="post" action="${action}">
     <input type="hidden" name="manifest" value="${escapeHtml(JSON.stringify(manifest))}">
     <button type="submit">Continue to GitHub</button>
   </form>
-  <script>document.getElementById('f').submit()</script>
+  ${noWebhook ? '' : "<script>document.getElementById('f').submit()</script>"}
 </body>`);
   }
 
@@ -178,10 +190,18 @@ export class GitHubController {
     const app = (await response.json()) as {
       id: number;
       slug: string;
-      pem: string;
-      webhook_secret: string;
+      pem?: string;
+      webhook_secret?: string | null;
       html_url: string;
     };
+
+    // Registering without a webhook (a localhost deployment) means GitHub has
+    // no secret to hand back. Printing `undefined` into someone's .env would
+    // be worse than useless: an unset secret rejects every delivery, and they
+    // would be hunting a value that was never real.
+    const secretLine = app.webhook_secret
+      ? `GITHUB_WEBHOOK_SECRET=${app.webhook_secret}`
+      : '# GITHUB_WEBHOOK_SECRET=  ← no webhook was configured; see the note below';
 
     res.type('html').send(`<!doctype html>
 <meta charset="utf-8">
@@ -192,9 +212,19 @@ export class GitHubController {
   <pre style="background:#111;color:#eee;padding:1rem;border-radius:.5rem;overflow-x:auto">${escapeHtml(
     `GITHUB_APP_ID=${app.id}
 GITHUB_APP_SLUG=${app.slug}
-GITHUB_WEBHOOK_SECRET=${app.webhook_secret}
-GITHUB_APP_PRIVATE_KEY="${app.pem.replace(/\n/g, '\\n')}"`,
+${secretLine}
+GITHUB_APP_PRIVATE_KEY="${(app.pem ?? '').replace(/\n/g, '\\n')}"`,
   )}</pre>
+  ${
+    app.webhook_secret
+      ? ''
+      : `<p style="background:#fff5e6;border-left:3px solid #e8a33d;padding:.75rem 1rem">
+           <strong>No webhook was configured</strong>, because GitHub could not reach this API.
+           Branches and PRs work; merges will not be detected. When you have a public URL, add it
+           under the App's <em>Settings → Webhook</em>, generate a secret there, and put that secret
+           in <code>GITHUB_WEBHOOK_SECRET</code>.
+         </p>`
+  }
   <p>Then <a href="${escapeHtml(app.html_url)}/installations/new">install it on your repositories</a>.</p>
   <p style="color:#666">specd stores no part of this. The private key lives in your deployment's
      secret store; installation tokens are minted per run and never written down.</p>

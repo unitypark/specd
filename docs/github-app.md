@@ -30,7 +30,11 @@ Events it subscribes to:
 |---|---|
 | `pull_request` (merged) | Setup branch → mark adopted and index `knowledge/`. Spec branch → mark the spec delivered and re-index. |
 | `push` to the default branch | Re-index if `knowledge/` changed. |
-| `installation`, `installation_repositories` | Track revocation, so a removed App stops working immediately. |
+
+It also handles `installation` and `installation_repositories`, which track
+revocation so a removed App stops working immediately. Those are **not**
+subscribed to and must not appear in the manifest — GitHub delivers them to
+every App automatically and rejects a manifest that lists them.
 
 Everything else is recorded and ignored.
 
@@ -47,7 +51,14 @@ http://localhost:4000/api/github/app/register
 ```
 
 Add `?org=your-org` to create it under an organization instead of your personal
-account. The page hands GitHub a manifest with the permissions above and
+account.
+
+**GitHub will not accept a webhook URL it cannot reach.** If `API_PUBLIC_URL`
+points at localhost or a private address, specd registers the App *without* a
+webhook and says so on the page — branches and PRs work, merges are not
+detected. To get webhooks from the start, set up a tunnel first (below), point
+`API_PUBLIC_URL` at it, restart, and then register. You can also add the URL
+later under the App's Settings → Webhook. The page hands GitHub a manifest with the permissions above and
 redirects back with the credentials, which are shown **once**:
 
 ```
@@ -63,9 +74,69 @@ minted per run and never written down.
 
 ### By hand
 
-Settings → Developer settings → GitHub Apps → New GitHub App. Set the webhook
-URL to `<your API>/api/github/webhook`, generate a webhook secret and a private
-key, and grant the three permissions and four events listed above.
+Use this if the manifest flow fails for any reason. It is the same App, typed
+in rather than generated.
+
+**1. Open the form.** <https://github.com/settings/apps/new>
+(for an organization: `https://github.com/organizations/<org>/settings/apps/new`)
+
+**2. Fill in the top section.**
+
+| Field | Value |
+|---|---|
+| GitHub App name | `specd-<your-handle>` — it must be **globally unique**, so plain `specd` is likely taken |
+| Homepage URL | `http://localhost:4000` — any URL is accepted here; it is only a link |
+| Description | Optional |
+
+**3. Webhook — this is the step that matters.**
+
+- Running on localhost: **untick `Active`**. GitHub validates the URL and
+  refuses anything it cannot reach, so leaving it ticked with a localhost URL
+  is what makes the form fail. Local webhook delivery is handled separately
+  (see *Webhooks in local development* below).
+- Running somewhere public: leave `Active` ticked, set **Webhook URL** to
+  `<your API>/api/github/webhook`, and set a **Webhook secret** to any long
+  random string — the same value goes in `GITHUB_WEBHOOK_SECRET`. Generate one
+  with `openssl rand -hex 32`.
+
+**4. Permissions.** Under **Repository permissions** set exactly these two:
+
+| Permission | Access |
+|---|---|
+| Contents | Read and write |
+| Pull requests | Read and write |
+
+`Metadata: Read-only` is selected for you and cannot be removed. Leave every
+other permission at *No access* — organization and account permissions included.
+
+**5. Subscribe to events.** If you ticked `Active`, select **Push** and
+**Pull request**. If you unticked it, this section does nothing and can be
+skipped. Do not look for `installation` or `installation_repositories` — they
+are not listed, because every App receives them automatically.
+
+**6. Where can this GitHub App be installed?** *Only on this account.*
+
+**7. Click *Create GitHub App*.**
+
+**8. Collect the credentials** from the App's **General** tab:
+
+- **App ID** — a number near the top → `GITHUB_APP_ID`
+- **App slug** — the last path segment of the page URL → `GITHUB_APP_SLUG`
+- **Private key** — scroll to *Private keys* → *Generate a private key*. A
+  `.pem` downloads. It is shown once.
+
+**9. Put the key in `.env`.** It is multi-line, so it needs escaping:
+
+```bash
+# from the repo root, pointing at wherever the .pem landed
+node -e 'const fs=require("fs");
+  const pem=fs.readFileSync(process.argv[1],"utf8").trim();
+  console.log(`GITHUB_APP_PRIVATE_KEY="${pem.replace(/\n/g,"\\n")}"`)' \
+  ~/Downloads/*.private-key.pem
+```
+
+Paste the printed line into `.env`, then restart the API. It logs the App id at
+boot, and `GET /api/github/status` confirms what it thinks it has.
 
 ### Install it
 
@@ -100,9 +171,16 @@ ngrok http 4000
 cloudflared tunnel --url http://localhost:4000
 ```
 
-`gh webhook forward` re-signs deliveries with its own secret and prints it —
-put **that** value in `GITHUB_WEBHOOK_SECRET` while you are using it, or every
-delivery fails the signature check.
+Two things to know about the choice:
+
+- `gh webhook forward` creates a **repository** webhook, not the App's. It
+  re-signs deliveries with its own secret and prints it — put **that** value in
+  `GITHUB_WEBHOOK_SECRET` while you are using it, or every delivery fails the
+  signature check. You get `push` and `pull_request`, which is enough to
+  exercise merge → re-index, but not installation events.
+- A tunnel gives you the App's real deliveries, signed with the App's own
+  secret. A quick tunnel's hostname changes on every restart, so the App's
+  webhook URL has to be updated each time.
 
 Without any of this, nothing breaks: merges simply are not detected, and the
 "I merged it" button remains the way to record adoption.

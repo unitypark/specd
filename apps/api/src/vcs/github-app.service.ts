@@ -139,10 +139,9 @@ export class GitHubAppService {
    * granting access to code beyond the repositories the customer picks.
    */
   manifest(publicUrl: string, webhookUrl: string): Record<string, unknown> {
-    return {
+    const manifest: Record<string, unknown> = {
       name: 'specd',
       url: publicUrl,
-      hook_attributes: { url: webhookUrl, active: true },
       redirect_url: `${publicUrl}/api/github/app/created`,
       public: false,
       default_permissions: {
@@ -150,7 +149,53 @@ export class GitHubAppService {
         pull_requests: 'write',
         metadata: 'read',
       },
-      default_events: ['push', 'pull_request', 'installation', 'installation_repositories'],
+      // Only events an App can actually subscribe to. `installation` and
+      // `installation_repositories` are delivered to every App automatically
+      // and GitHub rejects a manifest that lists them — they are not
+      // subscribable, they are unconditional.
+      default_events: ['push', 'pull_request'],
     };
+
+    // GitHub refuses a webhook URL it cannot reach from the public internet,
+    // so a localhost deployment registers without one and adds it later. The
+    // alternative — failing registration outright — would make the App
+    // unregisterable from a laptop, which is where it gets set up.
+    if (isPubliclyReachable(webhookUrl)) {
+      manifest.hook_attributes = { url: webhookUrl, active: true };
+    }
+
+    return manifest;
   }
+}
+
+/**
+ * Could GitHub reach this URL? Loopback, private ranges and made-up TLDs
+ * cannot be delivered to, and GitHub rejects a manifest that claims otherwise.
+ */
+export function isPubliclyReachable(rawUrl: string): boolean {
+  let host: string;
+  try {
+    host = new URL(rawUrl).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  } catch {
+    return false;
+  }
+
+  if (host === 'localhost' || host === '0.0.0.0' || host === '::1') return false;
+  if (/(^|\.)(local|internal|test|localhost|home|lan)$/.test(host)) return false;
+
+  // IPv4 loopback, private and link-local ranges.
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 127 || a === 10 || a === 0) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 169 && b === 254) return false;
+  }
+
+  // IPv6 unique-local (fc00::/7) and link-local (fe80::/10).
+  if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) return false;
+
+  // A bare hostname with no dot is not resolvable from outside.
+  return host.includes('.') || host.includes(':');
 }

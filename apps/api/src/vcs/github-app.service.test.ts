@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createLocalJWKSet, decodeJwt, decodeProtectedHeader, exportJWK, jwtVerify } from 'jose';
-import { GitHubAppService } from './github-app.service.js';
+import { GitHubAppService, isPubliclyReachable } from './github-app.service.js';
 import type { Config } from '../config.js';
 
 /**
@@ -114,7 +114,8 @@ describe('configuration reporting', () => {
 });
 
 describe('manifest', () => {
-  const manifest = () => service().manifest('https://specd.example.com', 'https://specd.example.com/api/github/webhook');
+  const manifest = () =>
+    service().manifest('https://specd.example.com', 'https://specd.example.com/api/github/webhook');
 
   it('requests only the permissions the pipeline uses', () => {
     // The answer to "you want write access to our repos?" is: contents and
@@ -134,13 +135,11 @@ describe('manifest', () => {
     }
   });
 
-  it('subscribes to the events the pipeline actually handles', () => {
-    expect(manifest().default_events).toEqual([
-      'push',
-      'pull_request',
-      'installation',
-      'installation_repositories',
-    ]);
+  it('subscribes only to events an App is allowed to subscribe to', () => {
+    // GitHub rejects the whole manifest if it lists `installation` or
+    // `installation_repositories`: every App receives those automatically, so
+    // asking for them is an error rather than a redundancy.
+    expect(manifest().default_events).toEqual(['push', 'pull_request']);
   });
 
   it('points the webhook at the receiving endpoint and enables it', () => {
@@ -150,8 +149,54 @@ describe('manifest', () => {
     });
   });
 
+  it('omits the webhook entirely when GitHub could not reach it', () => {
+    // GitHub refuses a manifest whose hook url is not publicly reachable, so a
+    // localhost deployment must register without one — otherwise the App
+    // cannot be registered from a laptop, which is where it gets set up.
+    const local = service().manifest(
+      'http://localhost:4000',
+      'http://localhost:4000/api/github/webhook',
+    );
+    expect(local.hook_attributes).toBeUndefined();
+    expect(local.default_permissions).toBeDefined();
+  });
+
   it('is private by default', () => {
     // A public App can be installed by strangers. Nothing about specd wants that.
     expect(manifest().public).toBe(false);
+  });
+});
+
+describe('isPubliclyReachable', () => {
+  it('rejects everything GitHub cannot deliver to', () => {
+    for (const url of [
+      'http://localhost:4000/api/github/webhook',
+      'http://127.0.0.1:4000/hook',
+      'http://0.0.0.0:4000/hook',
+      'http://[::1]:4000/hook',
+      'http://192.168.1.50/hook',
+      'http://10.0.0.4/hook',
+      'http://172.16.0.9/hook',
+      'http://172.31.255.1/hook',
+      'http://169.254.10.1/hook',
+      'http://specd.local/hook',
+      'http://my-laptop.internal/hook',
+      'http://devbox/hook',
+      'not a url',
+    ]) {
+      expect(isPubliclyReachable(url), `${url} must be treated as unreachable`).toBe(false);
+    }
+  });
+
+  it('accepts real public hosts', () => {
+    for (const url of [
+      'https://specd.example.com/api/github/webhook',
+      'https://long-name-1234.trycloudflare.com/api/github/webhook',
+      'https://a1b2c3.ngrok-free.app/hook',
+      'http://203.0.113.7/hook',
+      'http://172.32.0.1/hook',
+    ]) {
+      expect(isPubliclyReachable(url), `${url} must be treated as reachable`).toBe(true);
+    }
   });
 });

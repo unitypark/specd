@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { AiMode } from '@specd/shared';
 import {
   asBuiltPath,
   citationRef,
@@ -9,9 +10,10 @@ import {
   type RetrievedChunk,
   type SpecContent,
   type SpecDraftResult,
+  type EarsCriterion,
 } from '@specd/shared';
 import { KnowledgeService } from '../knowledge/knowledge.service.js';
-import { AnthropicService } from './anthropic.service.js';
+import { ModelRouter } from './model.router.js';
 import type { RunHandle } from '../runs/runs.service.js';
 
 const SPEC_SCHEMA = {
@@ -112,7 +114,7 @@ const SPEC_SCHEMA = {
 export class SpecAgent {
   constructor(
     private readonly knowledge: KnowledgeService,
-    private readonly anthropic: AnthropicService,
+    private readonly models: ModelRouter,
   ) {}
 
   async draft(input: {
@@ -125,6 +127,7 @@ export class SpecAgent {
     primaryRepo: string;
     apiKey: string | null;
     model: ModelId;
+    mode: AiMode;
     run: RunHandle;
     /** Review discussion, when re-drafting. v2 consumes the threads (§8). */
     revisionNotes?: string[];
@@ -143,7 +146,7 @@ export class SpecAgent {
           : ' — nothing indexed yet, the design will be mostly UNVERIFIED'),
     );
 
-    if (!input.apiKey) {
+    if (input.mode !== 'subscription_runner' && !input.apiKey) {
       throw new Error(
         'No Anthropic API key available for this project — cannot draft a spec. ' +
           'Add one in Settings → AI.',
@@ -151,8 +154,8 @@ export class SpecAgent {
     }
 
     const slug = slugify(input.title);
-    const result = await this.anthropic.call<SpecContent>({
-      apiKey: input.apiKey,
+    const result = await this.models.call<SpecContent>(input.mode, {
+      apiKey: input.apiKey ?? '',
       model: input.model,
       maxTokens: 32_000,
       effort: 'high',
@@ -168,7 +171,15 @@ export class SpecAgent {
       },
     });
 
-    await run.meter(result.model, result.usage);
+    if (result.model !== input.model) {
+      // Say so rather than quietly recording a different model than the
+      // project asked for — entitlement or provider routing can differ.
+      await run.log(
+        `requested ${input.model} but the provider served ${result.model}`,
+        'warn',
+      );
+    }
+    await run.meter(result.model, result.usage, result.billable);
 
     const content = normalizeSpecContent(result.parsed, {
       ticketKey: input.ticketKey,
@@ -242,12 +253,44 @@ export function normalizeSpecContent(
   }
 
   return {
-    requirements: parsed.requirements,
+    requirements: parsed.requirements.map((req) => ({
+      story: req.story,
+      criteria: req.criteria.map(normalizeCriterion),
+    })),
     design,
     tasks: tasks.map((t, i) => (i === tasks.length - 1 ? { ...t, asBuilt: true } : t)),
     outOfScope: parsed.outOfScope ?? [],
     openQuestions: parsed.openQuestions ?? [],
   };
+}
+
+/**
+ * EARS criteria are rendered as "<KEYWORD> <trigger> THE SYSTEM SHALL
+ * <response>", so the renderer supplies the connective. Models routinely
+ * include it in `response` anyway, which produces "THE SYSTEM SHALL THE SYSTEM
+ * SHALL …" in the spec a coding agent is handed. Strip it here rather than
+ * relying on the prompt to hold.
+ */
+function normalizeCriterion(criterion: EarsCriterion): EarsCriterion {
+  const trigger = criterion.trigger.trim().replace(/[,\s]+$/, '');
+
+  const response = criterion.response
+    .trim()
+    // "THE SYSTEM SHALL", "the system shall", and the bare "SHALL" variant.
+    .replace(/^(?:the\s+system\s+)?shall\s+/i, '')
+    .trim();
+
+  return {
+    keyword: criterion.keyword,
+    trigger: stripLeadingKeyword(trigger, criterion.keyword),
+    response,
+  };
+}
+
+/** Models sometimes repeat the keyword inside the trigger too. */
+function stripLeadingKeyword(trigger: string, keyword: string): string {
+  const pattern = new RegExp(`^${keyword}\\s+`, 'i');
+  return trigger.replace(pattern, '').trim();
 }
 
 function buildSystemPrompt(input: {

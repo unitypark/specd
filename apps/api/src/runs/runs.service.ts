@@ -18,7 +18,8 @@ import { ProjectsService } from '../projects/projects.service.js';
 export interface RunHandle {
   id: string;
   log: (message: string, level?: 'info' | 'warn' | 'error') => Promise<void>;
-  meter: (model: ModelId, usage: TokenUsage) => Promise<void>;
+  /** `billable: false` records tokens but no cost (subscription mode, D2). */
+  meter: (model: ModelId, usage: TokenUsage, billable?: boolean) => Promise<void>;
 }
 
 /**
@@ -93,8 +94,10 @@ export class RunsService {
       this.bus.emit(runId, line);
     };
 
-    const meter = async (model: ModelId, usage: TokenUsage) => {
-      const cents = costEurCents(model, usage, this.config.usdToEur);
+    const meter = async (model: ModelId, usage: TokenUsage, billable = true) => {
+      // Subscription runs consume quota, not euros — metering an API list
+      // price would show money the user was never charged.
+      const cents = billable ? costEurCents(model, usage, this.config.usdToEur) : 0;
       await this.db
         .update(agentRuns)
         .set({

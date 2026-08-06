@@ -26,6 +26,8 @@ import { RunsService } from './runs/runs.service.js';
 import { RunsController } from './runs/runs.controller.js';
 
 import { AnthropicService } from './agents/anthropic.service.js';
+import { ClaudeCodeProvider } from './agents/claude-code.provider.js';
+import { ModelRouter } from './agents/model.router.js';
 import { OnboardingAgent } from './agents/onboarding.agent.js';
 import { SpecAgent } from './agents/spec.agent.js';
 import { PipelineService } from './agents/pipeline.service.js';
@@ -61,6 +63,8 @@ import { CliController } from './cli/cli.controller.js';
     SpecsService,
     RunsService,
     AnthropicService,
+    ClaudeCodeProvider,
+    ModelRouter,
     OnboardingAgent,
     SpecAgent,
     PipelineService,

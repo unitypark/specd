@@ -11,4 +11,5 @@ export interface ProjectSummary {
   spendCents: number;
   spendCapCents: number;
   knowledgeHealth: number;
+  defaultModel: string;
 }

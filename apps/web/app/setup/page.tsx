@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { get, post } from '@/lib/api';
 import { AppShell } from '@/components/AppShell';
@@ -73,12 +73,22 @@ export default function SetupWizard() {
   const [model, setModel] = useState('claude-opus-5');
   const [capEuros, setCapEuros] = useState('100');
   const [keyCheck, setKeyCheck] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [aiModes, setAiModes] = useState<Record<string, { ok: boolean; detail: string }> | null>(null);
 
   // step 4
   const [tracker, setTracker] = useState<'board' | 'jira' | null>(null);
 
   // step 5
   const [onboardResults, setOnboardResults] = useState<OnboardResult[] | null>(null);
+
+  // Ask the server what this machine can actually do before offering it.
+  // Subscription mode only works where specd runs beside Claude Code (D2).
+  useEffect(() => {
+    if (step !== 3 || aiModes) return;
+    get<Record<string, { ok: boolean; detail: string }>>('/projects/ai-modes')
+      .then(setAiModes)
+      .catch(() => undefined);
+  }, [step, aiModes]);
 
   function fail(err: unknown) {
     setError(err instanceof Error ? err.message : String(err));
@@ -432,11 +442,22 @@ export default function SetupWizard() {
                 </button>
                 <button
                   type="button"
-                  className={`${styles.choice} ${aiMode === 'subscription_runner' ? styles.picked : ''}`}
+                  className={`${styles.choice} ${aiMode === 'subscription_runner' ? styles.picked : ''} ${
+                    aiModes && !aiModes.subscription_runner?.ok ? styles.soon : ''
+                  }`}
                   onClick={() => setAiMode('subscription_runner')}
+                  disabled={Boolean(aiModes && !aiModes.subscription_runner?.ok)}
                 >
-                  <h5>💻 Your subscription, your runner</h5>
-                  <p>Run the self-hosted runner where your Claude Code lives — credentials never touch our cloud.</p>
+                  <h5>💻 Your Claude subscription</h5>
+                  <p>
+                    Drives the Claude Code already signed in on this machine. specd never sees or
+                    stores a subscription credential.
+                  </p>
+                  {aiModes?.subscription_runner && (
+                    <span className={styles.badge}>
+                      {aiModes.subscription_runner.ok ? 'available here ✓' : 'claude not on PATH'}
+                    </span>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -467,9 +488,14 @@ export default function SetupWizard() {
               )}
 
               {aiMode === 'subscription_runner' && (
-                <div className="mutedbox">
-                  docker run -d specd/runner --pair XK4-9TR{'\n'}# Runner pairing lands in P2. The
-                  platform never holds subscription credentials — that is the whole point.
+                <div className={styles.info}>
+                  {aiModes?.subscription_runner?.detail ??
+                    'Checking whether Claude Code is available on this machine…'}
+                  <p style={{ margin: '.6rem 0 0', fontSize: '.74rem' }}>
+                    Runs consume your subscription quota, so they are <b>not</b> metered in euros —
+                    tokens are still recorded on every run. This mode only exists because specd is
+                    running on your machine; a hosted specd could not offer it.
+                  </p>
                 </div>
               )}
 

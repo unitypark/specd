@@ -100,10 +100,13 @@ export class ConnectionsService {
    */
   async resolveAi(projectId: string, projectDefaultModel: string): Promise<ResolvedAiCredential> {
     const conn = await this.get(projectId, 'ai');
-    const settings = (conn?.settings ?? {}) as { mode?: AiMode; model?: string };
+    const settings = (conn?.settings ?? {}) as { mode?: AiMode };
     const mode: AiMode = settings.mode ?? 'managed_cloud';
-    const model =
-      settings.model && isModelId(settings.model) ? settings.model : projectDefaultModel;
+
+    // The project owns the model choice — single source of truth. It used to
+    // be mirrored onto the connection too, which meant changing it in settings
+    // was silently ignored because the stale connection copy won.
+    const model = isModelId(projectDefaultModel) ? projectDefaultModel : 'claude-opus-5';
 
     if (mode === 'subscription_runner') {
       // By construction there is nothing to resolve here — the work happens on

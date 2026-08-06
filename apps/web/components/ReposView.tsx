@@ -68,7 +68,16 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                 {r.setupState === 'merged' ? (
                   <span className="pill on">merged ✓</span>
                 ) : r.setupBranch ? (
-                  <span className="pill warn">on {r.setupBranch}</span>
+                  <span
+                    className="pill warn"
+                    title={
+                      r.provider === 'github'
+                        ? 'specd is watching for the merge — the webhook records it and re-indexes'
+                        : 'Local repositories have no webhook, so tell specd once you have merged'
+                    }
+                  >
+                    on {r.setupBranch}
+                  </span>
                 ) : (
                   <span className="pill">not run</span>
                 )}
@@ -81,7 +90,14 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                 )}
               </td>
               <td className="right">
-                {r.setupBranch && r.setupState !== 'merged' && (
+                {/*
+                  GitHub repos need no button: the webhook sees the merge and
+                  records it. Asking for a click as well would be asking someone
+                  to confirm something specd already knows — and letting them
+                  claim a merge that never happened. Local repos have no
+                  webhook, so there the button is the only signal available.
+                */}
+                {r.setupBranch && r.setupState !== 'merged' && r.provider === 'local' && (
                   <button
                     type="button"
                     className="btn sm"
@@ -89,7 +105,7 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                     onClick={() =>
                       act(r.id, () => post(`/projects/${slug}/repositories/${r.id}/setup-merged`))
                     }
-                    title="Record that you merged the setup branch — adoption is a merge, not a click here"
+                    title="Local repositories have no webhook — tell specd once you have merged the setup branch"
                   >
                     I merged it
                   </button>

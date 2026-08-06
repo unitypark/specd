@@ -1,15 +1,32 @@
-import { rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import { simpleGit } from 'simple-git';
 import type { Repository } from '@specd/db';
+import { Config } from '../config.js';
+import { GitHubAdapter } from './github.adapter.js';
+import { VcsService } from './vcs.service.js';
 import { VcsError } from './vcs.types.js';
+
+export interface PublishResult {
+  url: string | null;
+  reviewHint: string;
+}
 
 export interface Workspace {
   /** Absolute path the build agent may edit. */
   dir: string;
   branch: string;
   baseBranch: string;
+  /**
+   * Make the branch reviewable where the team actually reviews.
+   *
+   * Local mode has nothing to do — the branch is already in the repository the
+   * user pointed at. Hosted providers push it and open a PR, because a branch
+   * in a temporary clone that is about to be deleted is not a deliverable.
+   */
+  publish: (pr: { title: string; body: string }) => Promise<PublishResult>;
   /** Removes the workspace. The branch it produced survives. */
   dispose: () => Promise<void>;
 }
@@ -19,24 +36,37 @@ export interface Workspace {
  *
  * A build agent edits real files, so it must never do that in the user's
  * working tree — an interrupted run would leave them with a dirty checkout on
- * an unexpected branch. A git worktree gives the agent its own directory on
- * its own branch, sharing the object store, and throwing it away afterwards
- * costs nothing.
+ * an unexpected branch. Local repositories get a git worktree: its own
+ * directory on its own branch, sharing the object store, free to throw away.
+ * Hosted repositories get a shallow clone in a scratch directory, made with a
+ * token that expires within the hour.
  */
 @Injectable()
 export class WorkspaceService {
   private readonly logger = new Logger(WorkspaceService.name);
 
+  constructor(
+    private readonly vcs: VcsService,
+    private readonly config: Config,
+  ) {}
+
   async create(repo: Repository, branch: string): Promise<Workspace> {
-    if (repo.provider !== 'local') {
-      // The build station needs a checkout it can edit. For hosted providers
-      // that means cloning with a scoped token, which arrives with the GitHub
-      // App integration — say so rather than half-doing it.
-      throw new VcsError(
-        `Hosted builds currently run on local repositories only. "${repo.name}" is a ` +
-          `${repo.provider} repository; use \`specd spec pull\` to hand the spec to your own agent.`,
-      );
+    switch (repo.provider) {
+      case 'local':
+        return this.createLocal(repo, branch);
+      case 'github':
+        return this.createGitHub(repo, branch);
+      default:
+        throw new VcsError(
+          `Hosted builds do not support ${repo.provider} repositories yet. Use ` +
+            '`specd spec pull` to hand the approved spec to your own agent.',
+        );
     }
+  }
+
+  // ─── local: a worktree beside the repository ───────────────────────────────
+
+  private async createLocal(repo: Repository, branch: string): Promise<Workspace> {
     if (!repo.localPath) throw new VcsError(`Repository "${repo.name}" has no local path`);
 
     const root = resolve(repo.localPath);
@@ -69,10 +99,121 @@ export class WorkspaceService {
       dir,
       branch,
       baseBranch,
+      publish: async () => ({
+        url: null,
+        reviewHint:
+          `Branch ${branch} is in ${root}. Review with \`git diff ${baseBranch}..${branch}\` ` +
+          'and merge when you are happy — merging is adopting.',
+      }),
       dispose: async () => {
         await this.forceRemove(root, dir);
       },
     };
+  }
+
+  // ─── github: a shallow clone with a short-lived token ──────────────────────
+
+  private async createGitHub(repo: Repository, branch: string): Promise<Workspace> {
+    if (!repo.name.includes('/')) {
+      throw new VcsError(`GitHub repository name must be "owner/repo", got "${repo.name}"`);
+    }
+
+    const token = await this.vcs.githubToken(repo.projectId);
+    const dir = await mkdtemp(join(this.config.buildRoot, 'specd-build-'));
+    const cloneUrl = `${this.config.githubCloneBase}/${repo.name}.git`;
+
+    try {
+      // The token travels as a per-invocation header, never written into
+      // .git/config. `git -c` before the subcommand configures *this* process
+      // only; `git clone -c` would persist it into the new repository, leaving
+      // a live credential on disk for as long as the workspace exists.
+      await simpleGit().raw([
+        ...this.authArgs(token),
+        'clone',
+        '--depth',
+        '1',
+        '--branch',
+        repo.defaultBranch,
+        '--no-tags',
+        cloneUrl,
+        dir,
+      ]);
+    } catch (err) {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      throw new VcsError(
+        `Could not clone ${repo.name}. Check the App is installed on it and that ` +
+          `"${repo.defaultBranch}" is its default branch.`,
+        err,
+      );
+    }
+
+    const git = simpleGit({ baseDir: dir });
+    const baseBranch = repo.defaultBranch;
+
+    await git.addConfig('user.name', 'specd build');
+    await git.addConfig('user.email', 'bot@specd.dev');
+    await git.checkoutLocalBranch(branch);
+
+    this.logger.log(`workspace ${dir} on ${branch} (clone of ${repo.name}@${baseBranch})`);
+
+    return {
+      dir,
+      branch,
+      baseBranch,
+      publish: async (pr) => {
+        // Push first, and treat it as the point of no return. Everything the
+        // build produced lives only in this clone until now, and the clone is
+        // deleted moments later — if the push fails there is nothing to salvage
+        // and the run must say so.
+        // Force-push: a re-run of the same spec replaces its branch rather than
+        // failing on a non-fast-forward. The branch belongs to this spec.
+        await git.raw([...this.authArgs(token), 'push', '--force', cloneUrl, `HEAD:${branch}`]);
+
+        const adapter = new GitHubAdapter(token, this.config.githubApiBase);
+        try {
+          const opened = await adapter.openPullRequest(repo.name, {
+            branch,
+            base: baseBranch,
+            title: pr.title,
+            body: pr.body,
+          });
+
+          return {
+            url: opened.url,
+            reviewHint: opened.existing
+              ? `Updated PR #${opened.number} on ${repo.name}. Merging is adopting.`
+              : `Opened PR #${opened.number} on ${repo.name}. Merging is adopting.`,
+          };
+        } catch (err) {
+          // The branch is safely pushed; only the review surface is missing.
+          // Failing the whole build here would throw away work that survived,
+          // over something the reviewer can do in one click.
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`pushed ${branch} but could not open a PR: ${message}`);
+          return {
+            url: `${this.config.githubBase}/${repo.name}/compare/${encodeURIComponent(
+              baseBranch,
+            )}...${encodeURIComponent(branch)}?expand=1`,
+            reviewHint:
+              `Pushed ${branch}, but opening the PR failed (${message.slice(0, 120)}). ` +
+              'The work is safe on the branch — open the PR from the compare link.',
+          };
+        }
+      },
+      dispose: async () => {
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      },
+    };
+  }
+
+  /**
+   * Authenticate a single git invocation without persisting the credential.
+   * Same mechanism GitHub Actions uses, minus the part where it writes the
+   * header into the repository's config and leaves it there.
+   */
+  private authArgs(token: string): string[] {
+    const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+    return ['-c', `http.extraheader=AUTHORIZATION: basic ${basic}`];
   }
 
   private async forceRemove(root: string, dir: string): Promise<void> {
@@ -114,3 +255,6 @@ export class WorkspaceService {
     }
   }
 }
+
+/** Default scratch root for hosted clones. */
+export const DEFAULT_BUILD_ROOT = tmpdir();

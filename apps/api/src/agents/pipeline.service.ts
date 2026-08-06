@@ -308,6 +308,12 @@ export class PipelineService {
     projectId: string;
     repositoryIds?: string[];
     actor: { userId: string; name: string } | null;
+    /**
+     * Who to credit when there is no signed-in user — "github webhook
+     * (merged by alice)" rather than a blanket "scheduler". An automated
+     * trigger is not a person, and the run log should not imply one.
+     */
+    triggeredByName?: string;
   }) {
     const repos = input.repositoryIds?.length
       ? await Promise.all(
@@ -319,7 +325,7 @@ export class PipelineService {
       projectId: input.projectId,
       kind: 'index',
       triggeredByUserId: input.actor?.userId ?? null,
-      triggeredByName: input.actor?.name ?? 'scheduler',
+      triggeredByName: input.actor?.name ?? input.triggeredByName ?? 'scheduler',
     });
 
     let indexed = 0;

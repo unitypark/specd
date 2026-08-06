@@ -14,6 +14,9 @@ import { ConnectionsService } from './projects/connections.service.js';
 
 import { LocalGitAdapter } from './vcs/local-git.adapter.js';
 import { VcsService } from './vcs/vcs.service.js';
+import { GitHubAppService } from './vcs/github-app.service.js';
+import { GitHubWebhookService } from './vcs/github-webhook.service.js';
+import { GitHubController } from './vcs/github.controller.js';
 
 import { EmbeddingService } from './knowledge/embeddings.js';
 import { KnowledgeService } from './knowledge/knowledge.service.js';
@@ -50,6 +53,7 @@ import { CliController } from './cli/cli.controller.js';
     BoardController,
     RunsController,
     CliController,
+    GitHubController,
   ],
   providers: [
     Config,
@@ -59,6 +63,8 @@ import { CliController } from './cli/cli.controller.js';
     ConnectionsService,
     LocalGitAdapter,
     VcsService,
+    GitHubAppService,
+    GitHubWebhookService,
     EmbeddingService,
     KnowledgeService,
     BoardService,

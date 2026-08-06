@@ -419,12 +419,30 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                       >
                         ⧉ specd spec pull {spec.ticketKey}
                       </button>
+                      {/* Station 05, handoff mode (a): the hosted runner
+                          implements the tasks and leaves a branch to review. */}
+                      <button
+                        type="button"
+                        className="btn primary"
+                        disabled={busy === 'build'}
+                        onClick={() =>
+                          act('build', () => post(`/projects/${slug}/board/specs/${spec.id}/build`))
+                        }
+                      >
+                        {busy === 'build' ? (
+                          <>
+                            <span className="spinner" /> Building…
+                          </>
+                        ) : (
+                          '▶ Build it'
+                        )}
+                      </button>
                       <button
                         type="button"
                         className="btn"
-                        disabled={busy === 'build'}
+                        disabled={busy === 'building'}
                         onClick={() =>
-                          act('build', () =>
+                          act('building', () =>
                             post(`/projects/${slug}/board/specs/${spec.id}/transition`, {
                               to: 'building',
                             }),

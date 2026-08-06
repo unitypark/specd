@@ -3,6 +3,7 @@ import {
   SchemaMismatch,
   extractJson,
   parseAgainstSchema,
+  repairControlCharacters,
   schemaInstruction,
 } from './claude-code.parse.js';
 
@@ -112,6 +113,48 @@ describe('parseAgainstSchema', () => {
       a: 'x',
       b: 1,
     });
+  });
+});
+
+describe('repairControlCharacters', () => {
+  it('escapes a raw newline inside a string — the failure actually seen', () => {
+    const broken = '{"doc":"## Title\nbody text"}';
+    expect(() => JSON.parse(broken)).toThrow();
+    const parsed = JSON.parse(repairControlCharacters(broken)) as { doc: string };
+    expect(parsed.doc).toBe('## Title\nbody text');
+  });
+
+  it('escapes tabs and carriage returns too', () => {
+    const parsed = JSON.parse(repairControlCharacters('{"a":"x\ty\r\nz"}')) as { a: string };
+    expect(parsed.a).toBe('x\ty\r\nz');
+  });
+
+  it('leaves already-valid JSON byte-identical', () => {
+    const valid = JSON.stringify({ doc: '## Title\nbody', n: 1, arr: [1, 2] });
+    expect(repairControlCharacters(valid)).toBe(valid);
+  });
+
+  it('does not touch newlines between tokens, only inside strings', () => {
+    const pretty = '{\n  "a": 1,\n  "b": 2\n}';
+    expect(repairControlCharacters(pretty)).toBe(pretty);
+  });
+
+  it('is not confused by escaped quotes around a raw newline', () => {
+    const broken = '{"a":"he said \\"hi\\"\nthen left"}';
+    const parsed = JSON.parse(repairControlCharacters(broken)) as { a: string };
+    expect(parsed.a).toBe('he said "hi"\nthen left');
+  });
+
+  it('rescues a realistic multi-field markdown payload', () => {
+    const broken =
+      '{"architecture":"## Modules\n\n| Path | Role |\n|---|---|\n| src/ | app |",' +
+      '"conventions":"Run:\n```sh\npnpm test\n```","glossaryTerms":[]}';
+    const parsed = JSON.parse(repairControlCharacters(broken)) as {
+      architecture: string;
+      conventions: string;
+    };
+    expect(parsed.architecture).toContain('| Path | Role |');
+    expect(parsed.conventions).toContain('pnpm test');
   });
 });
 

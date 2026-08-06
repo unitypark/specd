@@ -129,6 +129,21 @@ export class BoardController {
     });
   }
 
+  /** Station 05 — hand the approved spec to the hosted build runner. */
+  @Post('specs/:specId/build')
+  async build(
+    @Param('slug') slug: string,
+    @Param('specId') specId: string,
+    @CurrentUser() user: TokenClaims,
+  ) {
+    const project = await this.scope(slug, user, ['owner', 'maintainer']);
+    return this.pipeline.runBuild({
+      projectId: project.id,
+      specId,
+      actor: { userId: user.sub, name: user.name },
+    });
+  }
+
   @Get('specs/:specId')
   async getSpec(
     @Param('slug') slug: string,

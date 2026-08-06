@@ -1,0 +1,271 @@
+.wrap {
+  position: relative;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.9rem;
+}
+.hint {
+  font: 500 0.72rem/1.5 var(--mono);
+  color: var(--ink-3);
+}
+
+.compose {
+  max-width: 34rem;
+  margin-bottom: 1rem;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(11rem, 1fr));
+  gap: 0.7rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+@media (max-width: 1100px) {
+  .board {
+    grid-template-columns: repeat(6, 12rem);
+  }
+}
+
+.col h5 {
+  font: 600 0.7rem/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 0.6rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.count {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.colempty {
+  color: var(--ink-3);
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 0.8rem 0;
+}
+
+.card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  color: inherit;
+}
+.card:hover {
+  border-color: var(--accent);
+}
+.cid {
+  font: 700 0.62rem/1 var(--mono);
+  color: var(--ink-3);
+  margin-bottom: 0.3rem;
+}
+.ctitle {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin-bottom: 0.45rem;
+}
+.cfoot {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+/* ─── drawer ──────────────────────────────────────────────────────────────── */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  cursor: pointer;
+  z-index: 40;
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(38rem, 100vw);
+  background: var(--bg-2);
+  border-left: 1px solid var(--line-2);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+}
+
+.dhead {
+  padding: 1rem 1.2rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+.did {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font: 700 0.7rem/1 var(--mono);
+  color: var(--ink-3);
+  margin-bottom: 0.4rem;
+}
+.close {
+  background: none;
+  border: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.close:hover {
+  color: var(--ink);
+}
+.dtitle {
+  font: 600 1.05rem/1.3 var(--serif);
+  margin-bottom: 0.6rem;
+}
+.dmeta {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.dtabs {
+  display: flex;
+  gap: 0.2rem;
+  padding: 0 1.2rem;
+  border-bottom: 1px solid var(--line);
+}
+.dtab,
+.dton {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-3);
+  font: 600 0.76rem/1 var(--sans);
+  padding: 0.65rem 0.7rem;
+  cursor: pointer;
+}
+.dton {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.dbody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.2rem;
+  font-size: 0.83rem;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.dbody h6 {
+  font: 700 0.62rem/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 1.1rem 0 0.4rem;
+}
+.dbody h6:first-child {
+  margin-top: 0;
+}
+.dbody p {
+  margin: 0 0 0.6rem;
+}
+
+.reqblock {
+  margin-bottom: 1.2rem;
+}
+.ears {
+  border-left: 2px solid var(--accent-dim);
+  background: var(--accent-soft);
+  padding: 0.45rem 0.7rem;
+  margin: 0.4rem 0;
+  border-radius: 0 5px 5px 0;
+  font-size: 0.79rem;
+}
+.ears b {
+  font: 700 0.66rem/1 var(--mono);
+  color: var(--accent);
+}
+
+.claim {
+  margin: 0 0 0.7rem;
+}
+.cite {
+  display: inline-block;
+  font: 600 0.63rem/1 var(--mono);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  padding: 0.16em 0.4em;
+  white-space: nowrap;
+}
+/* An unverified claim must never wear the accent — the accent means grounded. */
+.unv {
+  display: inline-block;
+  font: 600 0.63rem/1 var(--mono);
+  color: var(--warn);
+  background: rgba(217, 196, 112, 0.08);
+  border: 1px solid rgba(217, 196, 112, 0.4);
+  border-radius: 4px;
+  padding: 0.16em 0.4em;
+}
+
+.task {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.45rem 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 0.8rem;
+}
+.task:last-child {
+  border-bottom: none;
+}
+.cb {
+  font-family: var(--mono);
+  color: var(--ink-3);
+  flex: none;
+}
+.sz {
+  margin-left: auto;
+  font: 500 0.66rem/1 var(--mono);
+  color: var(--ink-3);
+  flex: none;
+  white-space: nowrap;
+}
+
+.list {
+  margin: 0 0 0.8rem;
+  padding-left: 1.1rem;
+}
+
+.verbatim {
+  font-style: italic;
+  color: var(--ink-2);
+  border-left: 2px solid var(--line-2);
+  padding-left: 0.8rem;
+}
+.nospec {
+  color: var(--ink-3);
+  font-size: 0.78rem;
+}
+
+.dfoot {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.2rem;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}

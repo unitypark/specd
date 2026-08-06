@@ -1,0 +1,254 @@
+/*
+ * Design tokens — D12, settled: minimal monochrome.
+ *
+ * Near-black surfaces. ONE accent, phosphor green, reserved for exactly three
+ * things: human approval, attention, and primary actions. Muted red only for
+ * destructive acts. Serif headlines and mono annotations keep the blueprint
+ * heritage without the blue.
+ *
+ * The discipline matters: if the accent shows up on decoration, it stops
+ * meaning "a human did this".
+ */
+
+:root {
+  --bg: #070e0a;
+  --bg-2: #0a140d;
+  --field: #0d2117;
+  --panel: #121712;
+  --panel-2: #161c17;
+
+  --line: rgba(140, 245, 180, 0.13);
+  --line-2: rgba(140, 245, 180, 0.34);
+
+  --accent: #2be26a;
+  --accent-dim: #1fa04c;
+  --accent-soft: rgba(43, 226, 106, 0.09);
+
+  --ink: #f2f5f1;
+  --ink-2: #9fb3a6;
+  --ink-3: #5e7266;
+
+  --danger: #d97070;
+  --danger-soft: rgba(217, 112, 112, 0.1);
+  --warn: #d9c470;
+
+  --paper: #f5f7f2;
+  --paper-ink: #1a241d;
+
+  --serif: "Iowan Old Style", "Palatino Nova", Palatino, Georgia, serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+
+/* ─── primitives ─────────────────────────────────────────────────────────── */
+
+.btn {
+  cursor: pointer;
+  font: 650 0.78rem/1 var(--sans);
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--ink);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The accent is a promise: this is the action that matters here. */
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06130a;
+}
+.btn.primary:hover:not(:disabled) {
+  background: #4ff086;
+  border-color: #4ff086;
+  color: #06130a;
+}
+
+.btn.danger {
+  border-color: rgba(217, 112, 112, 0.5);
+  color: var(--danger);
+}
+.btn.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn.sm {
+  padding: 0.38rem 0.7rem;
+  font-size: 0.7rem;
+}
+
+.pill {
+  display: inline-block;
+  font: 600 0.64rem/1 var(--mono);
+  padding: 0.26rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  background: var(--panel-2);
+  white-space: nowrap;
+}
+.pill.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-dim);
+}
+.pill.warn {
+  color: var(--warn);
+  border-color: rgba(217, 196, 112, 0.4);
+  background: rgba(217, 196, 112, 0.08);
+}
+.pill.bad {
+  color: var(--danger);
+  border-color: rgba(217, 112, 112, 0.4);
+  background: var(--danger-soft);
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+}
+.field label {
+  font: 600 0.68rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.field input,
+.field select,
+.field textarea {
+  font: 400 0.86rem/1.5 var(--sans);
+  padding: 0.55rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--ink);
+}
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.field .hint {
+  font: 400 0.72rem/1.5 var(--mono);
+  color: var(--ink-3);
+}
+
+.tag {
+  font: 700 0.56rem/1 var(--mono);
+  letter-spacing: 0.24em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.mutedbox {
+  font: 500 0.74rem/1.7 var(--mono);
+  color: var(--ink-2);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.7rem 0.85rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.meter {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.meter > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.meter.warn > i {
+  background: var(--warn);
+}
+
+.spinner {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.empty {
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  padding: 2rem 0;
+  text-align: center;
+}
+
+.err {
+  color: var(--danger);
+  font: 500 0.8rem/1.6 var(--sans);
+  background: var(--danger-soft);
+  border: 1px solid rgba(217, 112, 112, 0.35);
+  border-radius: 6px;
+  padding: 0.7rem 0.85rem;
+  margin: 0.8rem 0;
+}

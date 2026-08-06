@@ -1,0 +1,241 @@
+.grid {
+  display: grid;
+  grid-template-columns: 13rem 1fr;
+  gap: 1.4rem;
+  align-items: start;
+}
+@media (max-width: 800px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.8rem;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line);
+}
+.step:last-child {
+  border-bottom: none;
+}
+.n {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  display: grid;
+  place-items: center;
+  font: 700 0.6rem/1 var(--mono);
+  flex: none;
+}
+.on {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+.on .n {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.done {
+  color: var(--ink-2);
+}
+.done .n {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 1.3rem 1.4rem 1.4rem;
+  min-height: 24rem;
+}
+.panel h3 {
+  font: 600 1.15rem/1.2 var(--serif);
+  margin: 0 0 0.4rem;
+}
+.sub {
+  color: var(--ink-2);
+  font-size: 0.83rem;
+  line-height: 1.7;
+  margin: 0 0 1.3rem;
+  max-width: 60ch;
+}
+.sub b {
+  color: var(--ink);
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 1.2rem;
+}
+.choice {
+  position: relative;
+  text-align: left;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: inherit;
+  padding: 0.8rem 0.9rem;
+  cursor: pointer;
+}
+.choice:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.choice:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.picked {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.choice h5 {
+  font: 600 0.88rem/1.2 var(--sans);
+  margin: 0 0 0.3rem;
+}
+.choice p {
+  font-size: 0.74rem;
+  line-height: 1.55;
+  color: var(--ink-3);
+  margin: 0;
+}
+.badge {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font: 700 0.55rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.22em 0.4em;
+}
+.soon h5 {
+  color: var(--ink-2);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1.4rem;
+  padding-top: 1.1rem;
+  border-top: 1px dashed var(--line);
+}
+.hintl {
+  font: 500 0.72rem/1 var(--mono);
+  color: var(--ink-3);
+}
+
+.good,
+.bad,
+.info,
+.warn {
+  border-radius: 6px;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.79rem;
+  line-height: 1.65;
+  margin-bottom: 0.9rem;
+}
+.good {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-dim);
+}
+.good b {
+  color: var(--ink);
+}
+.bad {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid rgba(217, 112, 112, 0.4);
+}
+.info {
+  color: var(--ink-2);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+/* The wizard must not lie: this warning is load-bearing, not decoration. */
+.warn {
+  color: var(--ink-2);
+  background: rgba(217, 196, 112, 0.07);
+  border: 1px solid rgba(217, 196, 112, 0.35);
+}
+.warn b {
+  color: var(--warn);
+}
+
+.repolist {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.repolist li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.8rem;
+}
+.repolist li:last-child {
+  border-bottom: none;
+}
+.path {
+  margin-left: auto;
+  font: 500 0.68rem/1 var(--mono);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22rem;
+}
+
+.footnote,
+.hintq {
+  font: 500 0.72rem/1.6 var(--mono);
+  color: var(--ink-3);
+  margin: 0.7rem 0 0;
+}
+.hintq {
+  margin-top: 0.4rem;
+}
+
+.checklist {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--ink-2);
+  font-size: 0.84rem;
+  line-height: 1.8;
+}
+.checklist b {
+  color: var(--ink);
+}
+
+.schematic {
+  margin-top: 2rem;
+}
+.schemnote {
+  font: 500 0.73rem/1.6 var(--mono);
+  color: var(--ink-3);
+  margin: 0 0 0.7rem;
+}

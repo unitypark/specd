@@ -1,0 +1,74 @@
+.tabs {
+  display: flex;
+  gap: 0.2rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1.3rem;
+  overflow-x: auto;
+}
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-3);
+  font: 600 0.8rem/1 var(--sans);
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover {
+  color: var(--ink);
+}
+.on {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 1.2rem;
+}
+.kpi {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.9rem 1rem;
+}
+.v {
+  font: 600 1.7rem/1 var(--serif);
+  color: var(--ink);
+}
+.l {
+  font: 500 0.68rem/1.4 var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  margin-top: 0.35rem;
+}
+
+.spend {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 1rem 1.1rem;
+  max-width: 30rem;
+}
+.spendhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+.amt {
+  font: 600 1.3rem/1 var(--serif);
+}
+.cap {
+  font: 500 0.7rem/1 var(--mono);
+  color: var(--ink-3);
+}
+.spendnote {
+  font-size: 0.74rem;
+  color: var(--ink-3);
+  margin: 0.6rem 0 0;
+  line-height: 1.6;
+}

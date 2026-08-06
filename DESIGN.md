@@ -51,7 +51,7 @@ creating depth. Charcoal gives the soft radials somewhere to sit.
 |---|---|---|
 | `--ink` | `#f2f5f1` | Body text, headings. |
 | `--ink-2` | `#9fb3a6` | Secondary copy, ledes. |
-| `--ink-3` | `#7d9186` | Small mono labels, meta, captions. |
+| `--ink-3` | `#8ea297` | Small mono labels, meta, captions. |
 
 ### Contrast — measured, not assumed
 
@@ -61,7 +61,7 @@ WCAG AA needs **4.5** for body text and **3.0** for large or bold text.
 |---|---|---|---|
 | `--ink` `#f2f5f1` | 14.21 | 14.49 | 13.43 |
 | `--ink-2` `#9fb3a6` | 7.04 | 7.19 | 6.66 |
-| `--ink-3` `#7d9186` | 4.66 | 4.75 | 4.41 |
+| `--ink-3` `#8ea297` | 5.77 | 5.89 | 5.46 |
 | `--green` `#00be2c` | 6.25 | 6.37 | 5.91 |
 | `--green-deep` `#009159` | 3.86 | 3.94 | 3.65 |
 | `--pink` `#ff0080` | 4.14 | 4.22 | 3.91 |
@@ -71,15 +71,19 @@ Three consequences, and they are rules rather than suggestions:
 
 - **`--green-deep` is not a text colour.** At 3.86 on the field it fails AA for
   body copy. Borders, dividers, hover — nothing you have to read.
-- **`--pink` is for bold or uppercase text only.** At 4.14 it sits under AA for
-  body size. Every `UNVERIFIED` marker is uppercase mono, which clears the
-  large-text bar; pink prose would not. Use `--pink-soft` (6.95) for pink you
-  have to read.
+- **`--pink` is a fill and a border, not text.** At 4.14 it sits under AA for
+  body size, and over its own chip it drops to 3.67. Uppercase does **not**
+  count as large text — WCAG's bar is 18.66px bold or 24px, and markers render
+  at 9–10px. Text that has to read pink uses `--pink-soft`, which scores 6.17
+  on the chip and 6.95 on the field.
 - **Lifting a surface costs contrast everywhere above it.** When the floor moved
   from `#070e0a` to `#202226`, `--ink-3` fell to **3.09** — failing even the
-  large-text bar — and every small mono label on the site went with it. It was
-  raised from `#5e7266` to `#7d9186` in the same change. *Re-measure the ink
-  whenever a surface moves.*
+  large-text bar — and every small mono label on the site went with it.
+  *Re-measure the ink whenever a surface moves.*
+- **Measure against the lightest surface, not the darkest.** The first fix for
+  `--ink-3` cleared AA on `--bg` (4.75) and quietly failed on `--panel` (4.41)
+  and `--panel-2` (4.11) — which is where most of the app's small labels
+  actually live. A colour is only safe when every surface passes.
 
 ---
 
@@ -92,7 +96,7 @@ it stops meaning "a human approved this".
 |---|---|---|
 | A human approved it | `--green` | The stamp, approved states, primary buttons |
 | Grounded in your docs | `--green` | Citation chips |
-| **Nobody has checked this** | `--pink` | `UNVERIFIED` markers and counts |
+| **Nobody has checked this** | `--pink` fill, `--pink-soft` text | `UNVERIFIED` markers and counts |
 | Something is off | `--warn` `#d9c470` | Toolchain warnings, stale knowledge |
 | This destroys something | `--danger` `#d97070` | Delete, revoke, cancel |
 

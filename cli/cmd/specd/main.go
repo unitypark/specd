@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/specd-dev/specd/cli/internal/api"
 	"github.com/specd-dev/specd/cli/internal/config"
 )
@@ -38,6 +40,13 @@ const (
 func main() {
 	args := os.Args[1:]
 	if len(args) == 0 {
+		// A bare invocation launches the interactive shell (S-104) — but only
+		// in a real terminal. Piped/CI/non-interactive callers must keep
+		// getting exactly today's behavior (usage text, exit 2): the REPL
+		// would otherwise sit blocking on a stdin that never sends anything.
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			os.Exit(runRepl())
+		}
 		usage()
 		os.Exit(exitUsage)
 	}
@@ -87,6 +96,8 @@ func main() {
 
 func usage() {
 	fmt.Print(`specd — spec-driven delivery
+
+  specd                           interactive shell (type / for commands) — TTY only
 
   specd login                    authenticate this machine (device flow)
   specd logout                   forget the stored token

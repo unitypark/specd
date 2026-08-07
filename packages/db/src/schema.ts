@@ -131,6 +131,10 @@ export const repositories = pgTable(
     /** pending → open → merged. Adoption = merge (§6 step 6). */
     setupState: text('setup_state').notNull().default('pending'),
     kbStatus: text('kb_status').notNull().default('none'),
+    /** none | registered | failed — GitLab webhooks are per-repo API calls, not
+     *  a one-time App setup, so registering one can fail (§11) and the UI needs
+     *  to say so rather than silently missing every future merge. */
+    webhookStatus: text('webhook_status').notNull().default('none'),
     lastIndexedAt: timestamp('last_indexed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

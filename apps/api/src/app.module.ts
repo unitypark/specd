@@ -17,6 +17,8 @@ import { VcsService } from './vcs/vcs.service.js';
 import { GitHubAppService } from './vcs/github-app.service.js';
 import { GitHubWebhookService } from './vcs/github-webhook.service.js';
 import { GitHubController } from './vcs/github.controller.js';
+import { GitLabWebhookService } from './vcs/gitlab-webhook.service.js';
+import { GitLabController } from './vcs/gitlab.controller.js';
 
 import { EmbeddingService } from './knowledge/embeddings.js';
 import { KnowledgeService } from './knowledge/knowledge.service.js';
@@ -54,6 +56,7 @@ import { CliController } from './cli/cli.controller.js';
     RunsController,
     CliController,
     GitHubController,
+    GitLabController,
   ],
   providers: [
     Config,
@@ -65,6 +68,7 @@ import { CliController } from './cli/cli.controller.js';
     VcsService,
     GitHubAppService,
     GitHubWebhookService,
+    GitLabWebhookService,
     EmbeddingService,
     KnowledgeService,
     BoardService,

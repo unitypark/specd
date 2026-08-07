@@ -209,6 +209,12 @@
   white-space: nowrap;
   max-width: 22rem;
 }
+.pickerName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .footnote,
 .hintq {

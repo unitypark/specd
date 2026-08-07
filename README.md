@@ -87,6 +87,65 @@ clear error rather than inventing content.
 
 ---
 
+## Runbook
+
+### Prerequisites
+
+- Node ≥ 22, pnpm `10.32.1` (pinned via `packageManager` — `corepack enable` picks it up)
+- Docker, for Postgres + pgvector and Redis (`docker-compose.yml`)
+
+### First run
+
+```bash
+cp .env.example .env
+pnpm install
+pnpm infra:up      # Postgres on :5433, Redis on :6380 (docker compose)
+pnpm db:migrate
+pnpm db:seed       # writes a fixture git repo to onboard
+pnpm dev           # API on :4000, web on :3000
+```
+
+`.env` only needs to **exist** — nothing needs sourcing into your shell first.
+`apps/api`'s server and `packages/db`'s migration runner both load the
+repo-root `.env` themselves before reading anything out of it (the same way
+Next.js already does for `apps/web`), so a plain `pnpm dev` right after
+`cp .env.example .env` works. Missing `.env` still fails loudly — see
+Troubleshooting.
+
+### Restarting
+
+`pnpm dev` runs the API (`--watch`, restarts itself on save) and the web app
+(Next.js, fast refresh) in parallel; Ctrl-C stops both. `pnpm infra:up` /
+`pnpm infra:down` control Postgres and Redis independently — leave them
+running across sessions, there's no reason to tear them down between restarts
+of `pnpm dev` itself.
+
+### Verify it's actually up
+
+```bash
+curl http://localhost:4000/api/health
+open http://localhost:3000
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `DATABASE_URL is required — copy .env.example to .env` (API), or `db:migrate`'s `DATABASE_URL is not set` | No `.env` at the repo root yet | `cp .env.example .env`, then retry. This is the one thing auto-loading cannot paper over — there is nothing to load. |
+| Same error, and `.env` already exists | It's not at the repo root, or the value is empty | `grep DATABASE_URL .env` from the repo root should print a real value — the loader looks there specifically, not at the shell's `cwd`. |
+| API can't reach Postgres/Redis (connection refused) | `pnpm infra:up` was never run, or Docker isn't running | `docker ps` should list `specd-postgres` and `specd-redis`, both `healthy`. Run `pnpm infra:up` if not. |
+| `EADDRINUSE` on `:3000` or `:4000` | A previous `pnpm dev` is still running elsewhere | `lsof -nP -iTCP:3000 -sTCP:LISTEN` (swap the port), stop that process, then start a new one. |
+| A schema-shaped error right after pulling new commits | New migrations landed | `pnpm db:migrate` — idempotent, applies only what's new (tracked in `_specd_migrations`). |
+| Web dev server starts 500ing everything after a `pnpm build` | `next build` and `next dev` both write `apps/web/.next`, in incompatible shapes — running the former while the latter is live corrupts it | Don't run `pnpm build` against an `apps/web` a dev server is using. If it already happened: stop the dev server, `rm -rf apps/web/.next`, `pnpm --filter @specd/web dev` again. |
+
+### Resetting
+
+No script wipes data — `pnpm infra:down` is a plain `docker compose down`, so
+the named volumes (`specd-pgdata`, `specd-redisdata`) survive it. For a true
+reset: `docker compose down -v`, then `pnpm infra:up && pnpm db:migrate && pnpm db:seed`.
+
+---
+
 ## What is here
 
 | Path | What it is |
@@ -154,6 +213,14 @@ waving it through. Deliveries are deduplicated by GitHub's delivery id, and an
 event is acted on only when its repository *and* installation match a
 registered project.
 
+**Neither can GitLab, by the mechanism GitLab actually offers.**
+GitLab does not sign the body — a webhook carries a secret token instead,
+echoed back verbatim in `X-Gitlab-Token`, compared in constant time, with the
+same fail-closed rule on an unset secret. Deliveries are deduplicated by
+GitLab's per-delivery id, and an event is acted on only when its project id
+(falling back to its namespaced path for repositories added without the
+picker) matches a registered repository.
+
 **Leaving is free.**
 Git holds the knowledge. The platform holds a derived index — embeddings,
 metadata, run history. Delete a project and nothing you would miss is gone.
@@ -161,14 +228,16 @@ metadata, run history. Delete a project and nothing you would miss is gone.
 ### Tests
 
 ```bash
-pnpm test        # 183 tests
+pnpm test        # 222 tests
 ```
 
 The gate and webhook tests run against real Postgres and skip themselves if
 none is reachable, so the suite still works on a laptop with nothing running.
 Webhook signatures are tested with real HMAC and App JWTs with real RSA keys —
 a mocked signer would prove nothing about the only property that matters, which
-is that GitHub can verify what we send.
+is that GitHub can verify what we send. GitLab's webhook trust boundary is a
+token comparison rather than a signature, and is tested the same honest way:
+real constant-time comparisons, not a stubbed-out check.
 
 ---
 
@@ -264,9 +333,9 @@ to review. Three properties are enforced rather than hoped for:
 - **The agent gets editing tools only — never a shell.** specd runs the repo's
   own verify command itself, so nothing a model emits becomes a shell command.
 - **It never touches your working tree.** Local builds run in a throwaway git
-  worktree on `spec/<id>-<slug>`; GitHub builds run in a shallow clone in a
-  scratch directory. The branch survives, the workspace does not — an
-  interrupted build cannot leave you on an unexpected branch.
+  worktree on `spec/<id>-<slug>`; GitHub and GitLab builds run in a shallow
+  clone in a scratch directory. The branch survives, the workspace does not —
+  an interrupted build cannot leave you on an unexpected branch.
 
 The as-built spec is written by specd, not the model — it is a verbatim record
 of what was approved, and asking a model to reproduce it would invite drift in
@@ -277,10 +346,10 @@ work streams to the run log. Verify results distinguish **failed** (your tests
 ran and did not pass) from **could not run** (the toolchain or dependencies are
 missing) — those mean very different things to a reviewer.
 
-On GitHub the branch is pushed and a PR opened, described with what was
-approved, by whom, and whether verify actually ran. In local mode the branch is
-simply left in your repository. Hosted builds need the Claude Code CLI either
-way.
+On GitHub or GitLab the branch is pushed and a PR or MR opened, described with
+what was approved, by whom, and whether verify actually ran. In local mode the
+branch is simply left in your repository. Hosted builds need the Claude Code
+CLI either way.
 
 ## GitHub
 
@@ -337,6 +406,20 @@ GET /github/projects/:projectId/deliveries
 "The webhook arrived and specd chose not to act" and "the webhook never
 arrived" are different problems, and this says which one you have.
 
+## GitLab
+
+gitlab.com and self-managed, connected with a personal or project access
+token rather than an App — GitLab has nothing App-shaped to install. The rest
+of the pipeline does not know the difference: the same `VcsAdapter` interface,
+the same branch-and-merge-request write path, the same hosted build station.
+
+Registering a repository's webhook is a per-project API call rather than a
+one-time App setup, so it can fail on a token below Maintainer — that failure
+degrades the repository to local mode's fallback (the **"I merged it"**
+button) instead of blocking the add. Full walkthrough, including the token
+scope you need and how to connect a project today (there is no browser flow
+yet): [`docs/gitlab.md`](docs/gitlab.md).
+
 ## Knowledge and retrieval
 
 `knowledge/` lives in your repos. specd indexes merged docs into pgvector plus a
@@ -360,7 +443,11 @@ nobody can reason about gets ignored.
 Stated plainly, because the plan phases these and the UI should not imply
 otherwise:
 
-- **GitLab** (P2), **Jira sync** (P3) — interface-ready, adapters absent.
+- **Jira sync** (P3) — interface-ready, adapter absent.
+- **A GitLab connection UI** — the backend (adapter, webhook, hosted build) is
+  complete and tested; connecting a project still means a curl call
+  (`docs/gitlab.md`), the same place GitHub was before this. gitlab.com OAuth,
+  so connecting is a button instead of a pasted token, is not built.
 - **Remote runner pairing** (P2) — subscription mode works when specd runs on
   the same machine as Claude Code (above). Pairing a *separate* runner over the
   network, so a hosted specd can dispatch to your infrastructure, is not built.

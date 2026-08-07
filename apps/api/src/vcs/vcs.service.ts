@@ -5,6 +5,7 @@ import { Vault } from '../common/vault.js';
 import { Config } from '../config.js';
 import { GitHubAdapter } from './github.adapter.js';
 import { GitHubAppService } from './github-app.service.js';
+import { GitLabAdapter } from './gitlab.adapter.js';
 import { LocalGitAdapter } from './local-git.adapter.js';
 import type { RepoTarget, VcsAdapter } from './vcs.types.js';
 
@@ -30,11 +31,10 @@ export class VcsService {
       case 'github':
         return new GitHubAdapter(await this.githubToken(repo.projectId), this.config.githubApiBase);
 
-      case 'gitlab':
-        // P2. The interface is the contract; the adapter is the only thing missing.
-        throw new BadRequestException(
-          'GitLab support lands in P2. Use Local mode or GitHub for now.',
-        );
+      case 'gitlab': {
+        const { token, instanceUrl } = await this.gitlabCredential(repo.projectId);
+        return new GitLabAdapter(token, instanceUrl);
+      }
 
       default:
         throw new BadRequestException(`Unknown VCS provider: ${repo.provider}`);
@@ -76,6 +76,26 @@ export class VcsService {
     throw new BadRequestException(
       'The GitHub connection has neither an App installation nor a stored token. Reconnect it.',
     );
+  }
+
+  /**
+   * A GitLab token and instance URL for this project. Unlike GitHub there is
+   * no App to mint a short-lived token from — the connection's own token is
+   * used for as long as it is valid, the same trade-off a GitHub PAT makes.
+   */
+  async gitlabCredential(projectId: string): Promise<{ token: string; instanceUrl: string }> {
+    const conn = await this.connections.get(projectId, 'vcs');
+    if (!conn || conn.provider !== 'gitlab') {
+      throw new BadRequestException(
+        'This project has no GitLab connection. Connect one in project settings.',
+      );
+    }
+    if (!conn.encryptedSecret) {
+      throw new BadRequestException('The GitLab connection has no stored token. Reconnect it.');
+    }
+
+    const instanceUrl = (conn.settings as { instanceUrl?: string | null }).instanceUrl || 'https://gitlab.com';
+    return { token: this.vault.decrypt(conn.encryptedSecret, `${projectId}:vcs`), instanceUrl };
   }
 
   toTarget(repo: Repository): RepoTarget {

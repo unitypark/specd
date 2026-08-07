@@ -135,6 +135,9 @@ code,
 /* ─── primitives ─────────────────────────────────────────────────────────── */
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   font: 650 0.9rem/1 var(--sans);
   padding: 0.55rem 1rem;
@@ -142,11 +145,13 @@ code,
   border: 1px solid var(--line-2);
   background: transparent;
   color: var(--ink);
+  text-decoration: none;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
+  text-decoration: none;
 }
 .btn:disabled {
   opacity: 0.4;

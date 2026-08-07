@@ -14,6 +14,15 @@ const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, '..', 'migrations');
 
 async function main(): Promise<void> {
+  // Load the monorepo-root .env before reading DATABASE_URL — pnpm db:migrate
+  // runs straight from the shell, and nothing else in this project sources
+  // it. A missing .env just falls through to the check below, unchanged.
+  try {
+    process.loadEnvFile(join(here, '..', '..', '..', '.env'));
+  } catch {
+    // No .env yet, or it could not be read.
+  }
+
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error('DATABASE_URL is not set. Copy .env.example to .env first.');

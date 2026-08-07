@@ -1,10 +1,30 @@
 import 'reflect-metadata';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { Config } from './config.js';
 
+/**
+ * Load the monorepo-root `.env` before `Config` reads `process.env` — `pnpm
+ * dev` runs straight from the shell, and nothing else in this project
+ * sources it. A missing file is not an error here: it means `Config`'s own
+ * `required()` checks, which name the exact variable and say what to do
+ * about it, are what the developer should see instead of a raw ENOENT.
+ */
+function loadRootEnv(): void {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  try {
+    process.loadEnvFile(join(root, '.env'));
+  } catch {
+    // No .env yet (or it could not be read) — required() below says so.
+  }
+}
+
 async function bootstrap(): Promise<void> {
+  loadRootEnv();
+
   // rawBody: the GitHub webhook signature is an HMAC over the exact bytes
   // GitHub sent. Re-serialising the parsed JSON changes key order and
   // whitespace, and the signature would never verify again.

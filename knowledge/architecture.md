@@ -64,8 +64,9 @@ The README claims each of these is enforced by code plus a test. Treat the mecha
 | Spend capped | Caps checked before a run starts; cost in integer EUR cents |
 | Agents never push | Build agent gets editing tools only; specd pushes only to the spec's branch, never a default branch |
 | GitHub not impersonable | Unauthenticated webhook, HMAC over raw bytes in constant time before parse, unset secret rejects all, dedup by delivery id, repo+installation must match a project |
+| GitLab not impersonable | Unauthenticated webhook, secret-token comparison (GitLab does not sign payloads) in constant time, unset secret rejects all, dedup by delivery id, repository match scoped to the sending instance (`project.web_url` vs. the connection's `instanceUrl`) so two instances sharing a numeric project id cannot cross-trigger each other's specs |
 
-UNVERIFIED — the DB CHECK constraint should be visible in `packages/db/migrations`; the webhook HMAC and the spec state machine in `apps/api/src`. Verify each before relying on it.
+UNVERIFIED — the DB CHECK constraint should be visible in `packages/db/migrations`; the webhook HMAC and the spec state machine in `apps/api/src`. Verify each before relying on it. The GitLab row is grounded in `apps/api/src/vcs/gitlab-webhook.{service,verify}.ts` and `knowledge/decisions/0002-gitlab-via-personal-access-token.md` rather than a scan — read those directly rather than re-verifying by inference.
 
 ## Data model
 

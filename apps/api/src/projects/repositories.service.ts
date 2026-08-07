@@ -1,14 +1,19 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
-import { repositories, type Db } from '@specd/db';
+import { repositories, type Db, type Repository } from '@specd/db';
 import { DB } from '../db/db.module.js';
+import { Config } from '../config.js';
+import { GitLabAdapter } from '../vcs/gitlab.adapter.js';
 import { VcsService } from '../vcs/vcs.service.js';
 
 @Injectable()
 export class RepositoriesService {
+  private readonly logger = new Logger(RepositoriesService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly vcs: VcsService,
+    private readonly config: Config,
   ) {}
 
   async list(projectId: string) {
@@ -86,7 +91,56 @@ export class RepositoriesService {
       .returning();
 
     if (!row) throw new Error('failed to add repository');
+
+    if (row.provider === 'gitlab') {
+      return this.registerGitLabWebhook(row);
+    }
+
     return row;
+  }
+
+  /**
+   * Register specd's webhook on a newly-added GitLab repository (§11). Unlike
+   * GitHub's App-level webhook, GitLab needs one API call per project — and
+   * that call can fail on a token below Maintainer, so it must never fail the
+   * add itself. It degrades the same way local mode does: the repository
+   * works, merges just are not detected until someone fixes the token's role,
+   * and `webhookStatus` says so rather than staying silently wrong.
+   */
+  private async registerGitLabWebhook(row: Repository) {
+    if (!this.config.gitlabWebhookSecret) {
+      this.logger.warn(
+        `not registering a webhook for ${row.name} — GITLAB_WEBHOOK_SECRET is not set`,
+      );
+      return row;
+    }
+
+    try {
+      const { token, instanceUrl } = await this.vcs.gitlabCredential(row.projectId);
+      const adapter = new GitLabAdapter(token, instanceUrl);
+      await adapter.registerWebhook(
+        row.name,
+        `${this.config.apiPublicUrl}/api/gitlab/webhook`,
+        this.config.gitlabWebhookSecret,
+      );
+
+      const [updated] = await this.db
+        .update(repositories)
+        .set({ webhookStatus: 'registered' })
+        .where(eq(repositories.id, row.id))
+        .returning();
+      return updated ?? row;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`could not register a webhook for ${row.name}: ${message}`);
+
+      const [updated] = await this.db
+        .update(repositories)
+        .set({ webhookStatus: 'failed' })
+        .where(eq(repositories.id, row.id))
+        .returning();
+      return updated ?? row;
+    }
   }
 
   async setPrimary(projectId: string, repoId: string) {

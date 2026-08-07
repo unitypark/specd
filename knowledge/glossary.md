@@ -23,9 +23,11 @@ human can confirm what they mean.
 | **cap** | Spend limit checked before a run starts rather than after it overspends. |
 | **subscription_runner** | `SPECD_AI_MODE` value that shells out to a locally logged-in Claude Code CLI instead of using an API key; unavailable to a hosted specd. |
 | **loop (`pnpm --filter @specd/api loop`)** | Headless end-to-end exercise of every station over the real HTTP API, reporting pass/skip per station. |
-| **VCS adapter** | Abstraction over hosted (GitHub) vs local repos; README calls the hosted/local split one of the two interesting design decisions. UNVERIFIED — no adapter code seen. |
+| **VCS adapter** | `VcsAdapter` interface (`apps/api/src/vcs/vcs.types.ts`) implemented by GitHub, GitLab and local repos — everything above it (onboarding, indexing, the build station) is provider-agnostic against it. |
 | **local mode** | Repo registered via `specd connect .`; code stays on the machine and output is a branch you diff rather than a PR. |
-| **delivery id** | GitHub's per-webhook-delivery identifier, used to deduplicate replayed deliveries. |
-| **installation** | GitHub App installation; a webhook is acted on only when repository *and* installation match a registered project. |
+| **delivery id** | Per-webhook-delivery identifier used to deduplicate replayed deliveries: GitHub's `X-GitHub-Delivery`, GitLab's `X-Gitlab-Event-UUID`. |
+| **installation** | GitHub App installation; a webhook is acted on only when repository *and* installation match a registered project. GitLab has no equivalent — it authenticates with a personal/project access token instead (`knowledge/decisions/0002-gitlab-via-personal-access-token.md`). |
+| **instance URL** | Self-managed GitLab host stored on a connection (`connections.settings.instanceUrl`); absent means gitlab.com. Scopes webhook resolution so two instances cannot share a numeric project id. |
+| **webhook status** | `repositories.webhook_status` — `none \| registered \| failed`. GitLab registers a webhook per repository at add-time and this records whether it worked; GitHub's is App-level and does not use this column. |
 | **audience-scoped token** | CLI token carrying an audience claim that authoring/approval routes reject. |
 | **device flow** | `specd login` — the CLI cannot mint a token; a human confirms a code at the web app's `/cli-login`. |

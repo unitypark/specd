@@ -21,7 +21,7 @@ export default function NotFound() {
         <p style={{ color: 'var(--ink-3)', fontSize: '.85rem', margin: '0 0 1.4rem' }}>
           That page does not exist.
         </p>
-        <Link href="/projects" className="btn primary" style={{ display: 'inline-block' }}>
+        <Link href="/projects" className="btn primary">
           Back to projects
         </Link>
       </div>

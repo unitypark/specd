@@ -1,10 +1,10 @@
 # Self-hosted runners
 
-**Status: pairing + spec dispatch.** A machine can prove itself to a
-project, receive a credential, and be handed `spec`-drafting jobs to
-execute with its own local Claude Code. `onboard`/`build` dispatch (which
-need a git checkout on the runner) are not built yet — see "What is not
-built yet" below.
+**Status: pairing + spec/onboard dispatch.** A machine can prove itself to a
+project, receive a credential, and be handed `spec`-drafting and
+`onboard`-drafting jobs to execute with its own local Claude Code. `build`
+dispatch (which needs a real git checkout on the runner) is not built yet —
+see "What is not built yet" below.
 
 A runner is a machine, not a user. It pairs with a project using a short
 code — the same shape `specd login`'s device flow uses for a human at a
@@ -78,28 +78,32 @@ SPECD_RUNNER_TOKEN=$(specd runner token) SPECD_API=http://localhost:4000/api \
 ```
 
 It polls `POST /runners/jobs/claim` on an interval (`SPECD_RUNNER_POLL_MS`,
-default 5s). When a job is queued for this project, it drives the local
-`claude` CLI the same way `subscription_runner` mode does when specd runs
-beside a logged-in Claude Code, then reports the parsed result back with
-`POST /runners/jobs/:id/report`. It never touches the database or the
-knowledge index directly — the server does all of the DB-dependent work
-(retrieval, prompt assembly, and after the fact, saving the resulting spec
-version) on either side of the daemon's one job: drive the model and hand
-back a parsed reply.
+default 5s). When a `spec` or `onboard` job is queued for this project, it
+drives the local `claude` CLI the same way `subscription_runner` mode does
+when specd runs beside a logged-in Claude Code, then reports the parsed
+result back with `POST /runners/jobs/:id/report`. It never touches the
+database, the knowledge index, or a repository's VCS credential directly —
+the server does all of that on either side of the daemon's one job: drive
+the model and hand back a parsed reply. For `onboard` specifically, that is
+true even of the git side — `OnboardingAgent`'s clone/propose calls are VCS
+REST API requests with a platform-held token, not a real checkout, so they
+never needed to move to the runner at all; only the drafting model call did.
 
-The `PipelineService` picks a paired runner automatically whenever a
-project's AI mode is `subscription_runner` and a runner is paired to it —
-no runner picked, no dispatch: the existing synchronous path (specd's own
-process shelling out to a local `claude`) runs exactly as before.
+The `PipelineService`/onboarding station both pick a paired runner
+automatically whenever a project's AI mode is `subscription_runner` and a
+runner is paired to it — no runner picked, no dispatch: the existing
+synchronous path (specd's own process shelling out to a local `claude`)
+runs exactly as before.
 
 ## What is not built yet
 
-- **`onboard`/`build` dispatch.** Those job kinds need a git checkout on the
-  runner's own machine (clone, branch, push) — spec drafting needs none of
-  that, which is why it shipped first. The queue/claim/report protocol
-  already generalizes to other job kinds; only the runner-side git handling
-  and the corresponding `prepare`/`finalize` split for those agents are
-  missing.
+- **`build` dispatch.** Unlike `spec`/`onboard`, a build genuinely needs a
+  real git checkout (`WorkspaceService`: clone, branch, commit, push, run
+  the repo's verify command) on the runner's own machine — a materially
+  larger piece of work, since it also means deciding how a repo's VCS
+  credential (GitHub App install token / GitLab PAT, today only ever held by
+  the API process) reaches the runner safely. See
+  `knowledge/decisions/0004-runner-job-dispatch.md`.
 - **Concurrency.** The daemon claims and runs one job at a time. A runner
   with capacity to spare has no way to say so.
 - **Retry/backoff on daemon crash.** A job claimed by a runner that then

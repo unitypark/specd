@@ -16,7 +16,7 @@ import { SpecsService } from '../specs/specs.service.js';
 import { BoardService } from '../board/board.service.js';
 import { RunsService } from '../runs/runs.service.js';
 import { RunnersService } from '../runners/runners.service.js';
-import type { SpecJobPayload } from '../runners/runner-jobs.service.js';
+import type { OnboardJobPayload, SpecJobPayload } from '../runners/runner-jobs.service.js';
 import { OnboardingAgent } from './onboarding.agent.js';
 import { SpecAgent } from './spec.agent.js';
 import { BuildAgent } from './build.agent.js';
@@ -61,6 +61,9 @@ export class PipelineService {
     const ai = await this.connections.resolveAi(project.id, project.defaultModel);
     const model = this.resolveModel(ai.model, project.defaultModel);
 
+    const pairedRunner =
+      ai.mode === 'subscription_runner' ? await this.runners.pickPaired(project.id) : null;
+
     const results: {
       repositoryId: string;
       repoName: string;
@@ -70,6 +73,7 @@ export class PipelineService {
       reviewHint?: string;
       fileCount?: number;
       error?: string;
+      queued?: boolean;
     }[] = [];
 
     for (const repoId of input.repositoryIds) {
@@ -83,6 +87,31 @@ export class PipelineService {
         triggeredByName: input.actor.name,
         repositoryId: repo.id,
       });
+
+      if (pairedRunner) {
+        try {
+          const prepared = await this.onboarding.prepare({ repo, projectName: project.name, run });
+          const payload: OnboardJobPayload = {
+            kind: 'onboard',
+            system: prepared.system,
+            user: prepared.user,
+            schema: prepared.schema,
+            model,
+            maxTokens: 16_000,
+            ctx: prepared.ctx,
+          };
+          await this.runs.queueForRunner(run.id, payload as unknown as Record<string, unknown>);
+          await run.log(`queued for runner "${pairedRunner.name}" — waiting for it to poll`);
+          results.push({ repositoryId: repo.id, repoName: repo.name, runId: run.id, queued: true });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          await run.log(message, 'error');
+          await this.runs.finish(run.id, { status: 'failed', error: message });
+          this.logger.warn(`onboarding dispatch failed for ${repo.name}: ${message}`);
+          results.push({ repositoryId: repo.id, repoName: repo.name, runId: run.id, error: message });
+        }
+        continue;
+      }
 
       try {
         const result = await this.onboarding.run({

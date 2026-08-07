@@ -17,7 +17,7 @@ import { ModelRouter } from './model.router.js';
 import type { RunHandle } from '../runs/runs.service.js';
 
 /** What we ask the model for. Everything else is rendered from templates. */
-interface DraftedDocs {
+export interface DraftedDocs {
   architecture: string;
   conventions: string;
   glossaryTerms: { term: string; meaning: string }[];
@@ -70,15 +70,23 @@ export class OnboardingAgent {
     private readonly models: ModelRouter,
   ) {}
 
-  async run(input: {
+  /**
+   * The DB/network-bound half: read-only clone, stack detection, prompt
+   * assembly. Split out from `run()` so a dispatched job can be prepared
+   * server-side and handed only a prompt+schema — the same shape as
+   * `SpecAgent.prepare()`/`finalize()`, and for the same reason: the
+   * clone/propose calls here are VCS REST API calls with a platform-held
+   * token, not a real git checkout (`WorkspaceService`, used only by the
+   * build station, is the one that needs a runner's own filesystem), so
+   * there is nothing about them that benefits from running on a runner —
+   * only the model call does.
+   */
+  async prepare(input: {
     repo: Repository;
     projectName: string;
-    apiKey: string | null;
-    model: ModelId;
-    mode: AiMode;
     run: RunHandle;
-  }): Promise<{ branch: string; url: string | null; reviewHint: string; fileCount: number }> {
-    const { repo, projectName, apiKey, model, mode, run } = input;
+  }): Promise<PreparedOnboardCall> {
+    const { repo, projectName, run } = input;
 
     await run.log(`clone (read-only) · ${repo.name}`);
     const adapter = await this.vcs.adapterFor(repo);
@@ -91,35 +99,33 @@ export class OnboardingAgent {
     const topLevelDirs = topDirs(snapshot);
     const entryPoints = findEntryPoints(snapshot);
 
-    // The model drafts the three docs that need judgement. The scaffold's
-    // other files are deterministic templates — no reason to spend tokens or
-    // risk hallucination on a runbook stub.
-    let drafted: DraftedDocs | null = null;
-    if (apiKey || mode === 'subscription_runner') {
-      await run.log('drafting architecture · conventions · glossary');
-      const result = await this.models.call<DraftedDocs>(mode, {
-        apiKey: apiKey ?? '',
-        model,
-        maxTokens: 16_000,
-        effort: 'high',
-        system: SYSTEM_PROMPT,
-        user: buildUserPrompt({ repo, projectName, stack, snapshot, topLevelDirs, entryPoints }),
-        schema: DRAFT_SCHEMA as unknown as Record<string, unknown>,
-      });
-      if (result.model !== model) {
-        await run.log(
-          `requested ${model} but the provider served ${result.model}`,
-          'warn',
-        );
-      }
-      await run.meter(result.model, result.usage, result.billable);
-      drafted = result.parsed ?? null;
+    return {
+      system: SYSTEM_PROMPT,
+      user: buildUserPrompt({ repo, projectName, stack, snapshot, topLevelDirs, entryPoints }),
+      schema: DRAFT_SCHEMA as unknown as Record<string, unknown>,
+      ctx: { repo, projectName, stack, topLevelDirs, entryPoints },
+    };
+  }
+
+  /**
+   * The other half: turn a drafted (or absent) set of docs into a scaffold,
+   * propose it, and record the result. Pure network/DB — no model call, so
+   * it runs the same way whether the draft came from the synchronous path
+   * or a runner's report.
+   */
+  async finalize(
+    parsed: DraftedDocs | null,
+    ctx: PreparedOnboardCall['ctx'],
+    log: (message: string, level?: 'info' | 'warn' | 'error') => Promise<void> = async () => undefined,
+  ): Promise<{ branch: string; url: string | null; reviewHint: string; fileCount: number }> {
+    const { repo, projectName, stack, topLevelDirs, entryPoints } = ctx;
+    const drafted = parsed;
+
+    if (drafted) {
       const unverified = countUnverified(drafted);
-      await run.log(
-        `drafted ${unverified} UNVERIFIED marker(s) · ${result.usage.outputTokens} output tokens`,
-      );
+      await log(`drafted ${unverified} UNVERIFIED marker(s)`);
     } else {
-      await run.log(
+      await log(
         'no AI credential available — writing template scaffold only (every claim marked UNVERIFIED)',
         'warn',
       );
@@ -160,7 +166,9 @@ export class OnboardingAgent {
       stackLine: describeStack(stack) || 'not detected',
     });
 
-    await run.log(`proposing ${files.length} files for review`);
+    await log(`proposing ${files.length} files for review`);
+    const adapter = await this.vcs.adapterFor(repo);
+    const target = this.vcs.toTarget(repo);
     const change = await adapter.propose(target, {
       branch: 'specd/setup',
       title: `specd setup — knowledge base and agent working agreements`,
@@ -178,9 +186,63 @@ export class OnboardingAgent {
       })
       .where(eq(repositories.id, repo.id));
 
-    await run.log(change.reviewHint);
+    await log(change.reviewHint);
     return { ...change, fileCount: files.length };
   }
+
+  async run(input: {
+    repo: Repository;
+    projectName: string;
+    apiKey: string | null;
+    model: ModelId;
+    mode: AiMode;
+    run: RunHandle;
+  }): Promise<{ branch: string; url: string | null; reviewHint: string; fileCount: number }> {
+    const { repo, projectName, apiKey, model, mode, run } = input;
+
+    const prepared = await this.prepare({ repo, projectName, run });
+
+    // The model drafts the three docs that need judgement. The scaffold's
+    // other files are deterministic templates — no reason to spend tokens or
+    // risk hallucination on a runbook stub.
+    let drafted: DraftedDocs | null = null;
+    if (apiKey || mode === 'subscription_runner') {
+      await run.log('drafting architecture · conventions · glossary');
+      const result = await this.models.call<DraftedDocs>(mode, {
+        apiKey: apiKey ?? '',
+        model,
+        maxTokens: 16_000,
+        effort: 'high',
+        system: prepared.system,
+        user: prepared.user,
+        schema: prepared.schema,
+      });
+      if (result.model !== model) {
+        await run.log(
+          `requested ${model} but the provider served ${result.model}`,
+          'warn',
+        );
+      }
+      await run.meter(result.model, result.usage, result.billable);
+      drafted = result.parsed ?? null;
+      await run.log(`${result.usage.outputTokens} output tokens`);
+    }
+
+    return this.finalize(drafted, prepared.ctx, (message, level) => run.log(message, level));
+  }
+}
+
+export interface PreparedOnboardCall {
+  system: string;
+  user: string;
+  schema: Record<string, unknown>;
+  ctx: {
+    repo: Repository;
+    projectName: string;
+    stack: DetectedStack;
+    topLevelDirs: string[];
+    entryPoints: string[];
+  };
 }
 
 const SYSTEM_PROMPT = `You are the specd onboarding agent. You draft the first version of a repository's

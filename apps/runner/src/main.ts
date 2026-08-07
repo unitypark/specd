@@ -10,25 +10,29 @@ import { callClaude, isClaudeAvailable } from './claude.js';
  * (`SpecAgent.finalize`). This daemon only ever sees an opaque prompt+schema
  * request and returns a parsed reply.
  *
- * Scoped to `spec` jobs only (§9 follow-up) — `onboard`/`build` jobs need a
- * git checkout on this machine, which is a separate piece of work.
+ * `spec` and `onboard` jobs both reduce to "call the model, hand back JSON" —
+ * every VCS/DB-touching step for either stays server-side. `build` still
+ * does not dispatch here: it needs a real git checkout on this machine,
+ * which is a separate, larger piece of work (§9 follow-up).
  */
 
-interface SpecJobPayload {
-  kind: 'spec';
+interface JobPayload {
+  kind: string;
   system: string;
   user: string;
   schema: Record<string, unknown>;
   model: ModelId;
   maxTokens: number;
-  ticketKey: string;
+  ticketKey?: string;
 }
 
 interface ClaimedJob {
   id: string;
   kind: string;
-  payload: SpecJobPayload;
+  payload: JobPayload;
 }
+
+const DISPATCHABLE_KINDS = new Set(['spec', 'onboard']);
 
 const API = (process.env.SPECD_API ?? 'http://localhost:4000/api').replace(/\/$/, '');
 const TOKEN = process.env.SPECD_RUNNER_TOKEN;
@@ -72,9 +76,9 @@ async function pollOnce() {
   const job = await claim();
   if (!job) return;
 
-  console.log(`specd-runner: claimed ${job.kind} job ${job.id} (${job.payload.ticketKey})`);
+  console.log(`specd-runner: claimed ${job.kind} job ${job.id}${job.payload.ticketKey ? ` (${job.payload.ticketKey})` : ''}`);
 
-  if (job.kind !== 'spec') {
+  if (!DISPATCHABLE_KINDS.has(job.kind)) {
     await report(job.id, { status: 'failed', error: `This runner cannot execute "${job.kind}" jobs yet.` });
     return;
   }

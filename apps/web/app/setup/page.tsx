@@ -66,6 +66,7 @@ interface OnboardResult {
   fileCount?: number;
   error?: string;
   runId: string;
+  queued?: boolean;
 }
 
 export default function SetupWizard() {
@@ -368,6 +369,43 @@ export default function SetupWizard() {
       setBusy(false);
     }
   }
+
+  // A repo dispatched to a paired runner comes back `queued` with no
+  // branch/PR yet — poll each queued run until it finishes rather than
+  // leaving the wizard showing a result that never arrives.
+  useEffect(() => {
+    if (!project || !onboardResults?.some((r) => r.queued)) return;
+    const id = setInterval(async () => {
+      const updated = await Promise.all(
+        onboardResults.map(async (r) => {
+          if (!r.queued) return r;
+          try {
+            const { run } = await get<{ run: { status: string; result: Record<string, unknown> | null; error: string | null } }>(
+              `/projects/${project.slug}/runs/${r.runId}`,
+            );
+            if (run.status === 'succeeded' && run.result) {
+              return {
+                ...r,
+                queued: false,
+                branch: run.result.branch as string | undefined,
+                url: run.result.url as string | null | undefined,
+                fileCount: run.result.files as number | undefined,
+                reviewHint: 'Opened for review.',
+              };
+            }
+            if (run.status === 'failed') {
+              return { ...r, queued: false, error: run.error ?? 'The runner reported a failure.' };
+            }
+          } catch {
+            // Transient — the next tick tries again.
+          }
+          return r;
+        }),
+      );
+      setOnboardResults(updated);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [project, onboardResults]);
 
   // Local is always ready; GitLab and GitHub are ready once their respective
   // credential (token, installation id) has validated.
@@ -946,7 +984,13 @@ export default function SetupWizard() {
                   {onboardResults.map((r) => (
                     <div key={r.runId} className={r.error ? styles.bad : styles.good}>
                       <b>{r.repoName}</b>
-                      {r.error ? (
+                      {r.queued ? (
+                        <>
+                          {' '}
+                          — <span className="spinner" /> queued for your runner, waiting for it to
+                          pick this up…
+                        </>
+                      ) : r.error ? (
                         <> — {r.error}</>
                       ) : (
                         <>

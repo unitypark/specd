@@ -8,7 +8,11 @@
 -- handled it.
 --
 -- Rows are kept because they are the audit trail for "why did specd do that at
--- 03:00" (§10), and pruned by age rather than never.
+-- 03:00" (§10), and pruned by age rather than never. Pruning is implemented
+-- by WebhookRetentionService (apps/api/src/vcs/webhook-retention.service.ts),
+-- which runs on a timer, deletes rows strictly older than
+-- Config.webhookRetentionDays in batches (no single long-running
+-- transaction), and logs the deleted count on every run, including zero.
 
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   -- The X-GitHub-Delivery uuid. Not defaulted: it must come from GitHub.

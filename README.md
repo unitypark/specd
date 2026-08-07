@@ -228,7 +228,7 @@ metadata, run history. Delete a project and nothing you would miss is gone.
 ### Tests
 
 ```bash
-pnpm test        # 222 tests
+pnpm test        # 232 tests
 ```
 
 The gate and webhook tests run against real Postgres and skip themselves if
@@ -267,6 +267,7 @@ specd specs list             # every spec and its state
 specd specs list --status approved
 
 specd connect .              # register a local repo (code stays on your machine)
+specd runner pair XXXXX-XXXXX  # pair this machine as a self-hosted runner
 specd open CRM-131           # open the spec in the web app
 ```
 
@@ -315,6 +316,20 @@ steps:
 | `SPECD_PROJECT` | default project slug, overriding `specd use` |
 | `SPECD_TOKEN` | token to use instead of the stored one — for CI |
 | `SPECD_WEB` | web app origin; normally learned at login, used by `specd open` |
+| `SPECD_RUNNER_TOKEN` | runner token to use instead of the paired one |
+
+## Self-hosted runners
+
+`specd runner pair <code>` pairs a machine to a project — a runner token
+lands in its own keychain slot, separate from a signed-in user's own CLI
+token, and the command verifies outbound connectivity to the API before
+saying so. Generate a pairing code from the project's Settings page.
+
+**This is pairing only.** Nothing yet asks a paired runner to actually do
+anything — there is no job queue, no claim/report protocol, and the daemon
+that would poll for and execute work does not exist. What's built and what
+isn't, and why they shipped separately: [`docs/runners.md`](docs/runners.md),
+[`knowledge/decisions/0003-runner-pairing-before-dispatch.md`](knowledge/decisions/0003-runner-pairing-before-dispatch.md).
 
 ## The Build station
 
@@ -444,13 +459,17 @@ Stated plainly, because the plan phases these and the UI should not imply
 otherwise:
 
 - **Jira sync** (P3) — interface-ready, adapter absent.
-- **A GitLab connection UI** — the backend (adapter, webhook, hosted build) is
-  complete and tested; connecting a project still means a curl call
-  (`docs/gitlab.md`), the same place GitHub was before this. gitlab.com OAuth,
-  so connecting is a button instead of a pasted token, is not built.
-- **Remote runner pairing** (P2) — subscription mode works when specd runs on
-  the same machine as Claude Code (above). Pairing a *separate* runner over the
-  network, so a hosted specd can dispatch to your infrastructure, is not built.
+- **gitlab.com OAuth** — the wizard connects a GitLab project with a pasted
+  personal/project access token (validated live) rather than an OAuth button;
+  self-managed instances need a token regardless, since an OAuth app would
+  have to be registered per instance. A gitlab.com app narrowing this to a
+  click is optional wiring on top of the adapter, not built yet.
+- **Runner job dispatch** (P2) — `specd runner pair <code>` (above) pairs a
+  machine and hands it a credential; nothing yet dispatches work to it. There
+  is no job queue, no claim/report protocol, and the daemon that would poll
+  for and execute jobs does not exist — subscription mode still only works
+  when specd runs on the same machine as Claude Code. See
+  `docs/runners.md`.
 - **Spend billing** — spend is metered and capped; Stripe is not wired (P3).
 
 ---

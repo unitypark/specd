@@ -41,6 +41,9 @@ import { PipelineService } from './agents/pipeline.service.js';
 
 import { CliController } from './cli/cli.controller.js';
 
+import { RunnersService } from './runners/runners.service.js';
+import { RunnersController } from './runners/runners.controller.js';
+
 /**
  * One module. The system is small enough that splitting it into a dozen
  * feature modules would add ceremony without adding a boundary anyone
@@ -57,6 +60,7 @@ import { CliController } from './cli/cli.controller.js';
     CliController,
     GitHubController,
     GitLabController,
+    RunnersController,
   ],
   providers: [
     Config,
@@ -82,6 +86,7 @@ import { CliController } from './cli/cli.controller.js';
     BuildAgent,
     WorkspaceService,
     PipelineService,
+    RunnersService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

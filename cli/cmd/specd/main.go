@@ -62,6 +62,8 @@ func main() {
 		err = cmdSpecs(args[1:])
 	case "connect":
 		err = cmdConnect(args[1:])
+	case "runner":
+		err = cmdRunner(args[1:])
 	case "open":
 		err = cmdOpen(args[1:])
 	case "version", "--version", "-v":
@@ -98,6 +100,7 @@ func usage() {
   specd specs list               list specs and their states
 
   specd connect [path]           register a local repo with the project
+  specd runner pair <code>       pair this machine as a self-hosted runner
   specd open [id]                open the spec (or project) in the browser
 
 Flags:
@@ -110,6 +113,7 @@ Environment:
   SPECD_PROJECT                  default project slug
   SPECD_TOKEN                    token to use instead of the stored one
   SPECD_WEB                      web app origin (learned at login; used by open)
+  SPECD_RUNNER_TOKEN             runner token to use instead of the paired one
 
 Specs are pulled only when approved. That is enforced by the server, not here.
 `)
@@ -515,6 +519,49 @@ func cmdConnect(args []string) error {
 		fmt.Println("  note: working tree is dirty — commit or stash before running setup")
 	}
 	fmt.Println("\nCode never leaves this machine. Run setup from the app to scaffold knowledge/.")
+	return nil
+}
+
+func cmdRunner(args []string) error {
+	if len(args) == 0 || args[0] != "pair" {
+		return errors.New("usage: specd runner pair <code>")
+	}
+	return cmdRunnerPair(args[1:])
+}
+
+// cmdRunnerPair completes the handshake and verifies the two things it
+// promises to: that the code was valid, and that this machine can actually
+// reach the API outbound. It does not run any jobs — a runner is only paired
+// here, not started; the daemon that polls for and executes work is not
+// built yet (§9, remote runner pairing is landing in stages).
+func cmdRunnerPair(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: specd runner pair <code>")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	result, err := api.New(cfg.API, "").PairRunner(args[0])
+	if err != nil {
+		return err
+	}
+	if err := config.SaveRunnerToken(result.Token); err != nil {
+		return err
+	}
+
+	fmt.Printf("Paired with project %s.\n", result.Project)
+	fmt.Printf("Runner token stored%s.\n", keychainNote())
+
+	if err := api.New(cfg.API, result.Token).RunnerHeartbeat(); err != nil {
+		fmt.Fprintf(os.Stderr, "\nPaired, but the connectivity check failed: %v\n", err)
+		fmt.Fprintln(os.Stderr, "The token is stored; retry the check once the network issue is fixed.")
+		return nil
+	}
+	fmt.Println("Outbound connectivity to the API: OK.")
+	fmt.Println("\nThe job-polling daemon is not built yet — this command only completes pairing.")
 	return nil
 }
 

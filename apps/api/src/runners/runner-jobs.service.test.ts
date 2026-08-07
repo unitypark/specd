@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm';
 import { agentRuns, createDb, projects, tickets, type DbHandle } from '@specd/db';
 import type { SpecContent } from '@specd/shared';
 import { RunnersService } from './runners.service.js';
-import { RunnerJobsService, type SpecJobPayload } from './runner-jobs.service.js';
+import { RunnerJobsService, type OnboardJobPayload, type SpecJobPayload } from './runner-jobs.service.js';
+import type { DraftedDocs, OnboardingAgent } from '../agents/onboarding.agent.js';
 import { RunsService } from '../runs/runs.service.js';
 import { SpecsService } from '../specs/specs.service.js';
 import { SpecAgent } from '../agents/spec.agent.js';
@@ -26,6 +27,7 @@ let jobs: RunnerJobsService;
 let runs: RunsService;
 let projectId = '';
 let ticketId = '';
+const onboardFinalizeCalls: { parsed: DraftedDocs | null; ctx: OnboardJobPayload['ctx'] }[] = [];
 
 const reachable = await (async () => {
   try {
@@ -74,7 +76,16 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
     runners = new RunnersService(handle.db);
     const specs = new SpecsService(handle.db);
     const specAgent = new SpecAgent(null as unknown as never, null as unknown as never);
-    jobs = new RunnerJobsService(handle, runs, specAgent, specs);
+    // `finalize()` here does the real propose()/db-write against a real repo
+    // for genuine dispatch — a stub is enough to prove RunnerJobsService
+    // routes an `onboard` report to it and finishes the run correctly.
+    const onboardingAgent = {
+      finalize: async (parsed: DraftedDocs | null, ctx: OnboardJobPayload['ctx']) => {
+        onboardFinalizeCalls.push({ parsed, ctx });
+        return { branch: 'specd/setup', url: 'https://example.test/pr/1', reviewHint: 'Opened PR #1.', fileCount: 4 };
+      },
+    } as unknown as OnboardingAgent;
+    jobs = new RunnerJobsService(handle, runs, specAgent, onboardingAgent, specs);
 
     const [project] = await handle.db
       .insert(projects)
@@ -107,6 +118,38 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
         status: 'queued',
         ticketId,
         jobPayload: jobPayload as unknown as Record<string, unknown>,
+      })
+      .returning({ id: agentRuns.id });
+    return row!.id;
+  }
+
+  function onboardPayload(): OnboardJobPayload {
+    return {
+      kind: 'onboard',
+      system: 'onboard system prompt',
+      user: 'onboard user prompt',
+      schema: {},
+      model: 'claude-opus-5',
+      maxTokens: 16_000,
+      ctx: {
+        repo: { id: 'repo-1', name: 'acme/repo', provider: 'github', isPrimary: true } as unknown as OnboardJobPayload['ctx']['repo'],
+        projectName: 'Job Dispatch Test',
+        stack: {} as OnboardJobPayload['ctx']['stack'],
+        topLevelDirs: [],
+        entryPoints: [],
+      },
+    };
+  }
+
+  async function queueOnboardRun(payload: OnboardJobPayload) {
+    const [row] = await handle!.db
+      .insert(agentRuns)
+      .values({
+        projectId,
+        kind: 'onboard',
+        runner: 'self_hosted',
+        status: 'queued',
+        jobPayload: payload as unknown as Record<string, unknown>,
       })
       .returning({ id: agentRuns.id });
     return row!.id;
@@ -212,6 +255,29 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
         usage: { inputTokens: 1, outputTokens: 1 },
       }),
     ).rejects.toThrow(/not claimed by you/);
+  });
+
+  it('routes a succeeded onboard report to OnboardingAgent.finalize()', async () => {
+    const before = onboardFinalizeCalls.length;
+    const runId = await queueOnboardRun(onboardPayload());
+    const runner = await pairedRunner('onboard-runner');
+    const claimed = await jobs.claim(runner);
+    expect(claimed?.kind).toBe('onboard');
+
+    const drafted: DraftedDocs = { architecture: 'a', conventions: 'c', glossaryTerms: [] };
+    await jobs.report(runner, runId, {
+      status: 'succeeded',
+      parsed: drafted,
+      model: 'claude-opus-5',
+      usage: { inputTokens: 5, outputTokens: 5 },
+    });
+
+    expect(onboardFinalizeCalls.length).toBe(before + 1);
+    expect(onboardFinalizeCalls[before]?.parsed).toEqual(drafted);
+
+    const [row] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(row?.status).toBe('succeeded');
+    expect((row?.result as { url?: string })?.url).toBe('https://example.test/pr/1');
   });
 
   it('refuses a second report for an already-finished run', async () => {

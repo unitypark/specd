@@ -176,4 +176,58 @@ describe.skipIf(!reachable)('the human gate (integration)', () => {
       `,
     ).rejects.toThrow(/specs_approval_is_attributed/);
   });
+
+  describe('comments on UNVERIFIED points', () => {
+    it('attaches a comment to a specific design item on a draft spec', async () => {
+      const v2 = await service.latestForTicket(ticketId); // v2, still draft
+      const comment = await service.addComment({
+        specId: v2!.id,
+        specStatus: v2!.status,
+        section: 'design',
+        itemIndex: 0,
+        authorUserId: userId,
+        authorName: 'Gate Tester',
+        body: 'Which builder specifically?',
+      });
+
+      expect(comment.itemIndex).toBe(0);
+      expect(comment.section).toBe('design');
+
+      const comments = await service.comments(v2!.id);
+      expect(comments).toHaveLength(1);
+      expect(comments[0]?.body).toBe('Which builder specifically?');
+    });
+
+    it('rejects a whitespace-only comment without persisting it', async () => {
+      const v2 = await service.latestForTicket(ticketId);
+      await expect(
+        service.addComment({
+          specId: v2!.id,
+          specStatus: v2!.status,
+          section: 'design',
+          itemIndex: 0,
+          authorUserId: userId,
+          authorName: 'Gate Tester',
+          body: '   \n\t  ',
+        }),
+      ).rejects.toThrow(/cannot be empty/);
+    });
+
+    it('refuses a new comment on the stamped, approved version', async () => {
+      const v1 = await service.byId(projectId, (await service.latestForTicket(ticketId))!.supersedes!);
+      expect(v1.status).toBe('approved');
+
+      await expect(
+        service.addComment({
+          specId: v1.id,
+          specStatus: v1.status,
+          section: 'design',
+          itemIndex: 0,
+          authorUserId: userId,
+          authorName: 'Gate Tester',
+          body: 'too late now',
+        }),
+      ).rejects.toThrow(/comments are for clarifying a draft/);
+    });
+  });
 });

@@ -3,14 +3,15 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
-import type { ModelId, TokenUsage } from '@specd/shared';
-import { AiNotConfigured } from '../common/errors.js';
 import {
   SchemaMismatch,
   parseAgainstSchema,
   schemaInstruction,
   type ClaudeCodeEnvelope,
-} from './claude-code.parse.js';
+  type ModelId,
+  type TokenUsage,
+} from '@specd/shared';
+import { AiNotConfigured } from '../common/errors.js';
 import type { ModelCallOptions, ModelCallResult } from './anthropic.service.js';
 
 /**

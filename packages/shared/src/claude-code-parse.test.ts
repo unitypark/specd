@@ -5,7 +5,7 @@ import {
   parseAgainstSchema,
   repairControlCharacters,
   schemaInstruction,
-} from './claude-code.parse.js';
+} from './claude-code-parse.js';
 
 const schema = {
   type: 'object',

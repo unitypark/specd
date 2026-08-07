@@ -101,6 +101,7 @@ func usage() {
 
   specd connect [path]           register a local repo with the project
   specd runner pair <code>       pair this machine as a self-hosted runner
+  specd runner token             print the stored runner token (for SPECD_RUNNER_TOKEN)
   specd open [id]                open the spec (or project) in the browser
 
 Flags:
@@ -523,10 +524,29 @@ func cmdConnect(args []string) error {
 }
 
 func cmdRunner(args []string) error {
-	if len(args) == 0 || args[0] != "pair" {
-		return errors.New("usage: specd runner pair <code>")
+	if len(args) == 0 {
+		return errors.New("usage: specd runner pair <code> | specd runner token")
 	}
-	return cmdRunnerPair(args[1:])
+	switch args[0] {
+	case "pair":
+		return cmdRunnerPair(args[1:])
+	case "token":
+		return cmdRunnerToken()
+	default:
+		return errors.New("usage: specd runner pair <code> | specd runner token")
+	}
+}
+
+// cmdRunnerToken prints the stored runner token so it can be handed to the
+// job-polling daemon (`apps/runner`), which runs as a separate process and
+// has no keychain access of its own: `SPECD_RUNNER_TOKEN=$(specd runner token) specd-runner`.
+func cmdRunnerToken() error {
+	token, err := config.LoadRunnerToken()
+	if err != nil {
+		return err
+	}
+	fmt.Println(token)
+	return nil
 }
 
 // cmdRunnerPair completes the handshake and verifies the two things it

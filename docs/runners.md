@@ -1,9 +1,10 @@
 # Self-hosted runners
 
-**Status: pairing only.** This document describes what is actually built —
-a machine can prove itself to a project and receive a credential. It cannot
-yet be dispatched a job. See "What is not built yet" below before assuming
-more than that.
+**Status: pairing + spec dispatch.** A machine can prove itself to a
+project, receive a credential, and be handed `spec`-drafting jobs to
+execute with its own local Claude Code. `onboard`/`build` dispatch (which
+need a git checkout on the runner) are not built yet — see "What is not
+built yet" below.
 
 A runner is a machine, not a user. It pairs with a project using a short
 code — the same shape `specd login`'s device flow uses for a human at a
@@ -65,28 +66,45 @@ pairing, and how long since it was last heard from. Removing one from there
 revokes it immediately — its stored token stops authenticating on the very
 next request, there is no grace period.
 
+## Run the daemon
+
+Once a machine is paired, start the daemon that actually polls for and
+executes work — `apps/runner`, published as `@specd/runner` with a
+`specd-runner` bin:
+
+```bash
+SPECD_RUNNER_TOKEN=$(specd runner token) SPECD_API=http://localhost:4000/api \
+  pnpm --filter @specd/runner start
+```
+
+It polls `POST /runners/jobs/claim` on an interval (`SPECD_RUNNER_POLL_MS`,
+default 5s). When a job is queued for this project, it drives the local
+`claude` CLI the same way `subscription_runner` mode does when specd runs
+beside a logged-in Claude Code, then reports the parsed result back with
+`POST /runners/jobs/:id/report`. It never touches the database or the
+knowledge index directly — the server does all of the DB-dependent work
+(retrieval, prompt assembly, and after the fact, saving the resulting spec
+version) on either side of the daemon's one job: drive the model and hand
+back a parsed reply.
+
+The `PipelineService` picks a paired runner automatically whenever a
+project's AI mode is `subscription_runner` and a runner is paired to it —
+no runner picked, no dispatch: the existing synchronous path (specd's own
+process shelling out to a local `claude`) runs exactly as before.
+
 ## What is not built yet
 
-Pairing proves a machine and hands it a credential. **Nothing yet asks that
-machine to do anything.** Specifically absent:
-
-- **A job queue.** Every agent run today — hosted or not — executes
-  synchronously inside the API process. `AgentRun.runner` is a label for the
-  billing/observability story (subscription quota vs. metered tokens), not a
-  dispatch target.
-- **A job-claim/report protocol.** There is no `GET /runner/jobs`,
-  no claim, no way for a paired runner to be told "draft this spec" or
-  "build this branch" and hand results back.
-- **The runner daemon itself** — the long-running process that would poll
-  for jobs and execute them locally (shelling out to the runner's own
-  `claude` binary, cloning and pushing with git the way the hosted build
-  station already does, just on the runner's own machine instead of the
-  platform's). `specd runner pair` completes the handshake and stops there.
-
-`specd runner pair` is genuinely useful today on its own — it is the
-diagnostic step ("is this code valid, is this machine reachable, is the
-token good") that any dispatch protocol will need regardless of its final
-shape. It is not, yet, a way to actually run anything.
+- **`onboard`/`build` dispatch.** Those job kinds need a git checkout on the
+  runner's own machine (clone, branch, push) — spec drafting needs none of
+  that, which is why it shipped first. The queue/claim/report protocol
+  already generalizes to other job kinds; only the runner-side git handling
+  and the corresponding `prepare`/`finalize` split for those agents are
+  missing.
+- **Concurrency.** The daemon claims and runs one job at a time. A runner
+  with capacity to spare has no way to say so.
+- **Retry/backoff on daemon crash.** A job claimed by a runner that then
+  dies stays `running` forever — there is no lease timeout that would let
+  another runner (or the same one, restarted) reclaim it.
 
 ## Reference
 
@@ -97,6 +115,8 @@ shape. It is not, yet, a way to actually run anything.
 | `DELETE /projects/:slug/runners/:id` | Project member (owner/maintainer) | user token |
 | `POST /runners/pair` | The runner | none — the pairing code *is* the credential |
 | `POST /runners/heartbeat` | The runner | runner bearer token |
+| `POST /runners/jobs/claim` | The runner | runner bearer token |
+| `POST /runners/jobs/:id/report` | The runner | runner bearer token |
 
 The runner token is hashed (SHA-256) at rest, not encrypted — it is a
 256-bit random value, not a secret a person chose, so there is nothing a

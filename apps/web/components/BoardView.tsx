@@ -108,6 +108,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
   const [composing, setComposing] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newBody, setNewBody] = useState('');
+  const [waitingForRunner, setWaitingForRunner] = useState(false);
 
   const load = useCallback(async () => {
     const board = await get<{ columns: Column[]; cards: Card[] }>(`/projects/${slug}/board`);
@@ -151,11 +152,35 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
       setOpen(ticketId);
       setTab('req');
       setDetail(null);
+      setWaitingForRunner(false);
       const d = await get<TicketDetail>(`/projects/${slug}/board/tickets/${ticketId}`);
       setDetail(d);
     },
     [slug],
   );
+
+  // A spec dispatched to a paired runner (§9) has no synchronous result — the
+  // runner polls, executes, and reports back on its own schedule. Poll the
+  // ticket ourselves until its spec shows up, rather than leaving the drawer
+  // stuck on the "Generate spec" button with no feedback (and no guard
+  // against a confused second click queuing a duplicate job).
+  useEffect(() => {
+    if (!waitingForRunner || !open) return;
+    const id = setInterval(async () => {
+      try {
+        const d = await get<TicketDetail>(`/projects/${slug}/board/tickets/${open}`);
+        setDetail(d);
+        if (d.spec) {
+          setWaitingForRunner(false);
+          await load();
+          onChange();
+        }
+      } catch {
+        // Transient — the next tick tries again.
+      }
+    }, 4000);
+    return () => clearInterval(id);
+  }, [waitingForRunner, open, slug, load, onChange]);
 
   async function act(label: string, fn: () => Promise<unknown>) {
     setBusy(label);
@@ -444,17 +469,24 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                 )}
 
                 <div className={styles.dfoot}>
-                  {!spec && (
+                  {!spec && waitingForRunner && (
+                    <button type="button" className="btn primary" disabled>
+                      <span className="spinner" /> Queued for your runner — waiting for it to pick this up…
+                    </button>
+                  )}
+
+                  {!spec && !waitingForRunner && (
                     <button
                       type="button"
                       className="btn primary"
                       disabled={busy === 'gen'}
                       onClick={() =>
-                        act('gen', () =>
-                          post(
+                        act('gen', async () => {
+                          const res = await post<{ spec: SpecView | null; queued?: boolean }>(
                             `/projects/${slug}/board/tickets/${detail.ticket.id}/generate-spec`,
-                          ),
-                        )
+                          );
+                          if (res.queued) setWaitingForRunner(true);
+                        })
                       }
                     >
                       {busy === 'gen' ? (

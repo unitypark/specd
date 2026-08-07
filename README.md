@@ -464,12 +464,11 @@ otherwise:
   self-managed instances need a token regardless, since an OAuth app would
   have to be registered per instance. A gitlab.com app narrowing this to a
   click is optional wiring on top of the adapter, not built yet.
-- **Runner job dispatch** (P2) — `specd runner pair <code>` (above) pairs a
-  machine and hands it a credential; nothing yet dispatches work to it. There
-  is no job queue, no claim/report protocol, and the daemon that would poll
-  for and execute jobs does not exist — subscription mode still only works
-  when specd runs on the same machine as Claude Code. See
-  `docs/runners.md`.
+- **`onboard`/`build` runner dispatch** (P2) — a paired runner (`specd runner
+  pair <code>`) can be dispatched `spec`-drafting jobs today, executed by the
+  `@specd/runner` daemon on the runner's own machine. `onboard`/`build` jobs
+  still only run in-process, since they need a git checkout the runner-side
+  dispatch protocol does not yet hand off. See `docs/runners.md`.
 - **Spend billing** — spend is metered and capped; Stripe is not wired (P3).
 
 ---

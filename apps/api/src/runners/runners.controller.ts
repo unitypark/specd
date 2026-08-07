@@ -10,11 +10,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { IsString, MaxLength, MinLength } from 'class-validator';
+import type { ModelId, TokenUsage } from '@specd/shared';
 import { Public } from '../auth/auth.guard.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { TokenClaims } from '../auth/auth.service.js';
 import { ProjectsService } from '../projects/projects.service.js';
 import { RunnersService } from './runners.service.js';
+import { RunnerJobsService } from './runner-jobs.service.js';
 
 class CreateRunnerDto {
   @IsString() @MinLength(1) @MaxLength(80) name!: string;
@@ -36,6 +38,7 @@ class PairRunnerDto {
 export class RunnersController {
   constructor(
     private readonly runners: RunnersService,
+    private readonly jobs: RunnerJobsService,
     private readonly projects: ProjectsService,
   ) {}
 
@@ -98,9 +101,41 @@ export class RunnersController {
   @Public()
   @Post('runners/heartbeat')
   async heartbeat(@Headers('authorization') authorization: string | undefined) {
+    const runner = await this.runnerFrom(authorization);
+    return { ok: true, name: runner.name };
+  }
+
+  /**
+   * A runner asking for work. Returns `{ job: null }` — not a 404 — when
+   * there is nothing queued; "poll again later" is the expected outcome most
+   * of the time, not an error.
+   */
+  @Public()
+  @Post('runners/jobs/claim')
+  async claimJob(@Headers('authorization') authorization: string | undefined) {
+    const runner = await this.runnerFrom(authorization);
+    const job = await this.jobs.claim(runner);
+    return { job };
+  }
+
+  @Public()
+  @Post('runners/jobs/:id/report')
+  async reportJob(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Headers('authorization') authorization: string | undefined,
+    @Body()
+    body:
+      | { status: 'succeeded'; parsed: unknown; model: ModelId; usage: TokenUsage; billable?: boolean }
+      | { status: 'failed'; error: string },
+  ) {
+    const runner = await this.runnerFrom(authorization);
+    await this.jobs.report(runner, id, body);
+    return { ok: true };
+  }
+
+  private async runnerFrom(authorization: string | undefined) {
     const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined;
     if (!token) throw new UnauthorizedException('Missing bearer token');
-    const runner = await this.runners.authenticate(token);
-    return { ok: true, name: runner.name };
+    return this.runners.authenticate(token);
   }
 }

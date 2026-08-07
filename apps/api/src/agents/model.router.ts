@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { AiMode } from '@specd/shared';
+import { RunnersService } from '../runners/runners.service.js';
 import { AnthropicService, type ModelCallOptions, type ModelCallResult } from './anthropic.service.js';
 import { ClaudeCodeProvider } from './claude-code.provider.js';
 
@@ -22,6 +23,7 @@ export class ModelRouter {
   constructor(
     private readonly api: AnthropicService,
     private readonly claudeCode: ClaudeCodeProvider,
+    private readonly runners: RunnersService,
   ) {}
 
   async call<T = unknown>(
@@ -39,18 +41,38 @@ export class ModelRouter {
     return { ...result, billable: true };
   }
 
-  /** Preflight for the wizard: can this machine actually run subscription mode? */
-  async describeMode(mode: AiMode): Promise<{ ok: boolean; detail: string }> {
+  /**
+   * Preflight: can subscription mode actually run for this project? Two
+   * independent ways to say yes — local Claude Code on this machine (true for
+   * a single-machine dev setup, never true for a genuinely hosted deployment),
+   * or a runner already paired to `projectId` (the only way a hosted specd,
+   * with no local `claude` of its own, can offer this mode at all). `projectId`
+   * is optional because the wizard's very first AI-mode preflight
+   * (`GET /projects/ai-modes`) runs before a project exists to pair a runner
+   * against — that call can only ever see the local-machine answer.
+   */
+  async describeMode(mode: AiMode, projectId?: string): Promise<{ ok: boolean; detail: string }> {
     if (mode !== 'subscription_runner') {
       return { ok: true, detail: 'Uses the Messages API.' };
     }
+
+    const pairedRunner = projectId ? await this.runners.pickPaired(projectId) : null;
+    if (pairedRunner) {
+      return {
+        ok: true,
+        detail: `Will dispatch to your paired runner "${pairedRunner.name}", which drives its own local Claude Code. No credential is stored by specd.`,
+      };
+    }
+
     const available = await this.claudeCode.isAvailable();
     if (!available) {
       return {
         ok: false,
-        detail:
-          'The Claude Code CLI is not on this machine’s PATH. Subscription mode runs `claude` ' +
-          'locally with your own login — install it and sign in, or pick another mode.',
+        detail: projectId
+          ? 'No runner is paired to this project, and the Claude Code CLI is not on this ' +
+            'machine’s PATH either. Pair a runner in Settings, or pick another mode.'
+          : 'The Claude Code CLI is not on this machine’s PATH. Subscription mode runs `claude` ' +
+            'locally with your own login — install it and sign in, or pick another mode.',
       };
     }
     const version = await this.claudeCode.version();

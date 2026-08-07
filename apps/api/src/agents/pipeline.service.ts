@@ -15,6 +15,8 @@ import { KnowledgeService } from '../knowledge/knowledge.service.js';
 import { SpecsService } from '../specs/specs.service.js';
 import { BoardService } from '../board/board.service.js';
 import { RunsService } from '../runs/runs.service.js';
+import { RunnersService } from '../runners/runners.service.js';
+import type { SpecJobPayload } from '../runners/runner-jobs.service.js';
 import { OnboardingAgent } from './onboarding.agent.js';
 import { SpecAgent } from './spec.agent.js';
 import { BuildAgent } from './build.agent.js';
@@ -42,6 +44,7 @@ export class PipelineService {
     private readonly specs: SpecsService,
     private readonly board: BoardService,
     private readonly runs: RunsService,
+    private readonly runners: RunnersService,
     private readonly onboarding: OnboardingAgent,
     private readonly specAgent: SpecAgent,
     private readonly build: BuildAgent,
@@ -122,7 +125,7 @@ export class PipelineService {
     actor: { userId: string; name: string };
     /** Set when re-drafting: v2 consumes the review discussion. */
     reviseFromSpecId?: string;
-  }): Promise<{ spec: SpecView; runId: string }> {
+  }): Promise<{ spec: SpecView | null; runId: string; queued?: boolean }> {
     await this.runs.assertCanRun(input.projectId);
 
     const project = await this.projects.byId(input.projectId);
@@ -147,6 +150,14 @@ export class PipelineService {
       previousContent = previous.content;
     }
 
+    // A paired runner takes priority over local Claude Code when both could
+    // serve this request — pairing is an explicit statement of where the
+    // customer wants their subscription quota spent, and dogfooding the real
+    // dispatch path in dev is more honest than a synchronous shortcut that a
+    // hosted deployment (no local `claude` at all) could never take anyway.
+    const pairedRunner =
+      ai.mode === 'subscription_runner' ? await this.runners.pickPaired(project.id) : null;
+
     const run = await this.runs.start({
       projectId: input.projectId,
       kind: 'spec',
@@ -156,6 +167,48 @@ export class PipelineService {
       triggeredByName: input.actor.name,
       ticketId: ticket.id,
     });
+
+    if (pairedRunner) {
+      try {
+        const prepared = await this.specAgent.prepare({
+          projectId: project.id,
+          projectName: project.name,
+          ticketKey: ticket.key,
+          title: ticket.title,
+          body: ticket.body,
+          repoNames: repos.map((r) => r.name),
+          primaryRepo: primary.name,
+          run,
+          revisionNotes,
+          previousContent,
+        });
+
+        const payload: SpecJobPayload = {
+          kind: 'spec',
+          system: prepared.system,
+          user: prepared.user,
+          schema: prepared.schema,
+          model,
+          maxTokens: 32_000,
+          effort: 'high',
+          chunks: prepared.chunks,
+          slug: prepared.slug,
+          ticketKey: ticket.key,
+          ticketId: ticket.id,
+          primaryRepo: primary.name,
+          projectId: project.id,
+        };
+        await this.runs.queueForRunner(run.id, payload as unknown as Record<string, unknown>);
+        await run.log(`queued for runner "${pairedRunner.name}" — waiting for it to poll`);
+
+        return { spec: null, runId: run.id, queued: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await run.log(message, 'error');
+        await this.runs.finish(run.id, { status: 'failed', error: message });
+        throw err;
+      }
+    }
 
     try {
       const draft = await this.specAgent.draft({

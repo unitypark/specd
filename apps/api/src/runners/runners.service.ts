@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, sql } from 'drizzle-orm';
 import { projects, runners, type Db, type Runner } from '@specd/db';
 import { DB } from '../db/db.module.js';
 
@@ -114,6 +114,24 @@ export class RunnersService {
 
     await this.db.update(runners).set({ lastSeenAt: new Date() }).where(eq(runners.id, row.id));
     return row;
+  }
+
+  /**
+   * Is there a runner worth dispatching to for this project? The most
+   * recently paired one, on the theory that whoever paired last is most
+   * likely still around — there is no liveness threshold here (a runner that
+   * has never polled since pairing is still "available" in this sense; a
+   * queued job simply waits). Job dispatch is what actually tests whether a
+   * runner is alive; this is only ever asked "should a job be queued at all."
+   */
+  async pickPaired(projectId: string): Promise<Runner | null> {
+    const [row] = await this.db
+      .select()
+      .from(runners)
+      .where(and(eq(runners.projectId, projectId), sql`${runners.pairedAt} IS NOT NULL`))
+      .orderBy(desc(runners.pairedAt))
+      .limit(1);
+    return row ?? null;
   }
 }
 

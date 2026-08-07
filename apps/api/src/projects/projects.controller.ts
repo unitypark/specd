@@ -229,8 +229,9 @@ export class ProjectsController {
 
     if (dto.mode === 'subscription_runner') {
       // Fail here rather than in the first agent run: subscription mode only
-      // works where specd runs beside the user's Claude Code (D2).
-      validation = await this.modelRouter.describeMode('subscription_runner');
+      // works where specd runs beside the user's Claude Code (D2), or where a
+      // runner is already paired to this project and can dispatch for it.
+      validation = await this.modelRouter.describeMode('subscription_runner', project.id);
       if (!validation.ok) return validation;
     }
 

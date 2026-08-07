@@ -42,6 +42,7 @@ import { PipelineService } from './agents/pipeline.service.js';
 import { CliController } from './cli/cli.controller.js';
 
 import { RunnersService } from './runners/runners.service.js';
+import { RunnerJobsService } from './runners/runner-jobs.service.js';
 import { RunnersController } from './runners/runners.controller.js';
 
 /**
@@ -87,6 +88,7 @@ import { RunnersController } from './runners/runners.controller.js';
     WorkspaceService,
     PipelineService,
     RunnersService,
+    RunnerJobsService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

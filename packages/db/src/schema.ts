@@ -225,6 +225,24 @@ export const specComments = pgTable(
   (t) => [index('spec_comments_spec_idx').on(t.specId)],
 );
 
+export const runners = pgTable(
+  'runners',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** Short pairing code shown in the wizard: XK4-9TR. */
+    pairCode: text('pair_code').notNull(),
+    pairedAt: timestamp('paired_at', { withTimezone: true }),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    tokenHash: text('token_hash'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('runners_pair_code_key').on(t.pairCode)],
+);
+
 /** Every agent interaction is an immutable, auditable record (§12). */
 export const agentRuns = pgTable(
   'agent_runs',
@@ -238,6 +256,7 @@ export const agentRuns = pgTable(
     /** hosted | self_hosted */
     runner: text('runner').notNull().default('hosted'),
     model: text('model'),
+    /** queued | running | succeeded | failed | cancelled */
     status: text('status').notNull().default('queued'),
     triggeredByUserId: uuid('triggered_by_user_id').references(() => users.id, {
       onDelete: 'set null',
@@ -245,6 +264,22 @@ export const agentRuns = pgTable(
     triggeredByName: text('triggered_by_name'),
     ticketId: uuid('ticket_id').references(() => tickets.id, { onDelete: 'set null' }),
     repositoryId: uuid('repository_id').references(() => repositories.id, { onDelete: 'set null' }),
+    /**
+     * The runner that claimed this job — null until claimed, and always null
+     * for a `hosted` run. Set atomically by the claim query, never by a
+     * separate write, so two runners racing for the same queued job cannot
+     * both win (§ runner job dispatch).
+     */
+    runnerId: uuid('runner_id').references(() => runners.id, { onDelete: 'set null' }),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    /**
+     * Everything a runner needs to execute a queued job, and everything the
+     * server needs to finish it once the runner reports back — assembled
+     * server-side (knowledge retrieval, prompt construction) before the run
+     * is ever queued, since a runner has no database access of its own.
+     * Cleared once the run finishes; nothing here outlives the run it belongs to.
+     */
+    jobPayload: jsonb('job_payload').$type<Record<string, unknown>>(),
     inputTokens: integer('input_tokens').notNull().default(0),
     outputTokens: integer('output_tokens').notNull().default(0),
     cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
@@ -259,6 +294,7 @@ export const agentRuns = pgTable(
   (t) => [
     index('agent_runs_project_created_idx').on(t.projectId, t.createdAt),
     index('agent_runs_project_status_idx').on(t.projectId, t.status),
+    index('agent_runs_queued_idx').on(t.projectId, t.status, t.runnerId),
   ],
 );
 
@@ -333,24 +369,6 @@ export const knowledgeChunks = pgTable(
     index('knowledge_chunks_doc_idx').on(t.docId),
     index('knowledge_chunks_project_idx').on(t.projectId),
   ],
-);
-
-export const runners = pgTable(
-  'runners',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    projectId: uuid('project_id')
-      .notNull()
-      .references(() => projects.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    /** Short pairing code shown in the wizard: XK4-9TR. */
-    pairCode: text('pair_code').notNull(),
-    pairedAt: timestamp('paired_at', { withTimezone: true }),
-    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
-    tokenHash: text('token_hash'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [uniqueIndex('runners_pair_code_key').on(t.pairCode)],
 );
 
 /**

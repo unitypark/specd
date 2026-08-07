@@ -94,6 +94,15 @@ const SPEC_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/** Everything needed to make the model call, once retrieval and prompt assembly are done. */
+export interface PreparedSpecCall {
+  system: string;
+  user: string;
+  schema: Record<string, unknown>;
+  chunks: RetrievedChunk[];
+  slug: string;
+}
+
 /**
  * SpecAgent — station 03.
  *
@@ -109,6 +118,15 @@ const SPEC_SCHEMA = {
  * so it is delimited and labelled as data — and even a successful injection
  * only reaches a *draft*, which a human must approve before any coding agent
  * sees it (§12).
+ *
+ * `prepare()` and `finalize()` are split out from `draft()` because retrieval
+ * needs the database and normalization needs nothing at all — only the model
+ * call in between needs to happen wherever the AI mode says it should. A
+ * dispatched run (runner job queue) calls `prepare()` server-side, hands the
+ * runner exactly what `prepare()` returned, and calls `finalize()` once the
+ * runner reports a result — `draft()` itself is just the synchronous path
+ * (local Claude Code or the Messages API) gluing the same three steps together
+ * in one call, unchanged from before this split.
  */
 @Injectable()
 export class SpecAgent {
@@ -116,6 +134,55 @@ export class SpecAgent {
     private readonly knowledge: KnowledgeService,
     private readonly models: ModelRouter,
   ) {}
+
+  async prepare(input: {
+    projectId: string;
+    projectName: string;
+    ticketKey: string;
+    title: string;
+    body: string;
+    repoNames: string[];
+    primaryRepo: string;
+    run: RunHandle;
+    /** Review discussion, when re-drafting. v2 consumes the threads (§8). */
+    revisionNotes?: string[];
+    previousContent?: SpecContent;
+  }): Promise<PreparedSpecCall> {
+    const { run } = input;
+
+    await run.log(`ticket ${input.ticketKey} fetched`);
+
+    const query = `${input.title}\n${input.body}`;
+    const chunks = await this.knowledge.retrieve(input.projectId, query, 14);
+    await run.log(
+      `retrieved ${chunks.length} chunk(s) from the knowledge base` +
+        (chunks.length
+          ? `: ${[...new Set(chunks.map((c) => c.path))].slice(0, 4).join(', ')}`
+          : ' — nothing indexed yet, the design will be mostly UNVERIFIED'),
+    );
+
+    const slug = slugify(input.title);
+    return {
+      system: buildSystemPrompt({
+        repoNames: input.repoNames,
+        primaryRepo: input.primaryRepo,
+        asBuiltFile: asBuiltPath(input.ticketKey, slug),
+      }),
+      user: buildUserPrompt({ ...input, chunks, slug }),
+      schema: SPEC_SCHEMA as unknown as Record<string, unknown>,
+      chunks,
+      slug,
+    };
+  }
+
+  /** Turns a raw parsed model reply — from either path — into a validated SpecContent. */
+  finalize(
+    parsed: SpecContent | undefined,
+    chunks: RetrievedChunk[],
+    ctx: { ticketKey: string; slug: string; primaryRepo: string },
+  ): SpecContent {
+    return normalizeSpecContent(parsed, { ...ctx, chunks });
+  }
 
   async draft(input: {
     projectId: string;
@@ -135,17 +202,6 @@ export class SpecAgent {
   }): Promise<SpecDraftResult> {
     const { run } = input;
 
-    await run.log(`ticket ${input.ticketKey} fetched`);
-
-    const query = `${input.title}\n${input.body}`;
-    const chunks = await this.knowledge.retrieve(input.projectId, query, 14);
-    await run.log(
-      `retrieved ${chunks.length} chunk(s) from the knowledge base` +
-        (chunks.length
-          ? `: ${[...new Set(chunks.map((c) => c.path))].slice(0, 4).join(', ')}`
-          : ' — nothing indexed yet, the design will be mostly UNVERIFIED'),
-    );
-
     if (input.mode !== 'subscription_runner' && !input.apiKey) {
       throw new Error(
         'No Anthropic API key available for this project — cannot draft a spec. ' +
@@ -153,19 +209,16 @@ export class SpecAgent {
       );
     }
 
-    const slug = slugify(input.title);
+    const prepared = await this.prepare(input);
+
     const result = await this.models.call<SpecContent>(input.mode, {
       apiKey: input.apiKey ?? '',
       model: input.model,
       maxTokens: 32_000,
       effort: 'high',
-      system: buildSystemPrompt({
-        repoNames: input.repoNames,
-        primaryRepo: input.primaryRepo,
-        asBuiltFile: asBuiltPath(input.ticketKey, slug),
-      }),
-      user: buildUserPrompt({ ...input, chunks, slug }),
-      schema: SPEC_SCHEMA as unknown as Record<string, unknown>,
+      system: prepared.system,
+      user: prepared.user,
+      schema: prepared.schema,
       onDelta: () => {
         // Deltas keep the connection warm; the structured result is what counts.
       },
@@ -181,11 +234,10 @@ export class SpecAgent {
     }
     await run.meter(result.model, result.usage, result.billable);
 
-    const content = normalizeSpecContent(result.parsed, {
+    const content = this.finalize(result.parsed, prepared.chunks, {
       ticketKey: input.ticketKey,
-      slug,
+      slug: prepared.slug,
       primaryRepo: input.primaryRepo,
-      chunks,
     });
 
     await run.log(
@@ -194,9 +246,8 @@ export class SpecAgent {
         `${content.tasks.length} task(s)`,
     );
 
-    return { content, model: result.model, usedChunks: chunks };
+    return { content, model: result.model, usedChunks: prepared.chunks };
   }
-
 }
 
 /**

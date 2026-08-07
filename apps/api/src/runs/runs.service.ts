@@ -94,24 +94,55 @@ export class RunsService {
       this.bus.emit(runId, line);
     };
 
-    const meter = async (model: ModelId, usage: TokenUsage, billable = true) => {
-      // Subscription runs consume quota, not euros — metering an API list
-      // price would show money the user was never charged.
-      const cents = billable ? costEurCents(model, usage, this.config.usdToEur) : 0;
-      await this.db
-        .update(agentRuns)
-        .set({
-          model,
-          inputTokens: sql`${agentRuns.inputTokens} + ${usage.inputTokens}`,
-          outputTokens: sql`${agentRuns.outputTokens} + ${usage.outputTokens}`,
-          cacheReadTokens: sql`${agentRuns.cacheReadTokens} + ${usage.cacheReadInputTokens ?? 0}`,
-          cacheWriteTokens: sql`${agentRuns.cacheWriteTokens} + ${usage.cacheCreationInputTokens ?? 0}`,
-          costCents: sql`${agentRuns.costCents} + ${cents}`,
-        })
-        .where(eq(agentRuns.id, runId));
-    };
+    const meter = async (model: ModelId, usage: TokenUsage, billable = true) =>
+      this.meterRun(runId, model, usage, billable);
 
     return { id: runId, log, meter };
+  }
+
+  /**
+   * Move an already-created run into the queue for a self-hosted runner to
+   * claim, carrying everything the runner needs to execute it and everything
+   * this service needs to finish it once a result comes back. Used instead of
+   * `start()` finishing synchronously when a paired runner exists — the run
+   * still gets a `RunHandle` from `start()` first, so preparation (retrieval,
+   * prompt assembly) logs exactly the way the synchronous path already does.
+   */
+  async queueForRunner(runId: string, jobPayload: Record<string, unknown>): Promise<void> {
+    await this.db
+      .update(agentRuns)
+      .set({ status: 'queued', runner: 'self_hosted', jobPayload })
+      .where(eq(agentRuns.id, runId));
+  }
+
+  /** The direct-by-id counterpart to a `RunHandle`'s `meter` — for a run
+   *  whose original handle is gone, as it is once a job dispatch reports back. */
+  async meterRun(runId: string, model: ModelId, usage: TokenUsage, billable = true): Promise<void> {
+    // Subscription runs consume quota, not euros — metering an API list
+    // price would show money the user was never charged.
+    const cents = billable ? costEurCents(model, usage, this.config.usdToEur) : 0;
+    await this.db
+      .update(agentRuns)
+      .set({
+        model,
+        inputTokens: sql`${agentRuns.inputTokens} + ${usage.inputTokens}`,
+        outputTokens: sql`${agentRuns.outputTokens} + ${usage.outputTokens}`,
+        cacheReadTokens: sql`${agentRuns.cacheReadTokens} + ${usage.cacheReadInputTokens ?? 0}`,
+        cacheWriteTokens: sql`${agentRuns.cacheWriteTokens} + ${usage.cacheCreationInputTokens ?? 0}`,
+        costCents: sql`${agentRuns.costCents} + ${cents}`,
+      })
+      .where(eq(agentRuns.id, runId));
+  }
+
+  /** Append a log line to a run directly, for the same reason `meterRun` exists. */
+  async logRun(runId: string, message: string, level: 'info' | 'warn' | 'error' = 'info'): Promise<void> {
+    const safe = redactSecrets(message);
+    const [{ next } = { next: 1 }] = await this.db
+      .select({ next: sql<number>`coalesce(max(${runLogs.seq}), 0) + 1` })
+      .from(runLogs)
+      .where(eq(runLogs.runId, runId));
+    await this.db.insert(runLogs).values({ runId, seq: next, level, message: safe });
+    this.bus.emit(runId, { at: new Date().toISOString(), level, message: safe });
   }
 
   async finish(

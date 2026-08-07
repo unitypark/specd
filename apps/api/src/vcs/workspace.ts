@@ -6,6 +6,7 @@ import { simpleGit } from 'simple-git';
 import type { Repository } from '@specd/db';
 import { Config } from '../config.js';
 import { GitHubAdapter } from './github.adapter.js';
+import { GitLabAdapter } from './gitlab.adapter.js';
 import { VcsService } from './vcs.service.js';
 import { VcsError } from './vcs.types.js';
 
@@ -56,6 +57,8 @@ export class WorkspaceService {
         return this.createLocal(repo, branch);
       case 'github':
         return this.createGitHub(repo, branch);
+      case 'gitlab':
+        return this.createGitLab(repo, branch);
       default:
         throw new VcsError(
           `Hosted builds do not support ${repo.provider} repositories yet. Use ` +
@@ -128,7 +131,7 @@ export class WorkspaceService {
       // only; `git clone -c` would persist it into the new repository, leaving
       // a live credential on disk for as long as the workspace exists.
       await simpleGit().raw([
-        ...this.authArgs(token),
+        ...this.authArgs('x-access-token', token),
         'clone',
         '--depth',
         '1',
@@ -167,7 +170,7 @@ export class WorkspaceService {
         // and the run must say so.
         // Force-push: a re-run of the same spec replaces its branch rather than
         // failing on a non-fast-forward. The branch belongs to this spec.
-        await git.raw([...this.authArgs(token), 'push', '--force', cloneUrl, `HEAD:${branch}`]);
+        await git.raw([...this.authArgs('x-access-token', token), 'push', '--force', cloneUrl, `HEAD:${branch}`]);
 
         const adapter = new GitHubAdapter(token, this.config.githubApiBase);
         try {
@@ -206,13 +209,99 @@ export class WorkspaceService {
     };
   }
 
+  // ─── gitlab: a shallow clone with a personal/project access token ─────────
+
+  private async createGitLab(repo: Repository, branch: string): Promise<Workspace> {
+    if (!repo.name.includes('/')) {
+      throw new VcsError(`GitLab repository name must be "namespace/project", got "${repo.name}"`);
+    }
+
+    const { token, instanceUrl } = await this.vcs.gitlabCredential(repo.projectId);
+    const dir = await mkdtemp(join(this.config.buildRoot, 'specd-build-'));
+    const cloneUrl = `${instanceUrl.replace(/\/+$/, '')}/${repo.name}.git`;
+
+    try {
+      // Same reasoning as the GitHub clone: the header travels per-invocation
+      // via `git -c`, never written into `.git/config`.
+      await simpleGit().raw([
+        ...this.authArgs('oauth2', token),
+        'clone',
+        '--depth',
+        '1',
+        '--branch',
+        repo.defaultBranch,
+        '--no-tags',
+        cloneUrl,
+        dir,
+      ]);
+    } catch (err) {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      throw new VcsError(
+        `Could not clone ${repo.name}. Check the token is still valid and that ` +
+          `"${repo.defaultBranch}" is its default branch.`,
+        err,
+      );
+    }
+
+    const git = simpleGit({ baseDir: dir });
+    const baseBranch = repo.defaultBranch;
+
+    await git.addConfig('user.name', 'specd build');
+    await git.addConfig('user.email', 'bot@specd.dev');
+    await git.checkoutLocalBranch(branch);
+
+    this.logger.log(`workspace ${dir} on ${branch} (clone of ${repo.name}@${baseBranch})`);
+
+    return {
+      dir,
+      branch,
+      baseBranch,
+      publish: async (pr) => {
+        await git.raw([...this.authArgs('oauth2', token), 'push', '--force', cloneUrl, `HEAD:${branch}`]);
+
+        const adapter = new GitLabAdapter(token, instanceUrl);
+        try {
+          const opened = await adapter.openMergeRequest(repo.name, {
+            branch,
+            base: baseBranch,
+            title: pr.title,
+            body: pr.body,
+          });
+
+          return {
+            url: opened.url,
+            reviewHint: opened.existing
+              ? `Updated MR !${opened.iid} on ${repo.name}. Merging is adopting.`
+              : `Opened MR !${opened.iid} on ${repo.name}. Merging is adopting.`,
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`pushed ${branch} but could not open an MR: ${message}`);
+          return {
+            url: `${instanceUrl.replace(/\/+$/, '')}/${repo.name}/-/compare/${encodeURIComponent(
+              baseBranch,
+            )}...${encodeURIComponent(branch)}`,
+            reviewHint:
+              `Pushed ${branch}, but opening the MR failed (${message.slice(0, 120)}). ` +
+              'The work is safe on the branch — open the MR from the compare link.',
+          };
+        }
+      },
+      dispose: async () => {
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      },
+    };
+  }
+
   /**
    * Authenticate a single git invocation without persisting the credential.
    * Same mechanism GitHub Actions uses, minus the part where it writes the
-   * header into the repository's config and leaves it there.
+   * header into the repository's config and leaves it there. `username` is a
+   * placeholder basic-auth accepts alongside a token — GitHub's convention is
+   * `x-access-token`, GitLab's is `oauth2`; neither host checks the value.
    */
-  private authArgs(token: string): string[] {
-    const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+  private authArgs(username: string, token: string): string[] {
+    const basic = Buffer.from(`${username}:${token}`, 'utf8').toString('base64');
     return ['-c', `http.extraheader=AUTHORIZATION: basic ${basic}`];
   }
 

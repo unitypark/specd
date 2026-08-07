@@ -64,6 +64,14 @@ export class Config {
     return Boolean(this.githubAppId && this.githubPrivateKey);
   }
 
+  // ─── GitLab (§11) ──────────────────────────────────────────────────────────
+  // No app-level registration exists for GitLab the way it does for GitHub —
+  // each connection brings its own token and, for self-managed instances, its
+  // own instance URL (stored on the connection, not here). The one thing that
+  // is global is the webhook token every registered project hook is given, so
+  // a single secret verifies deliveries from every tenant's GitLab instance.
+  readonly gitlabWebhookSecret = process.env.GITLAB_WEBHOOK_SECRET ?? '';
+
   get defaultModel(): ModelId {
     const raw = process.env.SPECD_DEFAULT_MODEL;
     return raw && isModelId(raw) ? raw : DEFAULT_MODEL;

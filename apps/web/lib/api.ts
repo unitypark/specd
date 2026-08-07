@@ -1,6 +1,7 @@
 'use client';
 
-const BASE = process.env.NEXT_PUBLIC_API ?? 'http://localhost:4000/api';
+export const API_BASE = process.env.NEXT_PUBLIC_API ?? 'http://localhost:4000/api';
+const BASE = API_BASE;
 const TOKEN_KEY = 'specd.token';
 const USER_KEY = 'specd.user';
 

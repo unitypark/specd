@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { get, patch } from '@/lib/api';
+import { API_BASE, del, get, patch, post } from '@/lib/api';
 import type { ProjectSummary } from '@/lib/types';
 
 interface Connection {
@@ -14,11 +14,28 @@ interface Connection {
   lastValidatedAt: string | null;
 }
 
+interface RunnerSummary {
+  id: string;
+  name: string;
+  paired: boolean;
+  pending: boolean;
+  pairedAt: string | null;
+  lastSeenAt: string | null;
+}
+
 const KIND_LABEL: Record<string, { icon: string; title: string }> = {
   vcs: { icon: '🐙', title: 'Code' },
   ai: { icon: '🔑', title: 'AI provider' },
   tracker: { icon: '📋', title: 'Tracker' },
 };
+
+function relativeTime(iso: string): string {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86_400)}d ago`;
+}
 
 export function SettingsView({
   slug,
@@ -36,11 +53,64 @@ export function SettingsView({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [runnerList, setRunnerList] = useState<RunnerSummary[]>([]);
+  const [runnerName, setRunnerName] = useState('');
+  const [justPaired, setJustPaired] = useState<{ name: string; pairCode: string } | null>(null);
+  const [runnerBusy, setRunnerBusy] = useState(false);
+  const [runnerError, setRunnerError] = useState<string | null>(null);
+
   const load = useCallback(() => {
     get<Connection[]>(`/projects/${slug}/connections`).then(setConnections).catch(() => undefined);
   }, [slug]);
 
   useEffect(load, [load]);
+
+  const loadRunners = useCallback(() => {
+    get<RunnerSummary[]>(`/projects/${slug}/runners`).then(setRunnerList).catch(() => undefined);
+  }, [slug]);
+
+  useEffect(loadRunners, [loadRunners]);
+
+  // While a runner is still awaiting its first pairing, poll for it — the
+  // moment `docker run specd/runner --pair <code>` completes the handshake
+  // server-side, this tab should notice without a manual refresh.
+  useEffect(() => {
+    if (!runnerList.some((r) => r.pending)) return;
+    const id = setInterval(loadRunners, 4000);
+    return () => clearInterval(id);
+  }, [runnerList, loadRunners]);
+
+  async function createRunnerPairing() {
+    if (!runnerName.trim()) return;
+    setRunnerBusy(true);
+    setRunnerError(null);
+    try {
+      const created = await post<{ id: string; name: string; pairCode: string }>(
+        `/projects/${slug}/runners`,
+        { name: runnerName.trim() },
+      );
+      setJustPaired({ name: created.name, pairCode: created.pairCode });
+      setRunnerName('');
+      loadRunners();
+    } catch (err) {
+      setRunnerError(err instanceof Error ? err.message : 'Failed to create pairing code');
+    } finally {
+      setRunnerBusy(false);
+    }
+  }
+
+  async function removeRunner(id: string) {
+    setRunnerBusy(true);
+    setRunnerError(null);
+    try {
+      await del(`/projects/${slug}/runners/${id}`);
+      loadRunners();
+    } catch (err) {
+      setRunnerError(err instanceof Error ? err.message : 'Failed to remove runner');
+    } finally {
+      setRunnerBusy(false);
+    }
+  }
 
   async function save(body: Record<string, unknown>) {
     setError(null);
@@ -76,6 +146,77 @@ export function SettingsView({
           </div>
         );
       })}
+
+      <div className="card">
+        <h5>Self-hosted runners</h5>
+        <p className="sub">
+          Pair a machine you control to drive builds and specs with its own Claude Code subscription.
+          specd never sees or stores that credential — only the runner does.
+        </p>
+
+        {runnerError && <div className="err">{runnerError}</div>}
+
+        {runnerList.length > 0 && (
+          <ul className="runnerList">
+            {runnerList.map((r) => (
+              <li key={r.id}>
+                <span className={r.paired ? 'pill on' : 'pill warn'}>
+                  {r.paired ? 'paired' : 'awaiting pairing'}
+                </span>
+                <span className="mono">{r.name}</span>
+                <span className="flex" />
+                <span className="ink3">
+                  {r.lastSeenAt ? `last seen ${relativeTime(r.lastSeenAt)}` : 'never connected'}
+                </span>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={runnerBusy}
+                  onClick={() => removeRunner(r.id)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {justPaired && (
+          <div className="pairBox">
+            <p className="pairLabel">
+              Pairing code for <b>{justPaired.name}</b> — shown once, copy it now:
+            </p>
+            <code className="pairCode">{justPaired.pairCode}</code>
+            <p className="pairLabel">Run this on the machine you want to pair:</p>
+            <pre>{`specd runner pair ${justPaired.pairCode} --api ${API_BASE}`}</pre>
+            <p className="hint">
+              Pairing proves the machine and stores its credential — the job-polling daemon that
+              actually executes builds and specs on it is not built yet.
+            </p>
+            <button type="button" className="btn sm" onClick={() => setJustPaired(null)}>
+              Done
+            </button>
+          </div>
+        )}
+
+        {!justPaired && (
+          <div className="inline">
+            <input
+              value={runnerName}
+              onChange={(e) => setRunnerName(e.target.value)}
+              placeholder="e.g. alice-macbook"
+            />
+            <button
+              type="button"
+              className="btn sm"
+              disabled={runnerBusy || !runnerName.trim()}
+              onClick={createRunnerPairing}
+            >
+              + Generate pairing code
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="card">
         <h5>Default model</h5>
@@ -208,6 +349,62 @@ export function SettingsView({
         .ok {
           color: var(--accent);
           font: 600 0.902rem/1 var(--mono);
+        }
+        .runnerList {
+          list-style: none;
+          margin: 0 0 0.9rem;
+          padding: 0;
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          overflow: hidden;
+        }
+        .runnerList li {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          padding: 0.55rem 0.8rem;
+          border-bottom: 1px solid var(--line);
+          font-size: 0.9rem;
+        }
+        .runnerList li:last-child {
+          border-bottom: none;
+        }
+        .ink3 {
+          color: var(--ink-3);
+          font-size: 0.86rem;
+        }
+        .pairBox {
+          background: var(--bg-2);
+          border: 1px solid var(--line-2);
+          border-radius: 6px;
+          padding: 0.9rem 1rem;
+          margin-bottom: 0.9rem;
+        }
+        .pairLabel {
+          font-size: 0.9rem;
+          margin: 0 0 0.4rem;
+        }
+        .pairCode {
+          display: block;
+          font: 700 1.3rem/1 var(--mono);
+          letter-spacing: 0.08em;
+          color: var(--accent);
+          margin-bottom: 0.7rem;
+        }
+        .pairBox pre {
+          font: 400 0.86rem/1.5 var(--mono);
+          background: var(--bg);
+          border: 1px solid var(--line);
+          border-radius: 4px;
+          padding: 0.6rem 0.8rem;
+          overflow-x: auto;
+          margin: 0 0 0.6rem;
+        }
+        .pairBox .hint {
+          font-size: 0.82rem;
+          color: var(--ink-3);
+          line-height: 1.5;
+          margin: 0 0 0.7rem;
         }
       `}</style>
     </div>

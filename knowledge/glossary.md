@@ -31,3 +31,5 @@ human can confirm what they mean.
 | **webhook status** | `repositories.webhook_status` — `none \| registered \| failed`. GitLab registers a webhook per repository at add-time and this records whether it worked; GitHub's is App-level and does not use this column. |
 | **audience-scoped token** | CLI token carrying an audience claim that authoring/approval routes reject. |
 | **device flow** | `specd login` — the CLI cannot mint a token; a human confirms a code at the web app's `/cli-login`. |
+| **runner pairing** | `specd runner pair <code>` — a machine, not a user, proves itself to a project with a short single-use code and receives its own bearer token. Pairing only: nothing yet dispatches work to a paired runner (`docs/runners.md`, `knowledge/decisions/0003-runner-pairing-before-dispatch.md`). |
+| **runner token** | The paired runner's credential — a random value hashed with SHA-256 at rest (`runners.token_hash`), not encrypted; there is nothing to recover, only a presented value to compare. Stored in a separate keychain slot from a signed-in user's CLI token. |

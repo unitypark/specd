@@ -248,6 +248,36 @@ type ConnectResult struct {
 	} `json:"repository"`
 }
 
+// ─── runner pairing ──────────────────────────────────────────────────────────
+//
+// A runner is a machine, not a user — it presents a short pairing code shown
+// once in the wizard, the same shape `specd login`'s device flow uses for a
+// different audience, and gets back a long-lived bearer token in return.
+
+type RunnerPairResult struct {
+	Token    string `json:"token"`
+	RunnerID string `json:"runnerId"`
+	Project  string `json:"project"`
+}
+
+func (c *Client) PairRunner(pairCode string) (*RunnerPairResult, error) {
+	raw, err := c.do(http.MethodPost, "/runners/pair",
+		map[string]string{"pairCode": pairCode}, "application/json")
+	if err != nil {
+		return nil, err
+	}
+	out := &RunnerPairResult{}
+	return out, json.Unmarshal(raw, out)
+}
+
+// RunnerHeartbeat proves the paired token is valid and that this machine can
+// reach the API outbound — the two things `specd runner pair` promises to
+// verify.
+func (c *Client) RunnerHeartbeat() error {
+	_, err := c.do(http.MethodPost, "/runners/heartbeat", struct{}{}, "application/json")
+	return err
+}
+
 func (c *Client) Connect(project, path, name string, primary bool) (*ConnectResult, error) {
 	primaryStr := "false"
 	if primary {

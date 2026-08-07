@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	keychainService = "specd-cli"
-	keychainAccount = "api-token"
-	DefaultAPI      = "http://localhost:4000/api"
+	keychainService       = "specd-cli"
+	keychainAccount       = "api-token"
+	keychainAccountRunner = "runner-token"
+	DefaultAPI            = "http://localhost:4000/api"
 )
 
 // Config is the non-secret part: which server, which project.
@@ -144,8 +145,16 @@ func ClearToken() error {
 var ErrNotLoggedIn = errors.New("not logged in — run `specd login`")
 
 func keychainSet(token string) error {
+	return keychainSetAccount(keychainAccount, token)
+}
+
+func keychainGet() (string, error) {
+	return keychainGetAccount(keychainAccount)
+}
+
+func keychainSetAccount(account, token string) error {
 	cmd := exec.Command("security", "add-generic-password",
-		"-s", keychainService, "-a", keychainAccount, "-w", token, "-U")
+		"-s", keychainService, "-a", account, "-w", token, "-U")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("keychain: %s", strings.TrimSpace(string(out)))
@@ -153,12 +162,57 @@ func keychainSet(token string) error {
 	return nil
 }
 
-func keychainGet() (string, error) {
+func keychainGetAccount(account string) (string, error) {
 	cmd := exec.Command("security", "find-generic-password",
-		"-s", keychainService, "-a", keychainAccount, "-w")
+		"-s", keychainService, "-a", account, "-w")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ─── runner token storage ─────────────────────────────────────────────────
+//
+// A paired runner is a machine, not the signed-in user `specd login`
+// authenticates — its token lives in a separate keychain entry / file so
+// pairing a runner on a laptop that is also logged in as a user cannot
+// overwrite (or be confused with) that user's own CLI token.
+
+var ErrNotPaired = errors.New("not paired — run `specd runner pair <code>`")
+
+func SaveRunnerToken(token string) error {
+	if runtime.GOOS == "darwin" {
+		if err := keychainSetAccount(keychainAccountRunner, token); err == nil {
+			return nil
+		}
+	}
+	d, err := dir()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(d, "runner-token"), []byte(token), 0o600)
+}
+
+func LoadRunnerToken() (string, error) {
+	if v := os.Getenv("SPECD_RUNNER_TOKEN"); v != "" {
+		return v, nil
+	}
+	if runtime.GOOS == "darwin" {
+		if token, err := keychainGetAccount(keychainAccountRunner); err == nil && token != "" {
+			return token, nil
+		}
+	}
+	d, err := dir()
+	if err != nil {
+		return "", err
+	}
+	raw, err := os.ReadFile(filepath.Join(d, "runner-token"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrNotPaired
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(raw)), nil
 }

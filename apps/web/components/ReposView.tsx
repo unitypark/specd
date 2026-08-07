@@ -16,25 +16,39 @@ interface Repo {
   webhookStatus: string;
   lastIndexedAt: string | null;
 }
+interface Connection {
+  kind: string;
+  provider: string;
+  status: string;
+}
 
 /**
  * Does specd actually get told when this repository's setup/spec branch
- * merges? GitHub always does (one App-level webhook covers every repo it is
- * installed on). GitLab only does when its own per-repository webhook
- * registration succeeded — a token below Maintainer, or a missing
- * `GITLAB_WEBHOOK_SECRET`, leaves it exactly where local mode already is.
+ * merges? GitHub does as long as the App installation behind it is still
+ * live — `connections.status` moves to `revoked`/`suspended` the moment
+ * GitHub's own `installation` webhook says so
+ * (`GitHubWebhookService.onInstallation`), and a dead installation delivers
+ * nothing, however confidently the UI claimed otherwise a moment ago. GitLab
+ * only watches when its own per-repository registration succeeded — a token
+ * below Maintainer, or a missing `GITLAB_WEBHOOK_SECRET`, leaves it exactly
+ * where local mode already is.
  */
-function hasWebhook(r: Repo): boolean {
-  return r.provider === 'github' || (r.provider === 'gitlab' && r.webhookStatus === 'registered');
+function hasWebhook(r: Repo, vcsConnectionStatus: string | undefined): boolean {
+  if (r.provider === 'github') return vcsConnectionStatus === 'connected';
+  return r.provider === 'gitlab' && r.webhookStatus === 'registered';
 }
 
 export function ReposView({ slug, onChange }: { slug: string; onChange: () => void }) {
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [vcsConnectionStatus, setVcsConnectionStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     get<Repo[]>(`/projects/${slug}/repositories`).then(setRepos).catch(() => undefined);
+    get<Connection[]>(`/projects/${slug}/connections`)
+      .then((cs) => setVcsConnectionStatus(cs.find((c) => c.kind === 'vcs')?.status))
+      .catch(() => undefined);
   }, [slug]);
 
   useEffect(load, [load]);
@@ -83,11 +97,13 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                   <span
                     className="pill warn"
                     title={
-                      hasWebhook(r)
+                      hasWebhook(r, vcsConnectionStatus)
                         ? 'specd is watching for the merge — the webhook records it and re-indexes'
                         : r.provider === 'gitlab'
                           ? 'No working GitLab webhook for this repository — tell specd once you have merged'
-                          : 'Local repositories have no webhook, so tell specd once you have merged'
+                          : r.provider === 'github'
+                            ? `The GitHub App installation is ${vcsConnectionStatus ?? 'not connected'} — tell specd once you have merged`
+                            : 'Local repositories have no webhook, so tell specd once you have merged'
                     }
                   >
                     on {r.setupBranch}
@@ -112,7 +128,7 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                   Local repos, and GitLab repos whose webhook registration
                   failed, have no other signal — there the button is it.
                 */}
-                {r.setupBranch && r.setupState !== 'merged' && !hasWebhook(r) && (
+                {r.setupBranch && r.setupState !== 'merged' && !hasWebhook(r, vcsConnectionStatus) && (
                   <button
                     type="button"
                     className="btn sm"

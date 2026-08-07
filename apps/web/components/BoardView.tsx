@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { canTransition, isHumanOnlyStatus, type SpecStatus } from '@specd/shared';
+import { BUILDABLE_STATUSES, canTransition, isHumanOnlyStatus, type SpecStatus } from '@specd/shared';
 import { get, post } from '@/lib/api';
 import styles from './board.module.css';
 
@@ -90,11 +90,20 @@ interface SpecView {
   approvedAt: string | null;
 }
 
+interface Comment {
+  id: string;
+  section: string;
+  itemIndex: number | null;
+  authorName: string;
+  body: string;
+  createdAt: string;
+}
+
 interface TicketDetail {
   ticket: { id: string; key: string; title: string; body: string };
   spec: SpecView | null;
   versions: { id: string; version: number; status: string }[];
-  comments: { id: string; section: string; authorName: string; body: string }[];
+  comments: Comment[];
 }
 
 export function BoardView({ slug, onChange }: { slug: string; onChange: () => void }) {
@@ -109,6 +118,8 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
   const [newTitle, setNewTitle] = useState('');
   const [newBody, setNewBody] = useState('');
   const [waitingForRunner, setWaitingForRunner] = useState(false);
+  const [commentOpen, setCommentOpen] = useState<number | null>(null);
+  const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
     const board = await get<{ columns: Column[]; cards: Card[] }>(`/projects/${slug}/board`);
@@ -153,11 +164,24 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
       setTab('req');
       setDetail(null);
       setWaitingForRunner(false);
+      setCommentOpen(null);
+      setCommentDrafts({});
       const d = await get<TicketDetail>(`/projects/${slug}/board/tickets/${ticketId}`);
       setDetail(d);
     },
     [slug],
   );
+
+  // Re-fetches the open ticket's detail without touching which tab is
+  // showing — unlike openCard, which is for landing on a *different* ticket
+  // and rightly resets to Requirements. act() uses this so that, say,
+  // commenting on a Design item does not knock the drawer back to the
+  // Requirements tab right after.
+  const refreshOpenCard = useCallback(async () => {
+    if (!open) return;
+    const d = await get<TicketDetail>(`/projects/${slug}/board/tickets/${open}`);
+    setDetail(d);
+  }, [open, slug]);
 
   // A spec dispatched to a paired runner (§9) has no synchronous result — the
   // runner polls, executes, and reports back on its own schedule. Poll the
@@ -188,7 +212,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
     try {
       await fn();
       await load();
-      if (open) await openCard(open);
+      await refreshOpenCard();
       onChange();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -198,6 +222,21 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
   }
 
   const spec = detail?.spec ?? null;
+  const commentable = Boolean(spec && !BUILDABLE_STATUSES.includes(spec.status as SpecStatus));
+
+  async function submitComment(itemIndex: number) {
+    const body = (commentDrafts[itemIndex] ?? '').trim();
+    if (!body || !spec) return;
+    await act('comment', async () => {
+      await post(`/projects/${slug}/board/specs/${spec.id}/comments`, {
+        section: 'design',
+        itemIndex,
+        body,
+      });
+      setCommentDrafts((d) => ({ ...d, [itemIndex]: '' }));
+      setCommentOpen(null);
+    });
+  }
 
   return (
     <div className={styles.wrap}>
@@ -418,15 +457,82 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
 
                       {tab === 'des' && (
                         <>
-                          {spec.content.design.map((claim, i) => (
-                            <p key={i} className={styles.claim}>
-                              {claim.text}{' '}
-                              {claim.citation && <span className={styles.cite}>{claim.citation} ✓</span>}
-                              {claim.unverified && (
-                                <span className={styles.unv}>⚠ UNVERIFIED — {claim.unverified}</span>
-                              )}
-                            </p>
-                          ))}
+                          {spec.content.design.map((claim, i) => {
+                            const itemComments = detail.comments.filter(
+                              (c) => c.section === 'design' && c.itemIndex === i,
+                            );
+                            return (
+                              <div key={i} className={styles.claimblock}>
+                                <p className={styles.claim}>
+                                  {claim.text}{' '}
+                                  {claim.citation && (
+                                    <span className={styles.cite}>{claim.citation} ✓</span>
+                                  )}
+                                  {claim.unverified && (
+                                    <span className={styles.unv}>⚠ UNVERIFIED — {claim.unverified}</span>
+                                  )}
+                                </p>
+
+                                {claim.unverified && (
+                                  <div className={styles.commentThread}>
+                                    {itemComments.map((c) => (
+                                      <div key={c.id} className={styles.commentRow}>
+                                        <div className={styles.commentMeta}>
+                                          <b>{c.authorName}</b>
+                                          <span>{new Date(c.createdAt).toLocaleDateString()}</span>
+                                        </div>
+                                        <p>{c.body}</p>
+                                      </div>
+                                    ))}
+
+                                    {commentable &&
+                                      (commentOpen === i ? (
+                                        <div className={styles.commentForm}>
+                                          <textarea
+                                            rows={2}
+                                            value={commentDrafts[i] ?? ''}
+                                            onChange={(e) =>
+                                              setCommentDrafts((d) => ({ ...d, [i]: e.target.value }))
+                                            }
+                                            placeholder="Ask a clarifying question…"
+                                            autoFocus
+                                          />
+                                          <div className={styles.commentFormActions}>
+                                            <button
+                                              type="button"
+                                              className="btn sm"
+                                              onClick={() => setCommentOpen(null)}
+                                            >
+                                              Cancel
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="btn sm primary"
+                                              disabled={
+                                                !(commentDrafts[i] ?? '').trim() || busy === 'comment'
+                                              }
+                                              onClick={() => submitComment(i)}
+                                            >
+                                              Comment
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          className={styles.commentAffordance}
+                                          onClick={() => setCommentOpen(i)}
+                                        >
+                                          {itemComments.length > 0
+                                            ? `${itemComments.length} comment${itemComments.length === 1 ? '' : 's'}`
+                                            : 'Add comment'}
+                                        </button>
+                                      ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                           {spec.content.outOfScope && spec.content.outOfScope.length > 0 && (
                             <>
                               <h6>Out of scope</h6>

@@ -199,14 +199,47 @@ export class SpecsService {
     return spec;
   }
 
+  /**
+   * A comment is how a reviewer clarifies an UNVERIFIED point before
+   * approving — so it only ever makes sense pre-gate. Once a spec has passed
+   * the gate (`approved`, `building`, `delivered` — `BUILDABLE_STATUSES`),
+   * refusing new comments here is the same reasoning `transition()` already
+   * applies to the state machine itself: the stamped version is a closed
+   * record, not something a comment thread should keep growing under.
+   * `specStatus` is the caller's job to supply — every caller has already
+   * fetched the spec (to scope it to a project) before reaching here.
+   */
   async addComment(input: {
     specId: string;
+    specStatus: SpecStatus;
     section: string;
+    itemIndex?: number | null;
     authorUserId: string;
     authorName: string;
     body: string;
   }) {
-    const [row] = await this.db.insert(specComments).values(input).returning();
+    if (BUILDABLE_STATUSES.includes(input.specStatus)) {
+      throw new BadRequestException(
+        `This spec is "${input.specStatus}" — comments are for clarifying a draft before approval, not after.`,
+      );
+    }
+
+    const body = input.body.trim();
+    if (!body) {
+      throw new BadRequestException('A comment cannot be empty.');
+    }
+
+    const [row] = await this.db
+      .insert(specComments)
+      .values({
+        specId: input.specId,
+        section: input.section,
+        itemIndex: input.itemIndex ?? null,
+        authorUserId: input.authorUserId,
+        authorName: input.authorName,
+        body,
+      })
+      .returning();
     return row!;
   }
 

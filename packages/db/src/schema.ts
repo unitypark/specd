@@ -217,6 +217,12 @@ export const specComments = pgTable(
       .references(() => specs.id, { onDelete: 'cascade' }),
     /** requirements | design | tasks */
     section: text('section').notNull(),
+    /**
+     * Index into `content[section]` this comment is about — e.g. which
+     * design claim's UNVERIFIED marker a reviewer is asking about. Null for
+     * a comment on the section as a whole rather than one specific item.
+     */
+    itemIndex: integer('item_index'),
     authorUserId: uuid('author_user_id').references(() => users.id, { onDelete: 'set null' }),
     authorName: text('author_name').notNull(),
     body: text('body').notNull(),

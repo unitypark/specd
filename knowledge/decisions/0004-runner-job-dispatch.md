@@ -83,3 +83,18 @@ extraction/repair/schema-check logic (`packages/shared/src/claude-code-parse.ts`
 - Known gaps, tracked in `docs/runners.md`: no lease timeout (a runner that
   crashes mid-job leaves it stuck `running` forever), no per-runner
   concurrency, `onboard`/`build` dispatch unimplemented.
+
+## Addendum (2026-08-08) — the `exec()` hang
+
+A real, in-process build hung for 30+ minutes with no error: `ClaudeCodeProvider.exec()`
+(and its duplicate in `apps/runner/src/claude.ts`) only ever resolved its
+promise on the child process's `close` event. The internal timeout only sent
+SIGTERM/SIGKILL — it never force-resolved the promise itself — so a killed
+process that left its stdio pipes open (a grandchild inheriting the write
+end, a known Node `child_process` gotcha) hung the `await` forever regardless
+of the timeout firing. Fixed in both copies with a bounded backstop: once a
+kill signal is actually sent, a second timer force-resolves using whatever
+`exit` last reported, rather than waiting indefinitely on a `close` that may
+never come. Regression-tested in `apps/runner/src/claude.test.ts` against a
+fake `claude` binary that reproduces exactly this (backgrounds a process that
+inherits stdout and outlives the parent).

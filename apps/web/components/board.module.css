@@ -20,14 +20,19 @@
 
 .board {
   display: grid;
-  grid-template-columns: repeat(6, minmax(13rem, 1fr));
+  /* Six fixed lanes (D5) that fill whatever width the page gives them —
+     `minmax(0, 1fr)` has no floor to overflow past, so the board never forces
+     a horizontal scrollbar on a normal desktop viewport. Only genuinely
+     narrow viewports (below) fall back to fixed columns you scroll across,
+     since six lanes cannot be squeezed to fit a phone width and stay legible. */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0;
   overflow-x: auto;
   padding-bottom: 0.5rem;
 }
-@media (max-width: 1200px) {
+@media (max-width: 760px) {
   .board {
-    grid-template-columns: repeat(6, 14rem);
+    grid-template-columns: repeat(6, 11rem);
   }
 }
 
@@ -222,8 +227,11 @@
   color: var(--accent);
 }
 
+.claimblock {
+  margin-bottom: 0.9rem;
+}
 .claim {
-  margin: 0 0 0.7rem;
+  margin: 0 0 0.35rem;
 }
 .cite {
   display: inline-block;
@@ -244,6 +252,63 @@
   border: 1px solid var(--unverified-line);
   border-radius: 4px;
   padding: 0.16em 0.4em;
+}
+
+/* ─── comments on UNVERIFIED points ───────────────────────────────────────── */
+
+.commentThread {
+  margin: 0 0 0.7rem 0.9rem;
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--line-2);
+}
+.commentRow {
+  padding: 0.4rem 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 0.958rem;
+}
+.commentRow:last-of-type {
+  border-bottom: none;
+}
+.commentRow p {
+  margin: 0.2rem 0 0;
+  color: var(--ink-2);
+}
+.commentMeta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font: 600 0.902rem/1 var(--mono);
+  color: var(--ink-3);
+}
+.commentAffordance {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: 600 0.938rem/1 var(--sans);
+  padding: 0.4rem 0 0;
+  cursor: pointer;
+}
+.commentAffordance:hover {
+  text-decoration: underline;
+}
+.commentForm {
+  padding-top: 0.4rem;
+}
+.commentForm textarea {
+  width: 100%;
+  resize: vertical;
+  font: 500 0.958rem/1.5 var(--sans);
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--ink);
+}
+.commentFormActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
 }
 
 .task {

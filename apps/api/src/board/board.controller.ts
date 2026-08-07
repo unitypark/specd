@@ -7,7 +7,7 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
 import { SPEC_STATUSES, type SpecStatus } from '@specd/shared';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { TokenClaims } from '../auth/auth.service.js';
@@ -35,6 +35,7 @@ class TransitionDto {
 
 class CommentDto {
   @IsIn(['requirements', 'design', 'tasks']) section!: string;
+  @IsOptional() @IsInt() @Min(0) itemIndex?: number;
   @IsString() @MinLength(1) @MaxLength(5_000) body!: string;
 }
 
@@ -192,10 +193,12 @@ export class BoardController {
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user);
-    await this.specs.byId(project.id, specId);
+    const spec = await this.specs.byId(project.id, specId);
     return this.specs.addComment({
       specId,
+      specStatus: spec.status,
       section: dto.section,
+      itemIndex: dto.itemIndex,
       authorUserId: user.sub,
       authorName: user.name,
       body: dto.body,

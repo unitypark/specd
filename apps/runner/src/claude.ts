@@ -138,7 +138,8 @@ async function invoke(
   }
 }
 
-function exec(
+/** Exported for testing the timeout/backstop behavior directly. */
+export function exec(
   args: string[],
   stdin: string,
   timeoutMs: number,
@@ -154,22 +155,50 @@ function exec(
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let exitCode: number | null = null;
+    let settled = false;
 
+    // `close` fires once the child has exited AND its stdio streams have
+    // ended — but a killed process can still leave a pipe open if a
+    // grandchild inherited the write end, in which case `close` never fires
+    // at all. Once a kill signal has actually been sent, stop trusting it to
+    // arrive and fall back to a bounded backstop instead, so a hung child can
+    // never hang this promise (and this job's claim) forever.
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(giveUpTimer);
+      resolve({ stdout, stderr, code: exitCode, timedOut });
+    };
+
+    let giveUpTimer: NodeJS.Timeout;
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 5_000).unref();
+      setTimeout(() => child.kill('SIGKILL'), 5_000);
+      giveUpTimer = setTimeout(settle, 15_000);
     }, timeoutMs);
 
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
     child.on('error', (err) => {
       clearTimeout(timer);
-      reject(err);
+      clearTimeout(giveUpTimer);
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
+    // `exit` fires as soon as the process itself terminates, ahead of
+    // `close` — recording the code here means the backstop still reports a
+    // real exit code even if `close` is what never arrives.
+    child.on('exit', (code) => {
+      exitCode = code;
     });
     child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ stdout, stderr, code, timedOut });
+      exitCode = code;
+      settle();
     });
 
     child.stdin.write(stdin);

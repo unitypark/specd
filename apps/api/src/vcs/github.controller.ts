@@ -20,10 +20,12 @@ import { Public, type RequestWithUser } from '../auth/auth.guard.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { TokenClaims } from '../auth/auth.service.js';
 import { ConnectionsService } from '../projects/connections.service.js';
+import { ProjectsService } from '../projects/projects.service.js';
 import { GitHubAppService, isPubliclyReachable } from './github-app.service.js';
 import { GitHubWebhookService } from './github-webhook.service.js';
 import { GitHubAdapter } from './github.adapter.js';
 import { VcsService } from './vcs.service.js';
+import { VcsError } from './vcs.types.js';
 import { verifySignature } from './github-webhook.verify.js';
 
 interface RawBodyRequest extends RequestWithUser {
@@ -48,6 +50,7 @@ export class GitHubController {
     private readonly webhooks: GitHubWebhookService,
     private readonly connectionsService: ConnectionsService,
     private readonly vcs: VcsService,
+    private readonly projects: ProjectsService,
   ) {}
 
   // ─── the route GitHub calls ────────────────────────────────────────────────
@@ -235,6 +238,10 @@ GITHUB_APP_PRIVATE_KEY="${(app.pem ?? '').replace(/\n/g, '\\n')}"`,
   /**
    * Record an installation against a project. This is what makes webhooks for
    * those repos resolvable, and what lets the repo picker read the granted list.
+   *
+   * Doubles as the wizard's live validation for a pasted installation id — so
+   * a wrong or revoked one has to surface in words someone can act on, not
+   * Nest's default opaque 500 for anything that is not an `HttpException`.
    */
   @Post('projects/:projectId/installation')
   async connect(
@@ -242,6 +249,7 @@ GITHUB_APP_PRIVATE_KEY="${(app.pem ?? '').replace(/\n/g, '\\n')}"`,
     @Body() body: { installationId?: string },
     @CurrentUser() user: TokenClaims,
   ) {
+    await this.projects.requireRole(user.sub, projectId, ['owner', 'maintainer']);
     this.logger.log(`${user.name} is connecting installation ${body.installationId}`);
     if (!body.installationId) {
       throw new BadRequestException('installationId is required');
@@ -250,36 +258,54 @@ GITHUB_APP_PRIVATE_KEY="${(app.pem ?? '').replace(/\n/g, '\\n')}"`,
       throw new BadRequestException(this.app.unconfiguredReason);
     }
 
-    // Prove the installation exists and is ours before recording it, so a typo
-    // fails here rather than as a silent no-op at the first webhook.
-    const token = await this.app.installationToken(body.installationId);
-    const adapter = new GitHubAdapter(token, this.config.githubApiBase);
-    const repos = await adapter.listInstallationRepositories();
+    try {
+      // Prove the installation exists and is ours before recording it, so a
+      // typo fails here rather than as a silent no-op at the first webhook.
+      const token = await this.app.installationToken(body.installationId);
+      const adapter = new GitHubAdapter(token, this.config.githubApiBase);
+      const repos = await adapter.listInstallationRepositories();
 
-    await this.connectionsService.upsert({
-      projectId,
-      kind: 'vcs',
-      provider: 'github',
-      label: `GitHub App installation ${body.installationId}`,
-      settings: { installationId: body.installationId },
-      // No secret: the App's private key is the credential, and it is not
-      // per-project. Nothing to encrypt, so nothing to leak (§12).
-      secret: null,
-    });
+      await this.connectionsService.upsert({
+        projectId,
+        kind: 'vcs',
+        provider: 'github',
+        label: `GitHub App installation ${body.installationId}`,
+        settings: { installationId: body.installationId },
+        // No secret: the App's private key is the credential, and it is not
+        // per-project. Nothing to encrypt, so nothing to leak (§12).
+        secret: null,
+      });
 
-    return { installationId: body.installationId, repositories: repos };
+      return { installationId: body.installationId, repositories: repos };
+    } catch (err) {
+      if (err instanceof VcsError) throw new BadRequestException(err.message);
+      throw err;
+    }
   }
 
   /** The repo picker's source: exactly what the installation was granted. */
   @Get('projects/:projectId/repositories')
-  async repositories(@Param('projectId', ParseUUIDPipe) projectId: string) {
-    const adapter = await this.adapterFor(projectId);
-    return { repositories: await adapter.listInstallationRepositories() };
+  async repositories(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @CurrentUser() user: TokenClaims,
+  ) {
+    await this.projects.requireRole(user.sub, projectId, ['owner', 'maintainer', 'reviewer']);
+    try {
+      const adapter = await this.adapterFor(projectId);
+      return { repositories: await adapter.listInstallationRepositories() };
+    } catch (err) {
+      if (err instanceof VcsError) throw new BadRequestException(err.message);
+      throw err;
+    }
   }
 
   /** "Are the webhooks actually arriving?" — the first question when they are not. */
   @Get('projects/:projectId/deliveries')
-  async deliveries(@Param('projectId', ParseUUIDPipe) projectId: string) {
+  async deliveries(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @CurrentUser() user: TokenClaims,
+  ) {
+    await this.projects.requireRole(user.sub, projectId, ['owner', 'maintainer', 'reviewer']);
     return { deliveries: await this.webhooks.recent(projectId) };
   }
 

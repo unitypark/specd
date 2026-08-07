@@ -39,6 +39,25 @@ interface Repo {
   setupBranch: string | null;
   setupPrUrl: string | null;
 }
+interface GitlabRepo {
+  id: string;
+  fullName: string;
+  defaultBranch: string;
+  namespace: string;
+}
+interface GithubRepo {
+  id: string;
+  fullName: string;
+  defaultBranch: string;
+  language: string | null;
+}
+interface GithubStatus {
+  configured: boolean;
+  reason?: string;
+  registerUrl?: string;
+  installUrl?: string;
+  appSlug?: string;
+}
 interface OnboardResult {
   repoName: string;
   branch?: string;
@@ -67,6 +86,22 @@ export default function SetupWizard() {
   const [pathCheck, setPathCheck] = useState<{ ok: boolean; clean?: boolean; branch?: string; reason?: string } | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
 
+  // step 2 · GitLab
+  const [gitlabToken, setGitlabToken] = useState('');
+  const [gitlabInstanceUrl, setGitlabInstanceUrl] = useState('');
+  const [gitlabConnected, setGitlabConnected] = useState(false);
+  const [gitlabError, setGitlabError] = useState<string | null>(null);
+  const [gitlabSearch, setGitlabSearch] = useState('');
+  const [gitlabResults, setGitlabResults] = useState<GitlabRepo[]>([]);
+  const [gitlabSearching, setGitlabSearching] = useState(false);
+
+  // step 2 · GitHub
+  const [githubStatus, setGithubStatus] = useState<GithubStatus | null>(null);
+  const [githubInstallationId, setGithubInstallationId] = useState('');
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [githubError, setGithubError] = useState<string | null>(null);
+  const [githubResults, setGithubResults] = useState<GithubRepo[]>([]);
+
   // step 3
   const [aiMode, setAiMode] = useState<'api_key' | 'subscription_runner' | 'managed_cloud' | null>(null);
   const [apiKey, setApiKey] = useState('');
@@ -89,6 +124,15 @@ export default function SetupWizard() {
       .then(setAiModes)
       .catch(() => undefined);
   }, [step, aiModes]);
+
+  // Is a GitHub App even registered for this deployment? That is a one-time,
+  // operator-level setup distinct from connecting a project to it.
+  useEffect(() => {
+    if (vcs !== 'github' || githubStatus) return;
+    get<GithubStatus>('/github/status')
+      .then(setGithubStatus)
+      .catch(() => undefined);
+  }, [vcs, githubStatus]);
 
   function fail(err: unknown) {
     setError(err instanceof Error ? err.message : String(err));
@@ -152,8 +196,118 @@ export default function SetupWizard() {
     }
   }
 
+  /**
+   * Connect GitLab, then immediately try to list repositories with the same
+   * token — there is no separate "test connection" call, so this doubles as
+   * live validation. A bad token surfaces here, on the form, rather than
+   * leaving `gitlabConnected` true with a picker that silently never returns
+   * anything (the wizard must not lie — §6 guardrail).
+   */
+  async function connectGitlab() {
+    if (!project || !gitlabToken) return;
+    setBusy(true);
+    setGitlabError(null);
+    try {
+      await post(`/projects/${project.slug}/connections/vcs`, {
+        provider: 'gitlab',
+        token: gitlabToken,
+        instanceUrl: gitlabInstanceUrl.trim() || undefined,
+      });
+      const res = await get<{ repositories: GitlabRepo[] }>(`/gitlab/projects/${project.id}/repositories`);
+      setGitlabResults(res.repositories);
+      setGitlabConnected(true);
+    } catch (err) {
+      setGitlabError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function searchGitlabRepos() {
+    if (!project) return;
+    setGitlabSearching(true);
+    try {
+      const qs = gitlabSearch ? `?search=${encodeURIComponent(gitlabSearch)}` : '';
+      const res = await get<{ repositories: GitlabRepo[] }>(`/gitlab/projects/${project.id}/repositories${qs}`);
+      setGitlabResults(res.repositories);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setGitlabSearching(false);
+    }
+  }
+
+  async function addGitlabRepo(r: GitlabRepo) {
+    if (!project) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const repo = await post<Repo>(`/projects/${project.slug}/repositories`, {
+        provider: 'gitlab',
+        name: r.fullName,
+        externalId: r.id,
+        defaultBranch: r.defaultBranch,
+        isPrimary: repos.length === 0,
+      });
+      setRepos([...repos, repo]);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Record the installation and list what it was granted, in one call — the
+   * wizard's live validation for a pasted installation id, same role
+   * `connectGitlab` plays for a pasted token.
+   */
+  async function connectGithub() {
+    if (!project || !githubInstallationId.trim()) return;
+    setBusy(true);
+    setGithubError(null);
+    try {
+      const res = await post<{ repositories: GithubRepo[] }>(`/github/projects/${project.id}/installation`, {
+        installationId: githubInstallationId.trim(),
+      });
+      setGithubResults(res.repositories);
+      setGithubConnected(true);
+    } catch (err) {
+      setGithubError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addGithubRepo(r: GithubRepo) {
+    if (!project) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const repo = await post<Repo>(`/projects/${project.slug}/repositories`, {
+        provider: 'github',
+        name: r.fullName,
+        externalId: r.id,
+        defaultBranch: r.defaultBranch,
+        isPrimary: repos.length === 0,
+      });
+      setRepos([...repos, repo]);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function connectVcsAndContinue() {
     if (!project || !vcs) return;
+    // GitLab/GitHub already connected the moment the token/installation
+    // validated — advancing here would just re-store the same connection
+    // under a busy spinner for nothing.
+    if (vcs === 'gitlab' || vcs === 'github') {
+      setStep(3);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -214,6 +368,11 @@ export default function SetupWizard() {
       setBusy(false);
     }
   }
+
+  // Local is always ready; GitLab and GitHub are ready once their respective
+  // credential (token, installation id) has validated.
+  const canContinueFromCode =
+    vcs === 'local' || (vcs === 'gitlab' && gitlabConnected) || (vcs === 'github' && githubConnected);
 
   return (
     <AppShell
@@ -310,12 +469,12 @@ export default function SetupWizard() {
                 </button>
                 <button
                   type="button"
-                  className={`${styles.choice} ${styles.soon}`}
-                  disabled
+                  className={`${styles.choice} ${vcs === 'gitlab' ? styles.picked : ''} ${styles.soon}`}
+                  onClick={() => setVcs('gitlab')}
                 >
                   <h5>🦊 GitLab</h5>
-                  <p>gitlab.com OAuth — or self-managed via URL + token.</p>
-                  <span className={styles.badge}>P2</span>
+                  <p>gitlab.com or self-managed, via a personal or project access token.</p>
+                  <span className={styles.badge}>needs a token</span>
                 </button>
                 <button
                   type="button"
@@ -327,12 +486,168 @@ export default function SetupWizard() {
                 </button>
               </div>
 
-              {vcs === 'github' && (
+              {vcs === 'github' && !githubStatus && <span className="spinner" />}
+
+              {vcs === 'github' && githubStatus && !githubStatus.configured && (
                 <div className={styles.info}>
-                  The GitHub adapter is implemented against the same interface as Local mode, but it
-                  needs a GitHub App registration and a token before it can open PRs. Use Local mode
-                  to walk the loop today.
+                  No GitHub App is registered for this specd deployment yet — that is a one-time,
+                  operator-level setup, not something a project connects to on its own.{' '}
+                  <a href={githubStatus.registerUrl} target="_blank" rel="noreferrer">
+                    Register it
+                  </a>{' '}
+                  (opens the API), then come back and pick GitHub again. See{' '}
+                  <code>docs/github-app.md</code> for the full walkthrough.
                 </div>
+              )}
+
+              {vcs === 'github' && githubStatus?.configured && !githubConnected && (
+                <>
+                  <div className="field">
+                    <label>1. Install the App on your repositories</label>
+                    <a
+                      className="btn"
+                      href={githubStatus.installUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      Install on GitHub →
+                    </a>
+                    <span className="hint">
+                      Opens GitHub in a new tab. After installing, the URL you land on ends{' '}
+                      <code>/installations/&lt;id&gt;</code> — copy that id below.
+                    </span>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ghinstall">2. Installation id</label>
+                    <input
+                      id="ghinstall"
+                      value={githubInstallationId}
+                      onChange={(e) => setGithubInstallationId(e.target.value)}
+                      placeholder="12345678"
+                      spellCheck={false}
+                    />
+                  </div>
+                  {githubError && <div className="err">{githubError}</div>}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={connectGithub}
+                    disabled={busy || !githubInstallationId.trim()}
+                  >
+                    {busy ? <span className="spinner" /> : 'Connect'}
+                  </button>
+                </>
+              )}
+
+              {vcs === 'github' && githubConnected && (
+                <>
+                  <div className={styles.good}>
+                    ✓ Connected — {githubResults.length} repositor{githubResults.length === 1 ? 'y' : 'ies'}{' '}
+                    granted.
+                  </div>
+                  {githubResults.length === 0 && (
+                    <p className={styles.footnote}>
+                      The installation has no repositories granted. Add some from the App&apos;s
+                      settings on GitHub, then reload this page and reconnect.
+                    </p>
+                  )}
+                  {githubResults.length > 0 && (
+                    <ul className={styles.repolist}>
+                      {githubResults.map((r) => {
+                        const added = repos.some((x) => x.name === r.fullName);
+                        return (
+                          <li key={r.id}>
+                            <span className={`mono ${styles.pickerName}`}>{r.fullName}</span>
+                            <button
+                              type="button"
+                              className="btn sm"
+                              disabled={busy || added}
+                              onClick={() => addGithubRepo(r)}
+                            >
+                              {added ? 'added ✓' : '+ Add'}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
+              )}
+
+              {vcs === 'gitlab' && !gitlabConnected && (
+                <>
+                  <div className="field">
+                    <label htmlFor="gltoken">Personal or project access token</label>
+                    <input
+                      id="gltoken"
+                      type="password"
+                      value={gitlabToken}
+                      onChange={(e) => setGitlabToken(e.target.value)}
+                      placeholder="glpat-…"
+                      spellCheck={false}
+                    />
+                    <span className="hint">
+                      Needs the <code>api</code> scope and at least the Maintainer role — that role
+                      is also what lets specd register the webhook that detects merges.
+                    </span>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="glurl">Instance URL (self-managed only)</label>
+                    <input
+                      id="glurl"
+                      value={gitlabInstanceUrl}
+                      onChange={(e) => setGitlabInstanceUrl(e.target.value)}
+                      placeholder="gitlab.com — leave blank for gitlab.com"
+                      spellCheck={false}
+                    />
+                  </div>
+                  {gitlabError && <div className="err">{gitlabError}</div>}
+                  <button type="button" className="btn" onClick={connectGitlab} disabled={busy || !gitlabToken}>
+                    {busy ? <span className="spinner" /> : 'Connect'}
+                  </button>
+                </>
+              )}
+
+              {vcs === 'gitlab' && gitlabConnected && (
+                <>
+                  <div className={styles.good}>✓ Connected. Search for a repository to add.</div>
+                  <div className="field">
+                    <label htmlFor="glsearch">Search repositories</label>
+                    <input
+                      id="glsearch"
+                      value={gitlabSearch}
+                      onChange={(e) => setGitlabSearch(e.target.value)}
+                      onBlur={searchGitlabRepos}
+                      placeholder="aurora"
+                      spellCheck={false}
+                    />
+                  </div>
+                  {gitlabSearching && <span className="spinner" />}
+                  {!gitlabSearching && gitlabResults.length === 0 && (
+                    <p className={styles.footnote}>No repositories found — the token may not grant access to any, or try a different search.</p>
+                  )}
+                  {gitlabResults.length > 0 && (
+                    <ul className={styles.repolist}>
+                      {gitlabResults.map((r) => {
+                        const added = repos.some((x) => x.name === r.fullName);
+                        return (
+                          <li key={r.id}>
+                            <span className={`mono ${styles.pickerName}`}>{r.fullName}</span>
+                            <button
+                              type="button"
+                              className="btn sm"
+                              disabled={busy || added}
+                              onClick={() => addGitlabRepo(r)}
+                            >
+                              {added ? 'added ✓' : '+ Add'}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
               )}
 
               {vcs === 'local' && (
@@ -384,18 +699,20 @@ export default function SetupWizard() {
                       </button>
                     </>
                   )}
+                </>
+              )}
 
-                  {repos.length > 0 && (
-                    <ul className={styles.repolist}>
-                      {repos.map((r) => (
-                        <li key={r.id}>
-                          <span className="mono">{r.name}</span>
-                          {r.isPrimary && <span className="pill on">primary</span>}
-                          <span className={styles.path}>{r.localPath}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+              {repos.length > 0 && (
+                <>
+                  <ul className={styles.repolist}>
+                    {repos.map((r) => (
+                      <li key={r.id}>
+                        <span className="mono">{r.name}</span>
+                        {r.isPrimary && <span className="pill on">primary</span>}
+                        {r.localPath && <span className={styles.path}>{r.localPath}</span>}
+                      </li>
+                    ))}
+                  </ul>
                   <p className={styles.footnote}>
                     The <b>primary</b> repo is where cross-repo specs file their as-built copy.
                   </p>
@@ -409,13 +726,22 @@ export default function SetupWizard() {
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={busy || vcs !== 'local' || repos.length === 0}
+                  disabled={busy || !canContinueFromCode || repos.length === 0}
                   onClick={connectVcsAndContinue}
                 >
                   Continue →
                 </button>
-                {vcs !== 'local' && <span className={styles.hintl}>pick Local to continue</span>}
-                {vcs === 'local' && repos.length === 0 && (
+                {vcs === 'github' && !githubConnected && (
+                  <span className={styles.hintl}>
+                    {githubStatus && !githubStatus.configured
+                      ? 'register the GitHub App first'
+                      : 'install the App and connect first'}
+                  </span>
+                )}
+                {vcs === 'gitlab' && !gitlabConnected && (
+                  <span className={styles.hintl}>connect with a token first</span>
+                )}
+                {canContinueFromCode && repos.length === 0 && (
                   <span className={styles.hintl}>add at least one repository</span>
                 )}
               </div>

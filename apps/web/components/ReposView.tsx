@@ -13,7 +13,19 @@ interface Repo {
   setupPrUrl: string | null;
   setupState: string;
   kbStatus: string;
+  webhookStatus: string;
   lastIndexedAt: string | null;
+}
+
+/**
+ * Does specd actually get told when this repository's setup/spec branch
+ * merges? GitHub always does (one App-level webhook covers every repo it is
+ * installed on). GitLab only does when its own per-repository webhook
+ * registration succeeded — a token below Maintainer, or a missing
+ * `GITLAB_WEBHOOK_SECRET`, leaves it exactly where local mode already is.
+ */
+function hasWebhook(r: Repo): boolean {
+  return r.provider === 'github' || (r.provider === 'gitlab' && r.webhookStatus === 'registered');
 }
 
 export function ReposView({ slug, onChange }: { slug: string; onChange: () => void }) {
@@ -71,9 +83,11 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                   <span
                     className="pill warn"
                     title={
-                      r.provider === 'github'
+                      hasWebhook(r)
                         ? 'specd is watching for the merge — the webhook records it and re-indexes'
-                        : 'Local repositories have no webhook, so tell specd once you have merged'
+                        : r.provider === 'gitlab'
+                          ? 'No working GitLab webhook for this repository — tell specd once you have merged'
+                          : 'Local repositories have no webhook, so tell specd once you have merged'
                     }
                   >
                     on {r.setupBranch}
@@ -91,13 +105,14 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
               </td>
               <td className="right">
                 {/*
-                  GitHub repos need no button: the webhook sees the merge and
-                  records it. Asking for a click as well would be asking someone
-                  to confirm something specd already knows — and letting them
-                  claim a merge that never happened. Local repos have no
-                  webhook, so there the button is the only signal available.
+                  A repo with a working webhook needs no button: the webhook
+                  sees the merge and records it. Asking for a click as well
+                  would be asking someone to confirm something specd already
+                  knows — and letting them claim a merge that never happened.
+                  Local repos, and GitLab repos whose webhook registration
+                  failed, have no other signal — there the button is it.
                 */}
-                {r.setupBranch && r.setupState !== 'merged' && r.provider === 'local' && (
+                {r.setupBranch && r.setupState !== 'merged' && !hasWebhook(r) && (
                   <button
                     type="button"
                     className="btn sm"
@@ -105,7 +120,7 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                     onClick={() =>
                       act(r.id, () => post(`/projects/${slug}/repositories/${r.id}/setup-merged`))
                     }
-                    title="Local repositories have no webhook — tell specd once you have merged the setup branch"
+                    title="No webhook for this repository — tell specd once you have merged the setup branch"
                   >
                     I merged it
                   </button>

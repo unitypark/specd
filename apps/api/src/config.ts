@@ -54,6 +54,11 @@ export class Config {
   readonly githubBase = process.env.GITHUB_BASE ?? 'https://github.com';
   readonly githubCloneBase = process.env.GITHUB_CLONE_BASE ?? 'https://github.com';
 
+  /** How long webhook_deliveries rows are kept before the retention prune job deletes them. */
+  readonly webhookRetentionDays = num('SPECD_WEBHOOK_RETENTION_DAYS', 30);
+  /** How often the retention prune job runs. */
+  readonly webhookPruneIntervalMs = num('SPECD_WEBHOOK_PRUNE_INTERVAL_MS', 60 * 60 * 1000);
+
   /**
    * Scratch root for hosted build clones. Each build gets its own directory
    * under it and deletes it afterwards — nothing here is meant to outlive a run.

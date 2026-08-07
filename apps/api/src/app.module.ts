@@ -16,6 +16,7 @@ import { LocalGitAdapter } from './vcs/local-git.adapter.js';
 import { VcsService } from './vcs/vcs.service.js';
 import { GitHubAppService } from './vcs/github-app.service.js';
 import { GitHubWebhookService } from './vcs/github-webhook.service.js';
+import { WebhookRetentionService } from './vcs/webhook-retention.service.js';
 import { GitHubController } from './vcs/github.controller.js';
 
 import { EmbeddingService } from './knowledge/embeddings.js';
@@ -65,6 +66,7 @@ import { CliController } from './cli/cli.controller.js';
     VcsService,
     GitHubAppService,
     GitHubWebhookService,
+    WebhookRetentionService,
     EmbeddingService,
     KnowledgeService,
     BoardService,

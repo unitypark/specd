@@ -123,34 +123,131 @@ func runStatus() {
 	fmt.Printf("auth:    %s <%s> (%s scope)\n", me.Name, me.Email, me.Audience)
 }
 
-// ─── the banner ─────────────────────────────────────────────────────────────
-
-const asciiBanner = `
-█████ ████  █████ █████ ████
-█     █   █ █     █     █   █
-█████ ████  ████  █     █   █
-    █ █     █     █     █   █
-█████ █     █████ █████ ████ `
+// ─── brand ───────────────────────────────────────────────────────────────────
+//
+// Exact tokens from apps/web/app/globals.css (D12 "minimal monochrome" /
+// "Wicked: Glinda and Elphaba" palette) — the CLI's colors are not a
+// separate guess at a brand, they are the same hex values the web app
+// renders with. The wordmark split (ink "spec" + accent "d") mirrors
+// apps/web/components/Logo.tsx's <Wordmark>; the hat glyph below mirrors
+// that file's cone+brim silhouette (its "check" variant, which is what
+// renders in accent green throughout the app's own nav).
 
 var (
-	bannerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	colorAccent = lipgloss.Color("#00be2c") // phosphor green — the brand accent
+	colorInk    = lipgloss.Color("#f2f5f1") // primary text
+	colorInk3   = lipgloss.Color("#8ea297") // muted labels
+
+	bannerStyle = lipgloss.NewStyle().Foreground(colorInk).Bold(true)
+	accentStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	dimStyle    = lipgloss.NewStyle().Foreground(colorInk3)
 )
+
+// The mark: a witch's hat, cone tapering to a point over a wide brim —
+// same silhouette as Logo.tsx's `cone`/`brim` paths, described in ASCII
+// rather than an SVG path.
+var hatGlyph = []string{
+	"          ▲          ",
+	"         ▲▲▲         ",
+	"        ▲▲▲▲▲        ",
+	"        ▲▲▲▲▲▲▲      ",
+	"       ▲▲▲▲▲▲▲▲▲     ",
+	"      ▲▲▲▲▲▲▲▲▲▲▲    ",
+	"     ▲▲▲▲▲▲▲▲▲▲▲▲▲   ",
+	"═════════════════════",
+}
+
+// The wordmark, "SPEC" + "D" kept as separate glyph sets so they can be
+// colored independently (ink / accent) — same split as the web app's
+// spec<i>d</i>. Each letter is a hand-verified 5×5 cell, upscaled 2×.
+var wordmarkGlyphs = map[rune][]string{
+	'S': {"█████", "█    ", "█████", "    █", "█████"},
+	'P': {"████ ", "█   █", "████ ", "█    ", "█    "},
+	'E': {"█████", "█    ", "████ ", "█    ", "█████"},
+	'C': {"█████", "█    ", "█    ", "█    ", "█████"},
+	'D': {"████ ", "█   █", "█   █", "█   █", "████ "},
+}
+
+func upscaleGlyph(rows []string, scale int) []string {
+	out := make([]string, 0, len(rows)*scale)
+	for _, row := range rows {
+		var wide strings.Builder
+		for _, ch := range row {
+			wide.WriteString(strings.Repeat(string(ch), scale))
+		}
+		for i := 0; i < scale; i++ {
+			out = append(out, wide.String())
+		}
+	}
+	return out
+}
+
+// renderWordmark renders "SPEC" in ink and "D" in accent, row by row, so
+// the two colors sit on one baseline rather than as two separate blocks.
+func renderWordmark(scale int) string {
+	letters := func(word string) [][]string {
+		out := make([][]string, len(word))
+		for i, ch := range word {
+			out[i] = upscaleGlyph(wordmarkGlyphs[ch], scale)
+		}
+		return out
+	}
+	spec := letters("SPEC")
+	d := letters("D")
+	height := len(spec[0])
+	gap := strings.Repeat(" ", scale)
+
+	var lines []string
+	for r := 0; r < height; r++ {
+		var row strings.Builder
+		for i, letter := range spec {
+			if i > 0 {
+				row.WriteString(gap)
+			}
+			row.WriteString(letter[r])
+		}
+		specPart := bannerStyle.Render(row.String())
+		dPart := accentStyle.Render(gap + d[0][r])
+		lines = append(lines, specPart+dPart)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderHat() string {
+	lines := make([]string, len(hatGlyph))
+	for i, row := range hatGlyph {
+		lines[i] = accentStyle.Render(row)
+	}
+	return strings.Join(lines, "\n")
+}
 
 // printBanner is called once, before the interactive loop starts — never for
 // a single-shot subcommand, and never when stdin/stdout is not a terminal.
+// The hero treatment (mark + big wordmark, boxed) only renders where it can
+// actually land well; anything narrower or colorless gets the plain line
+// every other terminal still reads correctly.
 func printBanner() {
 	width, _, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
 		width = 80
 	}
-	if width < 32 || lipgloss.ColorProfile() == termenv.Ascii {
+	if width < 64 || lipgloss.ColorProfile() == termenv.Ascii {
 		fmt.Println(dimStyle.Render("specd — spec-driven delivery"))
 		fmt.Println()
 		return
 	}
-	fmt.Println(bannerStyle.Render(asciiBanner))
-	fmt.Println(dimStyle.Render("  spec-driven delivery · type / for commands, /exit to leave"))
+
+	hat := lipgloss.PlaceHorizontal(58, lipgloss.Center, renderHat())
+	body := hat + "\n\n" + renderWordmark(2) + "\n\n" +
+		dimStyle.Render("spec-driven delivery · type / for commands, /exit to leave")
+
+	hero := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorAccent).
+		Padding(1, 4).
+		Render(body)
+
+	fmt.Println(lipgloss.PlaceHorizontal(width, lipgloss.Center, hero))
 	fmt.Println()
 }
 
@@ -172,31 +269,54 @@ type replModel struct {
 	awaitingArg *replCommand
 	message     string
 	quitting    bool
+	width       int
 }
+
+const defaultReplWidth = 60
+
+// chatFieldStyle / listBoxStyle are the "bottom chat field" — a bordered
+// input box like Claude Code/Gemini CLI/Copilot CLI all use, rather than a
+// bare prompt line. The command list renders in the same treatment
+// immediately above it, like a floating picker.
+var (
+	chatFieldStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorAccent).
+		Padding(0, 1)
+	listBoxStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorInk3).
+		Padding(0, 1)
+	promptGlyph = accentStyle.Render("❯ ")
+)
 
 func newReplModel() *replModel {
 	ti := textinput.New()
 	ti.Placeholder = "/ for commands"
 	ti.Focus()
 	ti.Prompt = ""
+	ti.TextStyle = lipgloss.NewStyle().Foreground(colorInk)
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(colorInk3)
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(colorAccent)
 
 	delegate := list.NewDefaultDelegate()
 	delegate.SetSpacing(0) // 2 rows/item instead of 3 — this is a fast palette, not a browser
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(lipgloss.Color("42")).BorderForeground(lipgloss.Color("42"))
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(lipgloss.Color("108")).BorderForeground(lipgloss.Color("42"))
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(colorAccent).BorderForeground(colorAccent)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(colorAccent).BorderForeground(colorAccent)
 
 	items := make([]list.Item, len(replCommands))
 	for i, c := range replCommands {
 		items[i] = commandItem(c)
 	}
 	const visibleItems = 7
-	l := list.New(items, delegate, 60, visibleItems*2+1)
+	l := list.New(items, delegate, defaultReplWidth, visibleItems*2+1)
 	l.Title = "commands"
+	l.Styles.Title = l.Styles.Title.Foreground(colorInk3)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(false) // filtering is driven by the prompt input, not list.Model's own
 
-	return &replModel{input: ti, list: l}
+	return &replModel{input: ti, list: l, width: defaultReplWidth}
 }
 
 func (m *replModel) Init() tea.Cmd {
@@ -206,10 +326,14 @@ func (m *replModel) Init() tea.Cmd {
 func (m *replModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		w := msg.Width
+		w := msg.Width - 6 // leaves room for the chat field's border + padding
 		if w > 70 {
 			w = 70
 		}
+		if w < 20 {
+			w = 20
+		}
+		m.width = w
 		m.input.Width = w
 		m.list.SetWidth(w)
 
@@ -371,18 +495,26 @@ func (m *replModel) execute(c replCommand, arg string) tea.Cmd {
 	}
 }
 
+// View renders the "bottom chat field" — a bordered input box, the way
+// Claude Code/Gemini CLI/Copilot CLI all present their prompt, with the
+// command list floating in the same treatment directly above it when
+// shown. The hero banner is not part of this: it prints once, into normal
+// scrollback, before the program starts (see printBanner).
 func (m *replModel) View() string {
 	if m.quitting {
 		return ""
 	}
+
 	var b strings.Builder
+	if m.showList {
+		b.WriteString(listBoxStyle.Width(m.width).Render(m.list.View()))
+		b.WriteString("\n")
+	}
 	if m.message != "" {
 		b.WriteString(m.message + "\n")
 	}
-	b.WriteString(bannerStyle.Render("specd") + " " + m.input.View() + "\n")
-	if m.showList {
-		b.WriteString(m.list.View())
-	}
+	b.WriteString(chatFieldStyle.Width(m.width).Render(promptGlyph + m.input.View()))
+	b.WriteString("\n")
 	return b.String()
 }
 

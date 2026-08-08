@@ -1,0 +1,166 @@
+/*
+ * A real flex column, not `display: contents`. The first version used
+ * `contents` — this wrapper exists only so JS has one element to watch
+ * and one class to toggle, and in principle it shouldn't need to become a
+ * layout box of its own. In practice, `display: contents` on a child of a
+ * CSS Grid container (.close, which centres its children via
+ * `place-content: center`) is a known rough edge across browsers: the
+ * grandchildren it's meant to expose to the grid can fail to participate
+ * in grid layout at all and disappear rather than render in place —
+ * caught by screenshot (the mark rendered; the headline, subtext and CTA
+ * did not, at any point in the animation), not assumed safe because the
+ * spec describes it as transparent to layout. A real flex column
+ * sidesteps the interaction entirely: `.close` ends up with one child
+ * (`.wrap`) instead of five, and `.wrap` itself reproduces the same
+ * centred, stacked look `.close`'s grid gave its children directly.
+ */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* .wrap's children (the mark, then the headline/subtext/CTA/footnote
+   page.tsx passes in) need to sit above .close's own decorative
+   background glow — the same reason landing-page.module.css has a
+   `.close > *` rule, just re-stated here since .wrap, not each of these
+   individually, is .close's actual direct child now. */
+.wrap > * {
+  position: relative;
+  z-index: 1;
+}
+
+.mark {
+  display: block;
+  margin: 0 auto 1.8rem;
+  color: var(--ink);
+  /* An SVG root's default `overflow` is `hidden` — anything that ends up
+     outside the `viewBox` gets clipped, not just squeezed. Visible as a
+     defensive backstop: the .hook translate below is now sized correctly
+     for the viewBox's own units (see that comment for the actual bug),
+     but this means a future tweak to that value overshooting slightly
+     reads as "a bit more open" instead of "a chunk of the mark missing". */
+  overflow: visible;
+}
+
+/* ─── the mark: spin, then open ──────────────────────────────────────────── */
+
+.spinner {
+  transform-origin: 16px 16px;
+  transform-box: fill-box;
+}
+.hook {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.9;
+  stroke-linecap: round;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /*
+   * Two animations sharing one clock, not one keyframe set doing both
+   * jobs: .spinner rotates *and grows* the whole mark as a rigid group,
+   * from a point at its own centre (`scale(0.12)` — "start from center");
+   * each .hook independently translates outward *within its own
+   * already-rotated <g>* (see FinaleReveal.tsx — each hook sits in its own
+   * `rotate(N 16 16)` group). Because CSS transforms compose through
+   * nested elements, the identical local "move up" translate below reads
+   * as "move up" for the 0° hook, "move right" for the 90° one, and so
+   * on — one shared keyframe produces four-way radial opening for free,
+   * the same shared-geometry trick the mark's own construction already
+   * uses.
+   */
+  .play .spinner {
+    animation: spin 2.4s cubic-bezier(0.65, 0, 0.35, 1) both;
+  }
+  .play .hook {
+    animation: open 2.4s cubic-bezier(0.65, 0, 0.35, 1) both;
+  }
+  @keyframes spin {
+    0% {
+      opacity: 0;
+      transform: rotate(-30deg) scale(0.12);
+    }
+    14% {
+      opacity: 1;
+    }
+    68%,
+    100% {
+      opacity: 1;
+      transform: rotate(600deg) scale(1);
+    }
+  }
+  /* Holds still through the grow+spin (0–68%), then pulls apart and
+     fades — the "lid lifts off" beat, timed to land as the spin settles
+     rather than fighting it mid-turn. The text below starts well before
+     this — it comes out *while* the mark is still visibly spinning, not
+     after — this is just the mark's own final flourish, not the cue the
+     text is waiting for.
+     `-4px`, not the visually-reasonable-looking `-18px` a first pass
+     used: a `.hook` here is a plain SVG `<path>`, with no `transform-box`
+     of its own (unlike `.spinner` above, which sets `fill-box`
+     explicitly), so its CSS `transform` resolves against the nearest SVG
+     viewport by default — this `viewBox="0 0 32 32"` mark, not the 132px
+     it happens to render at. `-18px` was 18 of the mark's own 32 units,
+     more than half its own radius, which pushed every hook mostly out of
+     the canvas and into `.mark`'s (then-default) `overflow: hidden` —
+     reported back as "logo is trimmed". Confirmed the actual magnitude by
+     rendering `-3/-5/-8/-18px` side by side at rest (no animation, no
+     guessing from the number alone): even `-3px` was already a dramatic
+     full separation, so `-4px` is deliberately small, a nudge, not the
+     motion the too-literal first value implied. */
+  @keyframes open {
+    0%,
+    68% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(-4px);
+      opacity: 0;
+    }
+  }
+
+  /*
+   * The headline/subtext/CTA/footnote — passed as children, styled by
+   * page.tsx's own landing-page.module.css classes, which this file has
+   * no access to by name (a different CSS module). Targeted purely by DOM
+   * position instead: `:nth-child(n+2)` is "everything after the mark
+   * svg", in whatever order page.tsx passes them, so this file never
+   * needs to know their class names to choreograph them. Held invisible
+   * only while `.play` is present and only under this media query — see
+   * the component doc comment for why that makes the no-JS/no-motion
+   * fallback safe by construction rather than by a separate check.
+   *
+   * Delays start at 0.75s — well inside the mark's own 0–1.63s (68% of
+   * 2.4s) grow-and-spin window, on direct instruction ("text should be
+   * coming out from logo while spinning", not after it stops). The
+   * slight scale-up-from-0.92 alongside the fade is what sells "coming
+   * out of" the mark rather than just "appearing near" it.
+   */
+  .play > :nth-child(n + 2) {
+    animation: text-in 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .play > :nth-child(2) {
+    animation-delay: 0.75s;
+  }
+  .play > :nth-child(3) {
+    animation-delay: 0.9s;
+  }
+  .play > :nth-child(4) {
+    animation-delay: 1.05s;
+  }
+  .play > :nth-child(5) {
+    animation-delay: 1.2s;
+  }
+  @keyframes text-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.92);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}

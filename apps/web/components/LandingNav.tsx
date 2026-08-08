@@ -63,7 +63,7 @@ export function LandingNav() {
           inset, the inner pill carries the glass. */}
       <div className={`${styles.navbar} ${scrolled ? styles.navbarScrolled : ''}`}>
       <Link href="/" className={styles.logo}>
-        <Logo variant="face" size={32} title="specd" />
+        <Logo size={32} title="specd" glow />
         <span>
           spec<i>d</i>
         </span>

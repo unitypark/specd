@@ -13,15 +13,19 @@
 .page {
   min-height: 100vh;
   /*
-   * Charcoal throughout, with the opening glow painted on the page rather than
-   * inside the hero. As a child of the hero it was clipped by that section's
-   * `overflow: hidden`, so the light stopped dead at the seam and the next
-   * section — which has no background of its own — started flat. Anchored to
-   * the page top in rem, it now carries across the boundary.
+   * A neutral depth wash, not a colored glow: the two radials used to carry
+   * the brand's green+magenta duo, but that was atmospheric page decoration,
+   * not a point of application — the thing "no point color... glow for point
+   * of application" reserves glow for. Kept as ink at very low opacity for
+   * depth rather than removed outright, still painted on the page rather
+   * than inside the hero (as a child of the hero it was clipped by that
+   * section's `overflow: hidden`, so it stopped dead at the seam and the
+   * next section — which has no background of its own — started flat).
+   * Anchored to the page top in rem, it carries across the boundary.
    */
   background:
-    radial-gradient(54rem 36rem at 16% 26rem, rgba(0, 190, 44, 0.17), transparent 62%),
-    radial-gradient(48rem 32rem at 84% 19rem, rgba(255, 0, 128, 0.13), transparent 60%),
+    radial-gradient(54rem 36rem at 16% 26rem, rgba(0, 0, 0, 0.05), transparent 62%),
+    radial-gradient(48rem 32rem at 84% 19rem, rgba(0, 0, 0, 0.035), transparent 60%),
     var(--bg);
   background-repeat: no-repeat;
   border: 10px solid var(--bg);
@@ -48,7 +52,7 @@
 }
 .h2 {
   font: 400 clamp(2.2rem, 4.2vw, 3.4rem)/1.1 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 1rem;
   letter-spacing: -0.005em;
   max-width: 24ch;
@@ -108,7 +112,7 @@
 }
 .step h3 {
   font: 600 1.2rem/1.3 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 0.5rem;
 }
 .step p {
@@ -125,6 +129,15 @@
   grid-template-columns: 1fr 1fr;
   gap: 1.2rem;
   margin-top: 3rem;
+  /* A gradient stage, not a flat one — the .good card's glass class (see
+     page.tsx) needs something behind it to actually frost. The first pass
+     here used --panel-2→--field, both near-white — too little tonal
+     difference for 55%-opacity blur to reveal anything, so the "glass"
+     card rendered indistinguishable from a flat one (caught by screenshot,
+     not assumed). A real dark patch gives it something to actually frost. */
+  padding: 1.4rem;
+  border-radius: 22px;
+  background: radial-gradient(70% 130% at 24% 0%, rgba(0, 0, 0, 0.16), transparent 58%), var(--field);
 }
 @media (max-width: 760px) {
   .vs {
@@ -137,9 +150,20 @@
   padding: 1.8rem;
   background: var(--panel);
 }
+/* .good repeats globals.css's .glass values explicitly rather than relying
+   on the plain "glass" class in page.tsx to win on its own: that class and
+   the plain .card rule above are both single-class selectors (0,1,0), a
+   specificity tie the compiled cross-file source order resolved in favor
+   of .card's opaque var(--panel) — confirmed by screenshot, where the
+   "good" card rendered pixel-identical to the plain one. .card.good
+   (0,2,0) beats plain .card unconditionally, so it's the reliable place
+   for these values; the "glass" class stays in the JSX as a label of
+   intent, not as the thing actually doing the work. */
 .card.good {
-  border-color: var(--accent-dim);
-  background: var(--accent-soft);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-color: var(--glass-border);
 }
 .card h4 {
   font: 600 1.05rem/1.3 var(--serif);
@@ -147,7 +171,7 @@
   margin: 0 0 1.1rem;
 }
 .card.good h4 {
-  color: #fff;
+  color: var(--ink);
 }
 .card ul {
   list-style: none;
@@ -203,7 +227,7 @@
 .mlab {
   font: 700 0.6rem/1.5 var(--mono);
   letter-spacing: 0.14em;
-  color: #fff;
+  color: var(--ink);
   margin: 0.9rem 0 0.4rem;
 }
 .mnote {
@@ -244,7 +268,7 @@
 }
 .tcard h4 {
   font: 600 1.1rem/1.3 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 0.6rem;
 }
 .tcard p {
@@ -280,7 +304,7 @@
 }
 .tier h4 {
   font: 600 1rem/1 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 0.7rem;
 }
 .tprice {
@@ -314,9 +338,10 @@
   padding: clamp(4rem, 8vw, 7rem) 2rem;
   position: relative;
   border-top: 1px solid var(--line);
+  /* Same neutral depth wash as .page above, not the old green+magenta pair. */
   background:
-    radial-gradient(54rem 36rem at 16% 42%, rgba(0, 190, 44, 0.17), transparent 62%),
-    radial-gradient(48rem 32rem at 84% 32%, rgba(255, 0, 128, 0.13), transparent 60%);
+    radial-gradient(54rem 36rem at 16% 42%, rgba(0, 0, 0, 0.05), transparent 62%),
+    radial-gradient(48rem 32rem at 84% 32%, rgba(0, 0, 0, 0.035), transparent 60%);
 }
 /* Content sits above the glow. */
 .close > * {
@@ -326,7 +351,7 @@
 .closeh {
   text-wrap: balance;
   font: 300 clamp(2.6rem, 6vw, 4.8rem)/1.04 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 1.4rem;
   letter-spacing: -0.015em;
 }
@@ -345,12 +370,19 @@
   font: 750 0.9rem/1 var(--sans);
   padding: 1rem 2rem;
   border-radius: 8px;
-  background: var(--accent);
-  color: #06130a;
+  /* The closing CTA — the definitive "point of application" on this page,
+     so it gets the full emphasis treatment: dark gradient + glow, same as
+     globals.css's .btn.primary. Light-page-only placement, unlike .cta. */
+  background: var(--emphasis);
+  color: #fff;
+  box-shadow: var(--emphasis-shadow);
   display: inline-block;
+  transition: box-shadow 0.2s, transform 0.2s;
 }
 .big:hover {
-  background: #4ff086;
+  background: var(--emphasis-hover);
+  box-shadow: var(--emphasis-shadow-hover);
+  transform: translateY(-1px);
   text-decoration: none;
 }
 .deeper {
@@ -434,10 +466,13 @@
   background: var(--bg);
   border: 1px solid var(--line);
 }
-/* One bright block per page, the way kiro spends its lavender exactly once at
-   the top. More than one and it stops being an accent. */
+/* One emphasis block per page, the way kiro spends its lavender exactly once
+   at the top — a dark gradient frame + glow now, not a bright mint fill, to
+   match the rest of the "point of application" language. More than one and
+   it stops being an accent. */
 .viz.bright {
-  background: linear-gradient(150deg, #9de8bc, #5fce90);
+  background: var(--emphasis);
+  box-shadow: var(--emphasis-shadow);
   border-color: transparent;
 }
 .viz.bright .inner {
@@ -448,7 +483,7 @@
 
 .copy h2 {
   font: 500 clamp(2.2rem, 4.2vw, 3.4rem)/1.12 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 1.1rem;
   letter-spacing: -0.01em;
   text-wrap: balance;
@@ -499,11 +534,18 @@
   }
 }
 
-.finmark {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 1.8rem;
-}
+/*
+ * The dark medallion this section used to sit the mark on is gone — on
+ * direct instruction ("remove the black background of the logo"). That
+ * medallion existed only because the glow mark's white bloom is
+ * invisible on this section's own near-white ground (the same reason the
+ * nav wraps its glow in a dark pill); without a dark backdrop to answer
+ * that, the finale now uses the flat, unboxed mark instead (plain
+ * `currentColor`, no glow) via `FinaleReveal.tsx` — the same mark, the
+ * same reason the flat version exists everywhere else it's used below
+ * hero size. See that component for the spin-then-open entrance that
+ * replaced this static medallion.
+ */
 
 /* Product shots sit flush inside the wrapper with their own rounded edge and a
    lift, so they read as a specimen rather than a decal. */
@@ -539,7 +581,7 @@
 }
 .showh {
   font: 500 clamp(1.9rem, 3.4vw, 2.7rem)/1.15 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 1rem;
   letter-spacing: -0.01em;
   text-wrap: balance;
@@ -587,10 +629,11 @@
   );
 }
 
-/* Panels get a gradient rather than a flat fill, lit from the top-left. */
+/* Panels get a gradient rather than a flat fill, lit from the top-left —
+   ink now, not the old dark-green tint. */
 .viz {
   background:
-    linear-gradient(155deg, rgba(0, 190, 44, 0.06), transparent 42%),
+    linear-gradient(155deg, rgba(0, 0, 0, 0.06), transparent 42%),
     var(--bg);
 }
 
@@ -601,12 +644,12 @@
  */
 .outline {
   color: transparent;
-  -webkit-text-stroke: 1.4px var(--green);
+  -webkit-text-stroke: 1.4px var(--ink);
   paint-order: stroke fill;
 }
 @supports not (-webkit-text-stroke: 1px red) {
   .outline {
-    color: var(--green);
+    color: var(--ink);
   }
 }
 
@@ -626,19 +669,26 @@
   left: -8rem;
   bottom: -4rem;
   width: 44rem;
-  color: rgba(255, 0, 128, 0.28);
+  /* Ink, not the old magenta — purely decorative line-art (see Linework),
+     unrelated to --magenta's reserved "unverified claim" meaning. */
+  color: rgba(0, 0, 0, 0.14);
 }
 .lnCorner {
   right: 6%;
   bottom: 12%;
   width: 9rem;
-  color: rgba(0, 190, 44, 0.3);
+  /* Ink, not the old green — see .lnArc above. */
+  color: rgba(0, 0, 0, 0.16);
 }
 .lnUnderline {
   left: 0;
   bottom: -1.4rem;
   width: 18rem;
-  color: var(--pink);
+  /* Ink, not --magenta: this swash is decorative, and --magenta is reserved
+     for the unverified-claim semantic (see board.module.css's .unv) — a
+     decorative use would both break "no point color" and dilute that
+     meaning. */
+  color: rgba(0, 0, 0, 0.5);
 }
 .underlined {
   position: relative;
@@ -758,7 +808,8 @@
  * with a consistent rhythm they read as one argument in three parts.
  */
 .group {
-  background: linear-gradient(165deg, rgba(0, 190, 44, 0.05), transparent 38%), var(--panel);
+  /* Ink wash, not the old dark-green tint — see .viz above. */
+  background: linear-gradient(165deg, rgba(0, 0, 0, 0.06), transparent 38%), var(--panel);
   /* one step lighter than the page, so the card still reads as a card */
   border: 1px solid var(--line);
   border-radius: 28px;
@@ -777,7 +828,7 @@
 /* Inside the card the visuals sit on the page floor, a step darker than the
    card itself — otherwise panel-on-panel goes flat. */
 .group .viz {
-  background: linear-gradient(155deg, rgba(0, 190, 44, 0.05), transparent 42%), var(--bg);
+  background: linear-gradient(155deg, rgba(0, 0, 0, 0.06), transparent 42%), var(--bg);
 }
 
 @media (max-width: 900px) {

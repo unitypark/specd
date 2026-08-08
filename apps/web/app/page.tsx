@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { LandingNav } from '@/components/LandingNav';
 import { Linework } from '@/components/Linework';
-import { Logo } from '@/components/Logo';
 import { CompoundingLoop } from '@/components/CompoundingLoop';
 import { TicketToSpec } from '@/components/TicketToSpec';
+import { FinaleReveal } from '@/components/FinaleReveal';
 import landing from './landing.module.css';
 import styles from './landing-page.module.css';
 
@@ -275,7 +275,7 @@ export default function Preview() {
                 <li>Ships assumptions silently — you find them in review</li>
               </ul>
             </div>
-            <div className={`${styles.card} ${styles.good}`}>
+            <div className={`${styles.card} ${styles.good} glass`}>
               <h4>Your specd agent</h4>
               <ul>
                 <li>Reads your knowledge base first — it is rule one of its brief</li>
@@ -334,22 +334,21 @@ export default function Preview() {
 
       {/* 8 · CLOSE */}
       <section className={styles.close}>
-        <div className={styles.finmark}>
-          <Logo variant="face" size={64} title="specd" />
-        </div>
-        <h2 className={styles.closeh}>
-          Ship faster. <em>Approve everything.</em>
-        </h2>
-        <p className={styles.closesub}>
-          Connect a repository and specd writes your knowledge base, drafts your first spec, and
-          waits for your stamp.
-        </p>
-        <Link href="/setup" className={styles.big}>
-          Start your setup
-        </Link>
-        <p className={styles.deeper}>
-          WANT THE MECHANICS? <Link href="/docs">READ THE DOCS</Link>
-        </p>
+        <FinaleReveal>
+          <h2 className={styles.closeh}>
+            Ship faster. <em>Approve everything.</em>
+          </h2>
+          <p className={styles.closesub}>
+            Connect a repository and specd writes your knowledge base, drafts your first spec, and
+            waits for your stamp.
+          </p>
+          <Link href="/setup" className={styles.big}>
+            Start your setup
+          </Link>
+          <p className={styles.deeper}>
+            WANT THE MECHANICS? <Link href="/docs">READ THE DOCS</Link>
+          </p>
+        </FinaleReveal>
       </section>
     </main>
   );

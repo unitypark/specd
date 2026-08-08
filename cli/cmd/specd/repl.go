@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -20,9 +21,9 @@ import (
 // slash command below is a thin adapter over the exact same cmd* functions
 // the flag-based switch in main() already calls — same config/token
 // loading, same errors, same behavior for direct single-shot use. A command
-// runs with the terminal handed back to it via ReleaseTerminal/
-// RestoreTerminal, so a function like cmdLogin (which polls and prints
-// progress dots) needs no changes at all to work here.
+// runs via tea.Exec, which suspends the TUI and hands back the real
+// terminal, so a function like cmdLogin (which polls and prints progress
+// dots) needs no changes at all to work here.
 // See knowledge/decisions/0006-cli-repl-bubbletea.md.
 
 type replCommand struct {
@@ -125,36 +126,65 @@ func runStatus() {
 
 // ─── brand ───────────────────────────────────────────────────────────────────
 //
-// Exact tokens from apps/web/app/globals.css (D12 "minimal monochrome" /
-// "Wicked: Glinda and Elphaba" palette) — the CLI's colors are not a
-// separate guess at a brand, they are the same hex values the web app
-// renders with. The wordmark split (ink "spec" + accent "d") mirrors
-// apps/web/components/Logo.tsx's <Wordmark>; the hat glyph below mirrors
-// that file's cone+brim silhouette (its "check" variant, which is what
-// renders in accent green throughout the app's own nav).
+// The web app dropped its neon-green point color entirely ("all black and
+// white only, no point color... use gradation and glow") in favor of
+// brightness/gradient-based emphasis. A terminal can't do gradients or
+// glow, so the equivalent here is a brightness tier: colorAccent is pure
+// white, reserved for emphasis (the mark, the "D", list selection, the
+// cursor, the focused field border); colorInk sits one step below pure
+// white so accent still reads as emphasis next to it, rather than the two
+// being visually identical. colorInk/colorInk3 deliberately are NOT copies
+// of the web's current --ink/--ink-3: the web app flipped to a white
+// background, but a terminal's background isn't ours to set — most
+// default to dark, and it stays that way here rather than assume
+// otherwise. termenv.HasDarkBackground() can query the real answer, but
+// its OSC-11 probe carries a 5-second timeout on terminals that never
+// answer it (OSCTimeout in muesli/termenv) — a startup-latency risk on
+// every interactive launch, on every unsupported terminal, in exchange for
+// correctness only the rare light-terminal user would notice. Not worth
+// it: colorInk stays light-on-dark, the safe default for the common case.
+//
+// The wordmark split (ink "spec" + accent "d") mirrors
+// apps/web/components/Logo.tsx's <Wordmark> (also now colorless, "d" set
+// apart by italics instead — a terminal can't italicize block-glyph art,
+// so brightness is this context's equivalent move). The ring glyph below
+// is independently derived from the same construction as that file's
+// mark, not a downsample of it — see the comment on markGlyph for why.
 
 var (
-	colorAccent = lipgloss.Color("#00be2c") // phosphor green — the brand accent
-	colorInk    = lipgloss.Color("#f2f5f1") // primary text
-	colorInk3   = lipgloss.Color("#8ea297") // muted labels
+	colorAccent = lipgloss.Color("#ffffff") // pure white — brightest tier, reserved for emphasis
+	colorInk    = lipgloss.Color("#dcdcdc") // primary text — one step below accent; see above
+	colorInk3   = lipgloss.Color("#8c8c8c") // muted labels
 
 	bannerStyle = lipgloss.NewStyle().Foreground(colorInk).Bold(true)
 	accentStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	dimStyle    = lipgloss.NewStyle().Foreground(colorInk3)
 )
 
-// The mark: a witch's hat, cone tapering to a point over a wide brim —
-// same silhouette as Logo.tsx's `cone`/`brim` paths, described in ASCII
-// rather than an SVG path.
-var hatGlyph = []string{
-	"          ▲          ",
-	"         ▲▲▲         ",
-	"        ▲▲▲▲▲        ",
-	"        ▲▲▲▲▲▲▲      ",
-	"       ▲▲▲▲▲▲▲▲▲     ",
-	"      ▲▲▲▲▲▲▲▲▲▲▲    ",
-	"     ▲▲▲▲▲▲▲▲▲▲▲▲▲   ",
-	"═════════════════════",
+// The mark: an open ring with a small comet-head flare at the gap — a
+// simplified derivative of Logo.tsx's weave (four circular-arc hooks,
+// each swept 220° around a center offset from the mark's own middle,
+// rotated 90° apart), not a downsample of it. Rasterizing the actual
+// four-hook weave into 13×7 terminal block characters was tried directly
+// and turns to mud — too much shape for that few cells, the same lesson
+// the previous hat glyph learned by dropping the full witch face. A ring
+// survives coarse block-character sampling far better than a woven shape
+// does, and still reads as the same idea: an open loop, a gap with a
+// flare at it. This glyph predates the web mark's most recent
+// construction change (golden spiral → interlocking hooks) and was never
+// redrawn for it — arguably needs it less now than before, since "a ring"
+// is a closer literal description of four overlapping circular arcs than
+// it ever was of a logarithmic spiral. Left as-is, not re-confirmed by
+// rendering it fresh; if it ever gets touched again, verify rather than
+// assume the old confirmation still holds for the new geometry.
+var markGlyph = []string{
+	"    ▄▄▄▄     ",
+	"  ▄██████▄   ",
+	" ███    █▀▀  ",
+	" ██          ",
+	" ███    █▄▄  ",
+	"  ▀██████▀   ",
+	"     ▀▀      ",
 }
 
 // The wordmark, "SPEC" + "D" kept as separate glyph sets so they can be
@@ -213,19 +243,24 @@ func renderWordmark(scale int) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderHat() string {
-	lines := make([]string, len(hatGlyph))
-	for i, row := range hatGlyph {
-		lines[i] = accentStyle.Render(row)
+// renderMark renders the ring glyph, one row per line, all in accent.
+func renderMark() string {
+	lines := make([]string, len(markGlyph))
+	for i, r := range markGlyph {
+		lines[i] = accentStyle.Render(r)
 	}
 	return strings.Join(lines, "\n")
 }
 
 // printBanner is called once, before the interactive loop starts — never for
 // a single-shot subcommand, and never when stdin/stdout is not a terminal.
-// The hero treatment (mark + big wordmark, boxed) only renders where it can
-// actually land well; anything narrower or colorless gets the plain line
-// every other terminal still reads correctly.
+// The hero treatment only renders where it can actually land well; anything
+// narrower or colorless gets the plain line every other terminal still
+// reads correctly. Left-aligned rather than centered, and the wordmark
+// leads with the mark after it — both by explicit direction, the one
+// deliberate divergence from Logo.tsx's own <Wordmark> (mark, then text).
+// No outer border — this sits unboxed above the (boxed) chat field, the
+// way Claude Code/Gemini CLI/Copilot CLI's own splashes do.
 func printBanner() {
 	width, _, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
@@ -237,17 +272,12 @@ func printBanner() {
 		return
 	}
 
-	hat := lipgloss.PlaceHorizontal(58, lipgloss.Center, renderHat())
-	body := hat + "\n\n" + renderWordmark(2) + "\n\n" +
-		dimStyle.Render("spec-driven delivery · type / for commands, /exit to leave")
+	mark := lipgloss.JoinHorizontal(lipgloss.Center, renderWordmark(2), "   ", renderMark())
 
-	hero := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorAccent).
-		Padding(1, 4).
-		Render(body)
-
-	fmt.Println(lipgloss.PlaceHorizontal(width, lipgloss.Center, hero))
+	fmt.Println()
+	fmt.Println(mark)
+	fmt.Println()
+	fmt.Println(dimStyle.Render("spec-driven delivery · type / for commands, /exit to leave"))
 	fmt.Println()
 }
 
@@ -262,7 +292,6 @@ func (c commandItem) FilterValue() string { return c.name }
 type commandFinishedMsg struct{}
 
 type replModel struct {
-	program     *tea.Program
 	input       textinput.Model
 	list        list.Model
 	showList    bool
@@ -280,13 +309,13 @@ const defaultReplWidth = 60
 // immediately above it, like a floating picker.
 var (
 	chatFieldStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorAccent).
-		Padding(0, 1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorAccent).
+			Padding(0, 1)
 	listBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorInk3).
-		Padding(0, 1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorInk3).
+			Padding(0, 1)
 	promptGlyph = accentStyle.Render("❯ ")
 )
 
@@ -326,10 +355,10 @@ func (m *replModel) Init() tea.Cmd {
 func (m *replModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		w := msg.Width - 6 // leaves room for the chat field's border + padding
-		if w > 70 {
-			w = 70
-		}
+		// Stretches to the full terminal width, the way every other AI
+		// agent's own bottom input field does — not capped to a fixed
+		// column count like a first pass would center-and-shrink instead.
+		w := msg.Width - 4 // leaves room for the chat field's own border + padding
 		if w < 20 {
 			w = 20
 		}
@@ -457,6 +486,21 @@ func (m *replModel) handleEnter() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// cmdExecAdapter lets an arbitrary func satisfy tea.ExecCommand, so running
+// a slash command goes through the same officially-supported suspend/resume
+// path tea.ExecProcess uses for spawning $EDITOR — not a hand-rolled
+// ReleaseTerminal/RestoreTerminal pair. That distinction matters: Bubbletea's
+// own Program.exec() calls the renderer's internal line-tracking reset after
+// restoring the terminal; without it, the frame from right before the
+// release (e.g. the command list, still showing) can be left stranded in
+// scrollback instead of being replaced by the next render.
+type cmdExecAdapter struct{ run func() error }
+
+func (e cmdExecAdapter) Run() error            { return e.run() }
+func (e cmdExecAdapter) SetStdin(_ io.Reader)  {}
+func (e cmdExecAdapter) SetStdout(_ io.Writer) {}
+func (e cmdExecAdapter) SetStderr(_ io.Writer) {}
+
 func (m *replModel) execute(c replCommand, arg string) tea.Cmd {
 	// /exit and /quit have no underlying cmd* function — quitting is a
 	// Bubbletea-level concern (tea.Quit), not something a plain `func() error`
@@ -474,10 +518,8 @@ func (m *replModel) execute(c replCommand, arg string) tea.Cmd {
 		m.showList = false
 		return nil
 	}
-	return func() tea.Msg {
-		if m.program != nil {
-			_ = m.program.ReleaseTerminal()
-		}
+
+	runner := cmdExecAdapter{run: func() error {
 		fmt.Printf("\n→ /%s%s\n", c.name, func() string {
 			if arg == "" {
 				return ""
@@ -488,11 +530,9 @@ func (m *replModel) execute(c replCommand, arg string) tea.Cmd {
 			fmt.Fprintf(os.Stderr, "specd: %v\n", err)
 		}
 		fmt.Println()
-		if m.program != nil {
-			_ = m.program.RestoreTerminal()
-		}
-		return commandFinishedMsg{}
-	}
+		return nil // already reported above — nothing left for the callback to surface
+	}}
+	return tea.Exec(runner, func(error) tea.Msg { return commandFinishedMsg{} })
 }
 
 // View renders the "bottom chat field" — a bordered input box, the way
@@ -518,14 +558,23 @@ func (m *replModel) View() string {
 	return b.String()
 }
 
+// clearScreen wipes the terminal — viewport and scrollback both — so the
+// shell opens on a clean page the way Claude Code/Gemini CLI/Copilot CLI
+// all do, rather than the banner landing wherever the prompt happened to
+// scroll to. Only ever called for the interactive shell; a single-shot
+// subcommand's output is never touched.
+func clearScreen() {
+	fmt.Print("\x1b[H\x1b[2J\x1b[3J")
+}
+
 // runRepl is the entry point for a bare, interactive invocation. It never
 // runs for a single-shot subcommand or a non-terminal stdin.
 func runRepl() int {
+	clearScreen()
 	printBanner()
 
 	m := newReplModel()
 	p := tea.NewProgram(m)
-	m.program = p
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "specd: %v\n", err)

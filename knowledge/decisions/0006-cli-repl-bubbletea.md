@@ -100,3 +100,31 @@ those use. Reworked on direct instruction:
   `lipgloss.RoundedBorder()` in accent), replacing the old bare prompt
   line. The command list, when shown, renders in the same treatment
   immediately above it — a floating picker, not an inline list.
+
+## Addendum (2026-08-08) — full witch mark, left-aligned, and a real dispatch bug
+
+Second pass, again on direct instruction: the mark is now the actual witch
+(hat + green face + red smile — Logo.tsx's "face" variant, not just its
+cone/brim), placed after the wordmark rather than above or before it, and
+the whole banner is left-aligned rather than centered. The shell also
+clears the terminal (viewport and scrollback) before the banner prints,
+so it opens on a clean page rather than wherever the prompt happened to
+scroll to — same as Claude Code/Gemini CLI/Copilot CLI.
+
+While verifying this live, found and fixed a real bug in how commands were
+being dispatched: `ClaudeCodeProvider`-style `ReleaseTerminal()`/
+`RestoreTerminal()`, called directly from inside a `tea.Cmd`, does not
+reset Bubbletea's renderer's internal line-count tracking — only
+`Program.exec()` (the function `tea.Exec`'s returned `Cmd` routes to,
+handled inside Bubbletea's own event loop) does that, via an unexported
+`resetLinesRendered()` call. Without it, a frame rendered right before the
+release (e.g. the command list, still showing when a filtered/arrow-selected
+`/exit` was chosen) could be left stranded in scrollback instead of being
+replaced by the next render. Fixed by dispatching through `tea.Exec` with a
+small `cmdExecAdapter` satisfying its `ExecCommand` interface,
+rather than calling `ReleaseTerminal`/`RestoreTerminal` by hand — the
+officially-supported path for "suspend the TUI, run something with real
+terminal access, resume," which is exactly what `tea.ExecProcess` uses
+internally for spawning `$EDITOR`. Reproduced the stuck-frame bug live via
+`tmux` before the fix, then confirmed clean across all three dispatch paths
+(typed in full, filtered, arrow-selected) after it.

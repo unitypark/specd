@@ -1,13 +1,13 @@
-/* Landing — the Matrix register (D12 / rev 14). Deep-green field, one
-   phosphor accent, white type, serif headlines. */
+/* Landing — minimal monochrome. Near-black field, one neon-green accent,
+   white type, serif headlines. */
 
 .page {
   min-height: 100vh;
   /*
-   * rev 13 colour rhythm: the page IS the green field. The hero, §01 and §02
-   * sit directly on it, §§03–05 and the giant word ride inside one inset black
-   * panel, and the finale returns to green — so the page opens and closes on
-   * the main colour with a dark middle.
+   * Colour rhythm: the page IS the field. The hero, §01 and §02 sit directly
+   * on it, §§03–05 and the giant word ride inside one inset panel, and the
+   * finale returns to the field — so the page opens and closes on the same
+   * surface with a lighter middle.
    */
   background: var(--field);
   border: 10px solid var(--field);
@@ -76,21 +76,72 @@
   /* Transparent, not absent — the width stays in the box model so the bar does
      not shift by 2px the moment you scroll. */
   border: 1px solid transparent;
-  background: rgba(32, 34, 38, 0.6);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-  transition: border-color 0.25s ease, background-color 0.25s ease;
+  /*
+   * High, not 60%, opacity. This pill is deliberately dark chrome against
+   * a page that is otherwise light (see DESIGN.md's "Surfaces" section) —
+   * it's the one place the mark's white glow actually shows, since white
+   * glow on the page's own near-white ground is invisible. A 60% fill
+   * blends toward whatever's behind it; over the OLD dark page that still
+   * read as near-black, but over the current light page the identical
+   * value washes out to mid-gray, which defeats both the chrome look and
+   * the glow. High opacity keeps it reliably dark regardless of what
+   * scrolls underneath — true at rest AND scrolled, so the fill itself
+   * never varies; only the blur/border/elevation below do.
+   */
+  background: rgba(10, 10, 10, 0.94);
+  /* At rest: flat chrome, no blur — the glass activates on scroll, the way
+     an OS toolbar (macOS/iOS) stays put over its own content until
+     something scrolls beneath it, then picks up blur and a hairline. At
+     94% fill there's barely anything behind the bar to blur anyway, so
+     blur here would cost paint for zero visible effect. */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  position: relative;
+  transition: border-color 0.3s ease, backdrop-filter 0.3s ease, box-shadow 0.3s ease;
 }
 .navbarScrolled {
   border-color: var(--line-2);
+  /*
+   * Liquid glass, not flat blur: `--glass-refract` bends the page content
+   * scrolling past underneath (see globals.css's token comment for the
+   * mechanism — `feDisplacementMap` fed by procedural turbulence,
+   * verified in headless Chrome only). The lift is what an OS toolbar
+   * does the instant it stops sitting flush with its content and starts
+   * floating over it; the rim light (a dark-tuned version of
+   * `--glass-rim` — the shared token is a light-surface highlight,
+   * washed out against a near-black fill) is what actually reads as
+   * "glass has a physical edge" rather than just "a blurred dark box."
+   */
+  -webkit-backdrop-filter: var(--glass-refract);
+  backdrop-filter: var(--glass-refract);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
-/* Without backdrop-filter a 60% fill just shows the page through unblurred and
-   the text loses its ground; those browsers get an opaque bar. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .navbar {
-    background: var(--bg);
-  }
+/* The specular sheen, present at all times but invisible at rest
+   (opacity 0) so it can fade in with everything else on scroll instead of
+   popping. `border-radius: inherit` clips it to the pill's own rounding —
+   see globals.css's .glass::before for why that's safer here than
+   `overflow: hidden` on .navbar (the dropdown menus below need to escape
+   this exact box). Dark-tuned: half the opacity of the light-surface
+   `--glass-specular` value, or it reads as a white smear rather than a
+   catch of light. */
+.navbar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.22), transparent 45%);
+  mix-blend-mode: overlay;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
 }
+.navbarScrolled::before {
+  opacity: 1;
+}
+/* Without backdrop-filter this is already near-opaque, so there is nothing
+   distinct for non-supporting browsers to fall back to. */
 @media (max-width: 700px) {
   .nav {
     padding: 8px 10px;
@@ -133,8 +184,10 @@
   text-decoration: none;
 }
 .logo i {
-  color: var(--accent);
-  font-style: normal;
+  /* No colour: the "d" is set apart by staying genuinely italic, same
+     treatment as Logo.tsx's Wordmark and globals.css's .applogo i. */
+  color: #fff;
+  font-style: italic;
 }
 .flex {
   flex: 1;
@@ -148,9 +201,23 @@
   font: 600 0.88rem/1 var(--mono);
   letter-spacing: 0.1em;
   color: #fff;
+  /* Padding + matching negative margin: an invisible-at-rest hit area for
+     the glass chip below, without shifting the link's visual position or
+     the gap to its neighbours. */
+  padding: 0.35em 0.5em;
+  margin: -0.35em -0.5em;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: opacity 0.15s, background 0.15s, backdrop-filter 0.15s, border-color 0.15s;
 }
 .navlink:hover {
-  color: var(--accent);
+  /* No colour to shift to on hover (base is already #fff on the dark nav
+     pill) — dim plus a glass chip is the feedback, not a hue change. */
+  opacity: 0.85;
+  background: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(8px) saturate(180%);
+  backdrop-filter: blur(8px) saturate(180%);
+  border-color: rgba(255, 255, 255, 0.14);
   text-decoration: none;
 }
 
@@ -161,17 +228,25 @@
   letter-spacing: 0.1em;
   color: #fff;
   background: none;
-  border: 0;
-  padding: 0;
+  border: 1px solid transparent;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 0.3em;
-  transition: color 0.15s;
+  /* Same invisible-at-rest hit-area trick as .navlink. */
+  padding: 0.35em 0.5em;
+  margin: -0.35em -0.5em;
+  border-radius: 6px;
+  transition: color 0.15s, opacity 0.15s, background 0.15s, backdrop-filter 0.15s, border-color 0.15s;
 }
 .lk:hover,
 .lk[aria-expanded='true'] {
-  color: var(--accent);
+  /* No colour to shift to — see .navlink:hover above. */
+  opacity: 0.85;
+  background: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(8px) saturate(180%);
+  backdrop-filter: blur(8px) saturate(180%);
+  border-color: rgba(255, 255, 255, 0.14);
   text-decoration: none;
 }
 .caret {
@@ -215,14 +290,18 @@
   transition: background 0.14s, color 0.14s;
 }
 .ddmenu a:hover {
-  background: rgba(0, 190, 44, 0.1);
-  color: var(--accent);
+  /* A white wash, not a hue — see .navlink:hover above. */
+  background: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(8px) saturate(180%);
+  backdrop-filter: blur(8px) saturate(180%);
   text-decoration: none;
 }
 .ddmenu i {
   font-style: normal;
   font-size: 0.5rem;
-  color: var(--accent);
+  /* Dimmed white on the dark dropdown ground — reads as "secondary/preview",
+     not an accent. */
+  color: rgba(255, 255, 255, 0.65);
   border: 1px solid var(--line-2);
   border-radius: 3px;
   padding: 0.12em 0.3em;
@@ -233,12 +312,20 @@
   font: 750 0.95rem/1 var(--sans);
   padding: 0.72rem 1.3rem;
   border-radius: 6px;
-  background: var(--accent);
-  color: #06130a;
-  border: 1px solid rgba(0, 0, 0, 0.25);
+  /* A white chip, not a dark gradient: this button renders on BOTH the dark
+     nav pill (LandingNav.tsx) and light page/pricing grounds via the same
+     class. var(--emphasis)'s dark gradient would vanish against the nav's
+     own near-black pill, so it needs a fill that reads on either surface —
+     the same self-adjusting logic as the mark's white glow. */
+  background: #fff;
+  color: #0f0f0f;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 4px 12px -4px rgba(0, 0, 0, 0.2);
+  transition: box-shadow 0.2s, transform 0.2s;
 }
 .cta:hover {
-  background: #4ff086;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 6px 18px -4px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
   text-decoration: none;
 }
 .ghost {
@@ -258,7 +345,7 @@
 
 /*
  * The band carries the colour, the grid carries the width. They were the same
- * element, so the green stopped at 66rem and the hero read as a floating box
+ * element, so the field stopped at 66rem and the hero read as a floating box
  * on a black page instead of a full-bleed band.
  */
 .heroband {
@@ -328,7 +415,7 @@
      clamp(2rem, 5vw, 3.4rem) — half again too big at every width. */
   font: 400 clamp(2.2rem, 4.4vw, 3.6rem)/1.06 var(--serif);
   letter-spacing: 0.005em;
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 0.75rem;
   display: flex;
   flex-direction: column;
@@ -392,7 +479,7 @@
 .h2 {
   /* Mockup rev 13 override: clamp(1.4rem, 2.6vw, 1.85rem), weight 500. */
   font: 400 clamp(1.9rem, 3.4vw, 2.7rem)/1.16 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 0.35rem;
 }
 .h2 em {
@@ -428,7 +515,7 @@
 }
 .cmpcard h4 {
   font: 600 0.95rem/1.3 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 0.55rem;
 }
 .cmpcard ul {
@@ -442,7 +529,7 @@
   padding: 0.36rem 0 0.36rem 1.2rem;
   position: relative;
   line-height: 1.6;
-  border-bottom: 1px dashed rgba(0, 190, 44, 0.09);
+  border-bottom: 1px dashed var(--line);
 }
 .cmpcard li:last-child {
   border-bottom: none;
@@ -487,7 +574,7 @@
   line-height: 1.7;
 }
 .note b {
-  color: #fff;
+  color: var(--ink);
   font-family: var(--serif);
   font-weight: 600;
 }
@@ -655,7 +742,7 @@
 }
 .finword {
   font: 600 clamp(2.4rem, 8vw, 4.6rem)/1 var(--serif);
-  color: #fff;
+  color: var(--ink);
 }
 .finword span {
   color: var(--accent);
@@ -676,7 +763,7 @@
   border-radius: 6px;
 }
 .finbtn:hover {
-  background: #fff;
+  background: var(--panel-2);
   text-decoration: none;
 }
 .finmeta {
@@ -820,7 +907,7 @@
 }
 .subh1 {
   font: 600 clamp(1.8rem, 3.4vw, 2.6rem)/1.15 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0.4rem 0 0.5rem;
 }
 .subh1 em {
@@ -859,14 +946,16 @@
   left: 1.2rem;
   font: 800 0.52rem/1 var(--mono);
   letter-spacing: 0.16em;
-  background: var(--accent);
-  color: #06130a;
+  /* On the light pricing card only (unlike .cta) — the emphasis gradient
+     reads cleanly here. */
+  background: var(--emphasis);
+  color: #fff;
   padding: 0.35em 0.5em;
   border-radius: 3px;
 }
 .price h4 {
   font: 600 1.05rem/1.2 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 0.5rem;
 }
 .amt {
@@ -968,7 +1057,7 @@
 }
 .surface h3 {
   font: 600 1.05rem/1.2 var(--serif);
-  color: #fff;
+  color: var(--ink);
   margin: 0 0 0.4rem;
   display: flex;
   align-items: center;
@@ -1073,7 +1162,7 @@
   border-top: none;
 }
 
-/* Sections on the green field carry the field's own hairline. */
+/* Sections on the field carry the field's own hairline. */
 .field {
   background: var(--field);
 }

@@ -172,13 +172,16 @@ export function AgentsView({ slug }: { slug: string }) {
           flex: none;
         }
         .st.succeeded {
-          background: var(--accent);
+          /* Solid ink dot. succeeded and running were already the same
+             colour, distinguished only by the pulse animation below — losing
+             the point-color fill loses nothing here. */
+          background: var(--ink);
         }
         .st.failed {
           background: var(--danger);
         }
         .st.running {
-          background: var(--accent);
+          background: var(--ink);
           animation: pulse 1.2s ease-in-out infinite;
         }
         @keyframes pulse {

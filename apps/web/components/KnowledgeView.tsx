@@ -89,7 +89,7 @@ export function KnowledgeView({ slug }: { slug: string }) {
             <span className="path">{doc.path.replace(/^knowledge\//, '')}</span>
             <span className="flex" />
             {doc.isStub && <span className="pill">stub</span>}
-            {doc.hasUnverified && <span className="pill warn">UNVERIFIED</span>}
+            {doc.hasUnverified && <span className="pill unverified">UNVERIFIED</span>}
             {doc.kind === 'spec' && <span className="pill on">as-built</span>}
             <span className={`pill ${doc.freshness.stale ? 'warn' : ''}`}>
               {doc.freshness.stale ? `⚠ ${doc.freshness.ageDays}d` : 'fresh'}

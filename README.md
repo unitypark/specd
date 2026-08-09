@@ -229,11 +229,17 @@ metadata, run history. Delete a project and nothing you would miss is gone.
 ### Tests
 
 ```bash
-pnpm test        # 232 tests
+pnpm test        # 274 TypeScript tests + the Go CLI suite
 ```
 
-The gate and webhook tests run against real Postgres and skip themselves if
-none is reachable, so the suite still works on a laptop with nothing running.
+The gate, webhook and migration tests run against real Postgres and skip
+themselves if none is reachable, so the suite still works on a laptop with
+nothing running. The migration suite builds a throwaway database and applies
+every migration from zero — the path a deployment takes, and the one that never
+happens locally, where the schema arrives one migration at a time. The runner's
+git layer is likewise tested against the real `git` binary rather than a mock,
+since talking to the actual binary with the machine's actual credentials is the
+whole reason that module exists.
 Webhook signatures are tested with real HMAC and App JWTs with real RSA keys —
 a mocked signer would prove nothing about the only property that matters, which
 is that GitHub can verify what we send. GitLab's webhook trust boundary is a

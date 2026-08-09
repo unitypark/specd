@@ -5,7 +5,7 @@ import { Injectable } from '@nestjs/common';
 import type { Repository } from '@specd/db';
 import {
   asBuiltPath,
-  renderSpecMarkdown,
+  renderAsBuiltMarkdown,
   slugify,
   specBranchName,
   type ModelId,
@@ -27,6 +27,49 @@ export interface BuildResult {
   asBuiltPath: string;
   /** Where to review it. A PR on hosted providers; null in local mode. */
   reviewUrl: string | null;
+}
+
+/** One task, with its prompt already rendered so a runner needs no spec knowledge. */
+export interface PreparedBuildTask {
+  id: string;
+  title: string;
+  prompt: string;
+  commitMessage: string;
+}
+
+/**
+ * Everything needed to execute a build, wherever it executes.
+ *
+ * `run()` consumes this in-process; `PipelineService` ships it to a paired
+ * runner as a job payload. Both come from the same `prepare()` call, so the
+ * two paths cannot drift in what they ask the model for.
+ */
+export interface PreparedBuild {
+  system: string;
+  model: ModelId;
+  branch: string;
+  asBuiltPath: string;
+  asBuiltCommitMessage: string;
+  verifyCommand: string | null;
+  tasks: PreparedBuildTask[];
+  /** Null for `local` repositories, which only ever build on the API host. */
+  remote: { cloneUrl: string; baseBranch: string } | null;
+}
+
+/**
+ * What a runner reports after executing a build on its own machine.
+ *
+ * Token usage rides the existing `JobReport.usage` field as one summed total
+ * rather than appearing here per task: metering only ever accumulates onto the
+ * run row, so the sum produces an identical cost, and per-task detail is
+ * already visible in the progress log the runner streams as it goes.
+ */
+export interface BuildRunnerReport {
+  tasksAttempted: number;
+  tasksCommitted: number;
+  commits: number;
+  verifyPassed: boolean | null;
+  verifyOutput: string | null;
 }
 
 /**
@@ -55,6 +98,99 @@ export class BuildAgent {
     private readonly workspaces: WorkspaceService,
   ) {}
 
+  /**
+   * Everything a build needs, resolved before anything executes.
+   *
+   * Deliberately produces no side effects: it reads the spec and the repo's
+   * detected stack and renders strings. That is what makes it safe to call on
+   * the dispatch path, where the result travels to another machine rather
+   * than being executed here.
+   */
+  async prepare(input: {
+    repo: Repository;
+    spec: SpecView;
+    projectName: string;
+    knowledgeExcerpts: string;
+    model: ModelId;
+  }): Promise<PreparedBuild> {
+    const { repo, spec, model } = input;
+
+    const slug = slugify(spec.title);
+    const branch = specBranchName(spec.ticketKey, slug);
+    const asBuilt = asBuiltPath(spec.ticketKey, slug);
+
+    // `stack` is whatever the onboarding scan detected, persisted as JSON —
+    // treat it as untrusted shape rather than asserting it is complete.
+    const stack = (repo.stack ?? {}) as Partial<DetectedStack>;
+
+    // The last task files the as-built spec; specd does that itself, so the
+    // agent implements everything before it.
+    const codeTasks = spec.content.tasks.filter((t) => !isAsBuiltTask(t));
+
+    return {
+      system: BUILD_SYSTEM_PROMPT,
+      model,
+      branch,
+      asBuiltPath: asBuilt,
+      asBuiltCommitMessage: `${spec.ticketKey}: file as-built spec\n\nCloses the loop — this spec now grounds the next one.`,
+      verifyCommand: typeof stack.verifyCommand === 'string' ? stack.verifyCommand : null,
+      remote: await this.workspaces.remoteFor(repo),
+      tasks: codeTasks.map((task, index) => ({
+        id: task.id,
+        title: task.title,
+        prompt: buildTaskPrompt({
+          spec,
+          task,
+          projectName: input.projectName,
+          repoName: repo.name,
+          knowledgeExcerpts: input.knowledgeExcerpts,
+          remaining: codeTasks.slice(index + 1),
+        }),
+        commitMessage: `${spec.ticketKey} ${task.id}: ${task.title}\n\nPer spec ${spec.ticketKey} v${spec.version}.`,
+      })),
+    };
+  }
+
+  /**
+   * Turn a runner's report into the same `BuildResult` the in-process path
+   * returns. The runner already pushed the branch with its own credentials
+   * (`knowledge/decisions/0009-...`), so the only thing left is the review
+   * surface — a VCS API call, which stays here with the platform token.
+   */
+  async finalize(
+    report: BuildRunnerReport,
+    ctx: {
+      repo: Repository;
+      spec: SpecView;
+      prepared: Pick<PreparedBuild, 'branch' | 'asBuiltPath' | 'verifyCommand' | 'remote'>;
+    },
+  ): Promise<BuildResult> {
+    const { repo, spec, prepared } = ctx;
+
+    const published = await this.workspaces.openReview(repo, {
+      branch: prepared.branch,
+      base: prepared.remote?.baseBranch ?? repo.defaultBranch,
+      title: `${spec.ticketKey}: ${spec.title}`,
+      body: buildPrBody(spec, {
+        commits: report.commits,
+        verifyPassed: report.verifyPassed,
+        verifyCommand: prepared.verifyCommand,
+        asBuilt: prepared.asBuiltPath,
+      }),
+    });
+
+    return {
+      branch: prepared.branch,
+      tasksAttempted: report.tasksAttempted,
+      tasksCommitted: report.tasksCommitted,
+      commits: report.commits,
+      verifyPassed: report.verifyPassed,
+      verifyOutput: report.verifyOutput,
+      asBuiltPath: prepared.asBuiltPath,
+      reviewUrl: published.url,
+    };
+  }
+
   async run(input: {
     repo: Repository;
     spec: SpecView;
@@ -65,17 +201,13 @@ export class BuildAgent {
   }): Promise<BuildResult> {
     const { repo, spec, run, model } = input;
 
-    const slug = slugify(spec.title);
-    const branch = specBranchName(spec.ticketKey, slug);
-    const asBuilt = asBuiltPath(spec.ticketKey, slug);
+    const plan = await this.prepare(input);
+    const { branch, asBuiltPath: asBuilt } = plan;
 
     await run.log(`spec ${spec.ticketKey} v${spec.version} pulled · ${spec.content.tasks.length} tasks`);
     await run.log(`preparing isolated workspace on ${branch}`);
 
     const workspace = await this.workspaces.create(repo, branch);
-    // `stack` is whatever the onboarding scan detected, persisted as JSON —
-    // treat it as untrusted shape rather than asserting it is complete.
-    const stack = (repo.stack ?? {}) as Partial<DetectedStack>;
 
     let tasksAttempted = 0;
     let tasksCommitted = 0;
@@ -83,26 +215,15 @@ export class BuildAgent {
     let verifyOutput: string | null = null;
 
     try {
-      // The last task files the as-built spec; specd does that itself, so the
-      // agent implements everything before it.
-      const codeTasks = spec.content.tasks.filter((t) => !isAsBuiltTask(t));
-
-      for (const [index, task] of codeTasks.entries()) {
+      for (const [index, task] of plan.tasks.entries()) {
         tasksAttempted += 1;
-        await run.log(`▸ ${task.id} ${task.title} (${index + 1}/${codeTasks.length})`);
+        await run.log(`▸ ${task.id} ${task.title} (${index + 1}/${plan.tasks.length})`);
 
         const result = await this.claudeCode.code({
           model,
           workspaceDir: workspace.dir,
-          system: BUILD_SYSTEM_PROMPT,
-          user: buildTaskPrompt({
-            spec,
-            task,
-            projectName: input.projectName,
-            repoName: repo.name,
-            knowledgeExcerpts: input.knowledgeExcerpts,
-            remaining: codeTasks.slice(index + 1),
-          }),
+          system: plan.system,
+          user: task.prompt,
         });
 
         await run.meter(result.model ?? model, result.usage, false);
@@ -113,10 +234,7 @@ export class BuildAgent {
           continue;
         }
 
-        const sha = await this.workspaces.commitAll(
-          workspace.dir,
-          `${spec.ticketKey} ${task.id}: ${task.title}\n\nPer spec ${spec.ticketKey} v${spec.version}.`,
-        );
+        const sha = await this.workspaces.commitAll(workspace.dir, task.commitMessage);
         if (sha) {
           tasksCommitted += 1;
           await run.log(`  ${task.id} committed ${sha.slice(0, 8)} · ${changed.length} file(s)`);
@@ -124,7 +242,7 @@ export class BuildAgent {
       }
 
       // Verify — specd runs this, never the agent.
-      const verifyCommand = typeof stack.verifyCommand === 'string' ? stack.verifyCommand : null;
+      const verifyCommand = plan.verifyCommand;
       if (verifyCommand) {
         await run.log(`verifying: ${verifyCommand}`);
         const verify = await runShell(verifyCommand, workspace.dir, 600_000);
@@ -151,11 +269,12 @@ export class BuildAgent {
       // Rule 7: the as-built spec rides the same branch as the code.
       const asBuiltTarget = join(workspace.dir, asBuilt);
       await mkdir(dirname(asBuiltTarget), { recursive: true });
-      await writeFile(asBuiltTarget, renderAsBuilt(spec, verifyPassed, verifyCommand), 'utf8');
-      const asBuiltSha = await this.workspaces.commitAll(
-        workspace.dir,
-        `${spec.ticketKey}: file as-built spec\n\nCloses the loop — this spec now grounds the next one.`,
+      await writeFile(
+        asBuiltTarget,
+        renderAsBuiltMarkdown(spec, { passed: verifyPassed, command: verifyCommand }),
+        'utf8',
       );
+      const asBuiltSha = await this.workspaces.commitAll(workspace.dir, plan.asBuiltCommitMessage);
       if (asBuiltSha) {
         await run.log(`as-built spec filed → ${asBuilt}`);
       }
@@ -167,12 +286,7 @@ export class BuildAgent {
       // never pushed is a build that produced nothing.
       const published = await workspace.publish({
         title: `${spec.ticketKey}: ${spec.title}`,
-        body: buildPrBody(spec, {
-          commits,
-          verifyPassed,
-          verifyCommand: typeof stack.verifyCommand === 'string' ? stack.verifyCommand : null,
-          asBuilt,
-        }),
+        body: buildPrBody(spec, { commits, verifyPassed, verifyCommand, asBuilt }),
       });
 
       await run.log(`branch ${branch} ready · ${commits} commit(s) · ${published.reviewHint}`);
@@ -288,40 +402,6 @@ ${
 }
 
 Implement it in the current directory.`;
-}
-
-/** The as-built record. Written by specd so it is exact, not paraphrased. */
-function renderAsBuilt(
-  spec: SpecView,
-  verifyPassed: boolean | null,
-  verifyCommand: string | null,
-): string {
-  const header = [
-    `<!-- Filed automatically by specd when ${spec.ticketKey} was built. -->`,
-    '<!-- This is a historical record: never rewrite it. If reality later -->',
-    '<!-- diverged, append a "## Deviations" section below.              -->',
-    '',
-  ].join('\n');
-
-  const verification = verifyCommand
-    ? `\n## Verification\n\n\`${verifyCommand}\` — ${
-        verifyPassed === null ? 'not run' : verifyPassed ? 'passed' : '**failed** at build time'
-      }\n`
-    : '\n## Verification\n\nNo verify command was detected for this repository.\n';
-
-  return (
-    header +
-    renderSpecMarkdown({
-      ticketKey: spec.ticketKey,
-      title: spec.title,
-      version: spec.version,
-      status: spec.status,
-      approvedBy: spec.approvedBy,
-      approvedAt: spec.approvedAt,
-      content: spec.content,
-    }) +
-    verification
-  );
 }
 
 /** Runs the repo's own verify command. Never a model-supplied string. */

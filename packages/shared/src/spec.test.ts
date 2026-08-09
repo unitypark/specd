@@ -3,6 +3,7 @@ import {
   asBuiltPath,
   countCitations,
   countUnverified,
+  renderAsBuiltMarkdown,
   renderSpecMarkdown,
   slugify,
   specBranchName,
@@ -106,5 +107,51 @@ describe('spec content', () => {
     expect(slugify('  Fix: the "widget" (v2) — again!  ')).toBe('fix-the-widget-v2-again');
     expect(slugify('///')).toBe('');
     expect(slugify('a'.repeat(100)).length).toBeLessThanOrEqual(48);
+  });
+
+  describe('renderAsBuiltMarkdown', () => {
+    const spec = {
+      ticketKey: 'CRM-142',
+      title: 'Export contacts to CSV',
+      version: 2,
+      status: 'approved' as const,
+      approvedBy: 'Theo',
+      approvedAt: '2026-08-10T09:00:00.000Z',
+      content,
+    };
+
+    it('marks the record as history that must not be rewritten', () => {
+      const md = renderAsBuiltMarkdown(spec, { passed: true, command: 'pnpm test' });
+      expect(md).toContain('Filed automatically by specd when CRM-142 was built');
+      expect(md).toContain('never rewrite it');
+      expect(md).toContain('## Deviations');
+      // The approval it records is the whole point of the file.
+      expect(md).toContain('approved by Theo');
+    });
+
+    it('keeps "passed", "failed" and "never ran" three different statements', () => {
+      const passed = renderAsBuiltMarkdown(spec, { passed: true, command: 'pnpm test' });
+      const failed = renderAsBuiltMarkdown(spec, { passed: false, command: 'pnpm test' });
+      const unrun = renderAsBuiltMarkdown(spec, { passed: null, command: 'pnpm test' });
+      const none = renderAsBuiltMarkdown(spec, { passed: null, command: null });
+
+      expect(passed).toContain('`pnpm test` — passed');
+      expect(failed).toContain('**failed** at build time');
+      // "Could not run" must never read as a pass — a reviewer told "passed"
+      // when nothing ran has been misled.
+      expect(unrun).toContain('`pnpm test` — not run');
+      expect(unrun).not.toContain('passed');
+      expect(none).toContain('No verify command was detected');
+    });
+
+    it('is byte-identical for the same input, so both build paths file the same file', () => {
+      // The in-process build station and the @specd/runner daemon call this
+      // same function on different machines (decision 0009). If they ever
+      // diverged, the as-built record would depend on where it was built.
+      const a = renderAsBuiltMarkdown(spec, { passed: false, command: 'make check' });
+      const b = renderAsBuiltMarkdown({ ...spec }, { passed: false, command: 'make check' });
+      expect(a).toBe(b);
+      expect(a).toContain(renderSpecMarkdown(spec));
+    });
   });
 });

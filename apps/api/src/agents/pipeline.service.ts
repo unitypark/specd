@@ -16,7 +16,11 @@ import { SpecsService } from '../specs/specs.service.js';
 import { BoardService } from '../board/board.service.js';
 import { RunsService } from '../runs/runs.service.js';
 import { RunnersService } from '../runners/runners.service.js';
-import type { OnboardJobPayload, SpecJobPayload } from '../runners/runner-jobs.service.js';
+import type {
+  BuildJobPayload,
+  OnboardJobPayload,
+  SpecJobPayload,
+} from '../runners/runner-jobs.service.js';
 import { OnboardingAgent } from './onboarding.agent.js';
 import { SpecAgent } from './spec.agent.js';
 import { BuildAgent } from './build.agent.js';
@@ -338,6 +342,66 @@ export class PipelineService {
         to: 'building',
         actor: input.actor,
       });
+    }
+
+    // Dispatch to a paired runner when there is one — it builds on its own
+    // machine with its own git credentials (D9). A `local` repository has no
+    // remote another machine could clone, so it always stays in-process:
+    // `prepare()` returns a null remote and we fall through.
+    const pairedRunner =
+      ai.mode === 'subscription_runner' ? await this.runners.pickPaired(project.id) : null;
+
+    if (pairedRunner) {
+      try {
+        const prepared = await this.build.prepare({
+          repo: primary,
+          spec,
+          projectName: project.name,
+          knowledgeExcerpts,
+          model,
+        });
+
+        if (prepared.remote) {
+          const payload: BuildJobPayload = {
+            kind: 'build',
+            model,
+            system: prepared.system,
+            branch: prepared.branch,
+            asBuiltPath: prepared.asBuiltPath,
+            asBuiltCommitMessage: prepared.asBuiltCommitMessage,
+            verifyCommand: prepared.verifyCommand,
+            tasks: prepared.tasks,
+            remote: prepared.remote,
+            ticketKey: spec.ticketKey,
+            ctx: { repo: primary, spec },
+          };
+
+          await this.runs.queueForRunner(run.id, payload as unknown as Record<string, unknown>);
+          await run.log(
+            `queued for runner "${pairedRunner.name}" — it clones and pushes ${primary.name} with ` +
+              'its own git credentials; specd sends no token',
+          );
+
+          return {
+            runId: run.id,
+            specId: spec.id,
+            ticketKey: spec.ticketKey,
+            branch: prepared.branch,
+            started: true as const,
+            queued: true as const,
+          };
+        }
+
+        await run.log(
+          `runner "${pairedRunner.name}" is paired, but ${primary.name} is a local repository ` +
+            'with no remote it could clone — building here instead',
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await run.log(message, 'error').catch(() => undefined);
+        await this.runs.finish(run.id, { status: 'failed', error: message }).catch(() => undefined);
+        throw err;
+      }
     }
 
     // A build runs for minutes, so it is *started* here and watched through

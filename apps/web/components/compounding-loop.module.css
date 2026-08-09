@@ -30,10 +30,15 @@
  * A quarter-circle that rotates to the active step. Drawn with a dash pattern
  * rather than an arc path so it can be repositioned by transform alone — no
  * path maths, and the browser tweens the rotation for free.
+ *
+ * .progress/.nodeOn/.marker are solid ink, not gradient: SVG stroke/fill
+ * can't take the linear-gradient --emphasis token directly, and at this
+ * stroke width (2.5) a gradient would barely read. .doc below is the actual
+ * HTML div in this graphic and carries the gradient+glow instead.
  */
 .progress {
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--ink);
   stroke-width: 2.5;
   stroke-linecap: round;
   stroke-dasharray: 186 556;
@@ -48,12 +53,12 @@
   transition: r 0.4s, fill 0.4s, stroke 0.4s;
 }
 .nodeOn {
-  fill: var(--accent);
-  stroke: var(--accent);
+  fill: var(--ink);
+  stroke: var(--ink);
 }
 
 .marker {
-  fill: var(--accent);
+  fill: var(--ink);
   opacity: 0.16;
   transition: cx 0.75s cubic-bezier(0.65, 0, 0.35, 1), cy 0.75s cubic-bezier(0.65, 0, 0.35, 1);
 }
@@ -82,7 +87,12 @@
   width: 62px;
   height: 4px;
   border-radius: 2px;
-  background: var(--accent);
+  /* The payoff moment of this graphic — the knowledge base actually growing
+     — so unlike .progress/.nodeOn/.marker above (SVG, solid ink) this is a
+     real HTML div and gets the full gradient+glow "point of application"
+     treatment. */
+  background: var(--emphasis);
+  box-shadow: 0 1px 4px -1px rgba(0, 0, 0, 0.4);
   animation: settle 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both;
 }
 @keyframes settle {
@@ -95,7 +105,7 @@
 .count b {
   display: block;
   font: 400 2rem/1 var(--serif);
-  color: #fff;
+  color: var(--ink);
 }
 .count span {
   font: 500 0.62rem/1.5 var(--mono);
@@ -149,7 +159,7 @@
   border-color: var(--line-2);
 }
 .steps li.on b {
-  color: #fff;
+  color: var(--ink);
 }
 .steps li.on::before {
   color: var(--accent);

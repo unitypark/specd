@@ -1,95 +1,156 @@
 /*
- * Design tokens — D12, settled: minimal monochrome.
+ * Design tokens — golden spiral, settled: white ground, black ink, no
+ * point colour at all.
  *
- * Near-black surfaces. ONE accent, phosphor green, reserved for exactly three
- * things: human approval, attention, and primary actions. Muted red only for
- * destructive acts. Serif headlines and mono annotations keep the blueprint
- * heritage without the blue.
+ * Near-white surfaces, near-black ink. There is no accent hue anymore —
+ * on direct instruction ("make all black and white only, no point
+ * color"), the neon-green accent this system carried through two earlier
+ * passes is gone. What used to be the accent's job — marking a primary
+ * action, an approved state, the thing that matters on a screen — is now
+ * carried by form instead of hue: a dark gradient fill plus a soft glow
+ * ("gradation and glow effect for point of application"), the same
+ * language the mark itself already uses (a black line with a white
+ * bloom). Magenta stays, but only for `UNVERIFIED` — a functional status
+ * signal, not brand decoration, so it wasn't swept up in "no point
+ * colour." Muted red stays for destructive acts, for the same reason.
  *
- * The discipline matters: if the accent shows up on decoration, it stops
- * meaning "a human did this".
+ * The discipline matters: if emphasis shows up on decoration, it stops
+ * meaning "this is the thing that matters here".
  */
 
 :root {
-  --bg: #202226;
-  --bg-2: #1a1c20;
-  --field: #1b2620;
-  --panel: #26282c;
-  --panel-2: #2b2d32;
+  --bg-2: #ececec;
+  --panel-2: #eeeeee;
+  --bg: #f4f4f4;
+  --field: #fafafa;
+  --panel: #ffffff;
 
-  --line: rgba(0, 190, 44, 0.2);
-  --line-2: rgba(0, 190, 44, 0.44);
+  --line: rgba(0, 0, 0, 0.1);
+  --line-2: rgba(0, 0, 0, 0.18);
 
+  --ink: #0f0f0f;
+  --ink-2: #525252;
   /*
-   * Palette — "Wicked: Glinda and Elphaba" (color-hex 1054600).
-   * Elphaba's green for what the system grounds, Glinda's pink for what still
-   * needs a person. Roles and measured contrast: see DESIGN.md.
+   * Muted labels. Chosen to clear AA (4.5) on the surface closest to its
+   * own tone — for dark ink on light surfaces that is the *darkest*
+   * surface, not the lightest (the inverse of the rule under the old dark
+   * theme, same underlying principle: measure against whichever surface
+   * is nearest the ink's own lightness). #636363 scores 5.09 on --bg-2
+   * (the darkest/grayest surface) and 6.01 on --panel (the whitest).
    */
-  --green: #00be2c;
-  --green-deep: #009159;
-  --pink: #ff0080;
-  --pink-soft: #ff84c4;
-  --pink-tint: #fcedff;
+  --ink-3: #636363;
 
   /*
-   * Paper variants. On the light surface the palette's own green (3.6) and pink
-   * (3.36) both fail AA for body text, so light components get darkened
-   * siblings — 5.44 and 5.86. Same meanings, legible ink.
+   * Emphasis — gradient + glow, not hue. This is what "point of
+   * application" means now: a dark gradient fill with a matching soft
+   * shadow lifts an element off the page; the deeper, wider shadow on
+   * hover/focus is the "glow." Used for primary actions and the handful
+   * of moments (a stat number, the approval stamp) that need to read as
+   * the important thing on the screen — not applied uniformly to every
+   * small label, the same restraint the old accent colour was supposed
+   * to have.
    */
-  --green-paper: #00713f;
-  --pink-paper: #b8005c;
-  --pink-paper-soft: #ffe4f1;
-  --pink-paper-line: #f5b8d4;
+  --emphasis: linear-gradient(160deg, #2e2e2e 0%, #000 100%);
+  --emphasis-hover: linear-gradient(160deg, #3c3c3c 0%, #111 100%);
+  --emphasis-shadow: 0 1px 2px rgba(0, 0, 0, 0.15), 0 8px 20px -6px rgba(0, 0, 0, 0.35);
+  --emphasis-shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.15), 0 10px 26px -6px rgba(0, 0, 0, 0.45),
+    0 0 0 6px rgba(0, 0, 0, 0.05);
+  --emphasis-soft: rgba(0, 0, 0, 0.05);
+  --emphasis-dim: rgba(0, 0, 0, 0.3);
 
-  --accent: var(--green);
-  --accent-dim: var(--green-deep);
-  --accent-soft: rgba(0, 190, 44, 0.1);
-
-  --ink: #f2f5f1;
-  --ink-2: #9fb3a6;
   /*
-   * Muted labels. Chosen to clear AA (4.5) on the *lightest* surface, not the
-   * darkest — at #7d9186 it passed on --bg (4.75) and failed on --panel (4.41)
-   * and --panel-2 (4.11), which is where most of the app's small labels
-   * actually sit. Every surface must pass, so the ceiling sets the colour.
+   * --accent/--accent-dim/--accent-soft kept as tokens (not removed) even
+   * though nothing in this file uses them anymore as of this pass — around
+   * 70 call sites elsewhere in the app (marketing-page kickers, stat
+   * numbers, step indices, price tags — a full inventory lives in
+   * knowledge/decisions/0007-rebrand-golden-spiral.md) still reference them
+   * directly and have not been individually revisited for this specific
+   * change yet. Deleting the tokens outright would not make those call
+   * sites monochrome, it would make them silently invalid — background/
+   * border/color properties that reference an undefined custom property
+   * with no fallback drop out entirely, which reads as a missing fill or a
+   * missing border, not as "no point colour." Repointed here to plain
+   * ink/gray so every such call site still renders something coherent;
+   * genuinely important moments get individually upgraded to the
+   * --emphasis treatment above rather than left on this default.
    */
-  --ink-3: #8ea297;
+  --accent: var(--ink);
+  --accent-dim: var(--ink-3);
+  --accent-soft: rgba(0, 0, 0, 0.05);
 
   /*
-   * Brand triad — black, green, red.
+   * Glass — liquid glass, not flat blur-behind. On direct instruction,
+   * referencing Aave's "Building Glass for the Web" writeup: the
+   * distinguishing property of real (Apple-style) liquid glass versus
+   * plain glassmorphism isn't the blur, it's that the glass *bends* the
+   * content under it — the content's own pixels shift, the way light
+   * refracts through curved glass, rather than the surface just being a
+   * frosted copy of whatever's behind it. `--glass-refract` is that:
+   * `feDisplacementMap`, fed by procedural turbulence (`feTurbulence`, a
+   * declarative SVG primitive — no JS, no per-shape map generation) that
+   * pushes each pixel of the real content sideways by an amount read from
+   * a generated noise texture. The filter itself lives once in
+   * `app/layout.tsx` (id `liquid-glass`), not duplicated per surface.
    *
-   * The red here is NOT the danger red. Brand red is a saturated lipstick
-   * crimson; danger red is a muted rose. They must stay visibly different or a
-   * red button stops telling you whether it ships or deletes.
+   * Aave's own article is explicit that this exact approach — an SVG
+   * filter referenced from `backdrop-filter: url(...)` — only renders in
+   * Chromium; their production system instead generates a shaped
+   * displacement-map PNG per component at runtime, with a battery of
+   * Safari-specific fixes (filter-id cache-busting, a source-size ceiling,
+   * a cheaper specular-pass region) and a parallel WebGL path for canvas/
+   * video. Replicating that whole pipeline is a much larger system than a
+   * design refinement calls for here. `--glass-blur` is deliberately kept
+   * as a separate, complete fallback rather than folded into
+   * `--glass-refract` — a `url()` a browser can't apply to backdrop-filter
+   * is dropped per spec (not an error, not a broken render), so
+   * `--glass-refract`'s consumers list `--glass-blur` after it in the
+   * same property and get the refraction where it renders, plain frosted
+   * glass everywhere else. Verified only in headless Chrome, the only
+   * engine available in this environment — not independently confirmed in
+   * Safari or Firefox.
    */
-  --brand-black: #07100b;
-  --brand-green: var(--green);
-  --brand-face: #b6f5ce;
-  --brand-red: var(--pink);
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-blur: blur(16px) saturate(180%);
+  --glass-refract: url(#liquid-glass) blur(2px) saturate(180%);
+  --glass-specular: linear-gradient(135deg, rgba(255, 255, 255, 0.55), transparent 45%);
+  --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 
   /*
-   * UNVERIFIED wears the brand red. It is the third colour's job: a claim the
-   * agent could not ground and a human still has to answer. Distinct from
-   * --danger (destructive) and from --warn (something is merely off).
+   * UNVERIFIED is a functional status signal — a claim the agent could not
+   * ground and a human still has to answer — not brand decoration, so it
+   * kept its own colour when the accent didn't. Distinct from --danger
+   * (destructive) and from --warn (something is merely off).
    */
+  --magenta: #ff5cd6;
+  --magenta-soft: #ff9ee6;
   /*
-   * The marker text is --pink-soft, not --pink. Markers render at 9–10px, and
-   * uppercase does NOT count as "large text" under WCAG — that needs 18.66px
-   * bold or 24px. Over its own chip (--unverified-soft composited on --panel,
-   * rgb(64,35,54)) --pink scores 3.67 and fails; --pink-soft scores 6.17.
-   * The chip fill and border keep the full-strength pink, so the marker still
-   * reads as pink at a glance.
+   * Text-safe sibling. Raw --magenta scores 2.33 on `--panel`, far under
+   * AA. --magenta-text scores 6.89. The chip fill/border stay in the raw
+   * hue's family at low alpha (a tint, not body text), so the marker
+   * still reads as magenta at a glance; the marker text itself is
+   * --magenta-text.
    */
-  --unverified: var(--pink-soft);
-  --unverified-soft: rgba(255, 0, 128, 0.12);
-  --unverified-line: rgba(255, 0, 128, 0.45);
+  --magenta-text: #a51684;
+  --magenta-text-soft: #ffe0f5;
+  --magenta-text-line: #f5c2ea;
+  --unverified: var(--magenta-text);
+  --unverified-soft: rgba(165, 22, 132, 0.08);
+  --unverified-line: rgba(165, 22, 132, 0.35);
 
-  --danger: #d97070;
-  --danger-soft: rgba(217, 112, 112, 0.1);
-  --warn: #d9c470;
+  /*
+   * Also unchanged in role, re-picked only for contrast when the ground
+   * flipped to white — the previous values (#d97070, #d9c470) were tuned
+   * to stay visible against near-black and score 3.23 and 1.74 on white,
+   * nowhere close to AA.
+   */
+  --danger: #b83232;
+  --danger-soft: rgba(184, 50, 50, 0.08);
+  --warn: #7a5f00;
+  --warn-soft: rgba(122, 95, 0, 0.08);
 
-  --paper: #fcedff;
-  --paper-ink: #1a241d;
+  --paper: #ffffff;
+  --paper-ink: #0f0f0f;
 
   /* Loaded and self-hosted by next/font in app/layout.tsx. The fallbacks are
      what shows if that ever fails — not what normally renders. */
@@ -115,11 +176,13 @@ body {
 }
 
 a {
-  color: var(--accent);
-  text-decoration: none;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 0.15em;
 }
 a:hover {
-  text-decoration: underline;
+  text-decoration-color: var(--ink);
 }
 
 button {
@@ -146,11 +209,19 @@ code,
   background: transparent;
   color: var(--ink);
   text-decoration: none;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, backdrop-filter 0.15s,
+    box-shadow 0.2s, transform 0.15s;
 }
-.btn:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
+/* Glass is the default hover feedback now, not an opt-in reserved for
+   marketing moments — .primary/.danger keep their own established
+   language (emphasis glow / danger tint) since a third treatment on top
+   of either would just compete with itself. */
+.btn:hover:not(:disabled):not(.primary):not(.danger) {
+  border-color: var(--glass-border);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-refract);
+  backdrop-filter: var(--glass-refract);
+  box-shadow: 0 4px 16px -6px rgba(0, 0, 0, 0.18), var(--glass-rim);
   text-decoration: none;
 }
 .btn:disabled {
@@ -158,20 +229,24 @@ code,
   cursor: not-allowed;
 }
 
-/* The accent is a promise: this is the action that matters here. */
+/* The point of application: a dark gradient fill and a shadow that lifts it
+   off the page, deepening into a soft glow on hover — the emphasis language
+   that replaced the old accent colour. */
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #06130a;
+  background: var(--emphasis);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--emphasis-shadow);
 }
 .btn.primary:hover:not(:disabled) {
-  background: #4ff086;
-  border-color: #4ff086;
-  color: #06130a;
+  background: var(--emphasis-hover);
+  border-color: transparent;
+  box-shadow: var(--emphasis-shadow-hover);
+  transform: translateY(-1px);
 }
 
 .btn.danger {
-  border-color: rgba(217, 112, 112, 0.5);
+  border-color: rgba(184, 50, 50, 0.45);
   color: var(--danger);
 }
 .btn.danger:hover:not(:disabled) {
@@ -194,20 +269,34 @@ code,
   color: var(--ink-2);
   background: var(--panel-2);
   white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s, backdrop-filter 0.15s;
 }
+/* Plain pills only — .on/.warn/.unverified/.bad already carry a specific
+   status meaning, and glass on hover would blur (literally) which one is
+   currently showing. */
+.pill:hover:not(.on):not(.warn):not(.unverified):not(.bad) {
+  border-color: var(--glass-border);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-refract);
+  backdrop-filter: var(--glass-refract);
+}
+/* Same emphasis language as .btn.primary, at pill scale — a filled, glowing
+   chip rather than a colour change, so "on" still reads as distinct from a
+   plain label without reaching for a hue. */
 .pill.on {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-color: var(--accent-dim);
+  color: #fff;
+  background: var(--emphasis);
+  border-color: transparent;
+  box-shadow: 0 1px 6px -1px rgba(0, 0, 0, 0.35);
 }
 .pill.warn {
   color: var(--warn);
-  border-color: rgba(217, 196, 112, 0.4);
-  background: rgba(217, 196, 112, 0.08);
+  border-color: rgba(122, 95, 0, 0.35);
+  background: var(--warn-soft);
 }
-/* UNVERIFIED counts wear the brand red, like every other unverified marker.
-   They used `pill warn`, which made a claim nobody has checked look like a
-   mild toolchain grumble. */
+/* UNVERIFIED counts wear magenta, like every other unverified marker. They
+   used `pill warn`, which made a claim nobody has checked look like a mild
+   toolchain grumble. */
 .pill.unverified {
   color: var(--unverified);
   border-color: var(--unverified-line);
@@ -215,7 +304,7 @@ code,
 }
 .pill.bad {
   color: var(--danger);
-  border-color: rgba(217, 112, 112, 0.4);
+  border-color: rgba(184, 50, 50, 0.35);
   background: var(--danger-soft);
 }
 
@@ -224,6 +313,57 @@ code,
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 1rem 1.1rem;
+  transition: border-color 0.15s, background 0.15s, backdrop-filter 0.15s, box-shadow 0.2s;
+}
+.card:hover {
+  border-color: var(--glass-border);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-refract);
+  backdrop-filter: var(--glass-refract);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.2), var(--glass-rim);
+}
+
+/* Glass at rest is still an explicit opt-in (`class="card glass"`) — a
+   static frosted surface reads as a marketing moment (the nav, a
+   landing-page feature panel), not something a data-dense product surface
+   should default to, since blur-behind costs legibility with the page
+   sitting still. On *hover* the calculus flips: the surface underneath is
+   this exact page's own ground, known and controlled, and the blur only
+   has to look good for as long as a cursor sits there — on direct
+   instruction, glass is now the default hover feedback for .btn/.pill/
+   .card (see each above), not reserved for opt-in surfaces. This class
+   stays for the at-rest case those hover rules don't cover.
+   `position: relative` is for `::before` below — deliberately not
+   `overflow: hidden` too: a card can reasonably hold a tooltip or a
+   dropdown that needs to escape its own box, and clipping that to chase
+   the specular sheen would be a worse regression than an unrounded
+   sheen corner. */
+.glass {
+  position: relative;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-refract);
+  -webkit-backdrop-filter: var(--glass-refract);
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-rim);
+}
+/* The specular highlight — a fixed sheen, not tied to cursor or light
+   position (Aave's dynamic version tracks real interaction state their
+   `<Glass>` component owns; a plain CSS gradient can't reach into a
+   pointer position without JS this class doesn't have). A diagonal
+   top-left gradient is the closest static approximation: light most
+   often reads as coming from above, and `overlay` blend keeps it from
+   just looking like a flat white wash on darker glass. `border-radius:
+   inherit` clips the gradient to this pseudo-element's own rounded
+   corners without needing `overflow: hidden` on .glass itself — the
+   pseudo-element rounds itself, the parent stays free to overflow. */
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--glass-specular);
+  mix-blend-mode: overlay;
+  pointer-events: none;
 }
 
 .field {
@@ -252,7 +392,8 @@ code,
 .field select:focus,
 .field textarea:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--emphasis-soft);
 }
 .field .hint {
   font: 400 0.84rem/1.5 var(--mono);
@@ -262,7 +403,7 @@ code,
 .tag {
   font: 700 0.848rem/1 var(--mono);
   letter-spacing: 0.24em;
-  color: var(--accent);
+  color: var(--ink-2);
   text-transform: uppercase;
 }
 
@@ -286,7 +427,7 @@ code,
 .meter > i {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--emphasis);
 }
 .meter.warn > i {
   background: var(--warn);
@@ -297,7 +438,7 @@ code,
   width: 0.7rem;
   height: 0.7rem;
   border: 2px solid var(--line-2);
-  border-top-color: var(--accent);
+  border-top-color: var(--ink);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -318,7 +459,7 @@ code,
   color: var(--danger);
   font: 500 0.92rem/1.6 var(--sans);
   background: var(--danger-soft);
-  border: 1px solid rgba(217, 112, 112, 0.35);
+  border: 1px solid rgba(184, 50, 50, 0.3);
   border-radius: 6px;
   padding: 0.7rem 0.85rem;
   margin: 0.8rem 0;
@@ -333,14 +474,16 @@ code,
  */
 .applogo {
   font: 700 1.12rem/1 var(--serif);
-  color: #fff;
+  color: var(--ink);
 }
 .applogo.lg {
   font-size: 1.55rem;
 }
 .applogo i {
-  color: var(--accent);
-  font-style: normal;
+  /* No colour: the "d" is set apart by staying genuinely italic (font-style
+     restored to normal below only where it sits on the nav's own dark
+     chrome, which uses white instead — see landing.module.css's .logo i). */
+  font-style: italic;
 }
 .applogo:hover {
   text-decoration: none;

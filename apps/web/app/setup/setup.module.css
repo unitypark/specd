@@ -94,9 +94,14 @@
   color: inherit;
   padding: 0.8rem 0.9rem;
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, backdrop-filter 0.15s, box-shadow 0.2s;
 }
 .choice:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--glass-border);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-refract);
+  backdrop-filter: var(--glass-refract);
+  box-shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.2);
 }
 .choice:disabled {
   opacity: 0.45;
@@ -164,7 +169,7 @@
 .bad {
   color: var(--danger);
   background: var(--danger-soft);
-  border: 1px solid rgba(217, 112, 112, 0.4);
+  border: 1px solid rgba(184, 50, 50, 0.4);
 }
 .info {
   color: var(--ink-2);
@@ -174,8 +179,8 @@
 /* The wizard must not lie: this warning is load-bearing, not decoration. */
 .warn {
   color: var(--ink-2);
-  background: rgba(217, 196, 112, 0.07);
-  border: 1px solid rgba(217, 196, 112, 0.35);
+  background: var(--warn-soft);
+  border: 1px solid rgba(122, 95, 0, 0.35);
 }
 .warn b {
   color: var(--warn);

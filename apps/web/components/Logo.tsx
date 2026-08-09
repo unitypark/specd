@@ -1,169 +1,171 @@
 /**
  * The specd mark.
  *
- * A witch's hat, because the palette was already phosphor-on-black and the
- * silhouette survives being shrunk to a favicon in a way a face never would.
+ * Four interlocking hooks: identical circular arcs, each centered 6 units
+ * off the mark's own center point and swept 220° (leaving a 140° opening),
+ * rotated 90° apart. Replaces the earlier golden-spiral construction — on
+ * direct instruction, referencing a bold geometric pinwheel mark as a style
+ * cue (a stock-logo listing, watermarked, used only for its general
+ * *technique* — offset arcs arranged in rotation — never traced; the
+ * specific curves are that reference's, not copied here; see the decision
+ * doc for the full reasoning). Each hook's opening is centered 40° off its
+ * own outward-facing direction, not on it — a gap centered on the radial
+ * direction reads as a static four-petal flower (every hook symmetric
+ * around its own axis, no sense of motion); offsetting it is what makes
+ * the shapes chase each other into a genuine woven pinwheel, the same way
+ * the previous spiral construction's weave came from four asymmetric arcs
+ * rather than four symmetric ones. Confirmed at 16/24/32/48px before
+ * settling here — bolder, simpler geometry than the spiral it replaced,
+ * and reads clearly even smaller.
  *
- * The idea it has to carry is approval — that is the product. So the brim does
- * double duty: read it as a hat, then notice it is also the stroke of a check.
- * A mark that means the thing beats a mark that merely decorates it.
+ * Pure currentColor by default, no embedded fill. Nothing here needs a
+ * colored tile for contrast, so it drops straight onto light or dark
+ * surfaces unchanged.
  *
- * Drawn on a 32×32 grid so it lands on whole pixels at 16 and 32.
+ * Drawn on a 32×32 grid so it lands on whole pixels at 16 and 32. Legible
+ * down to a 16px favicon — measured, not assumed.
  */
 
-export type LogoVariant = 'face' | 'check' | 'seal' | 'spec' | 'plain';
+import { useId } from 'react';
+
+const HOOK = 'M8.48 7.26A8 8 0 1 1 20 16.93';
 
 export function Logo({
-  variant = 'check',
   size = 28,
   title,
+  glow = false,
 }: {
-  variant?: LogoVariant;
   size?: number;
   title?: string;
+  /**
+   * A soft white bloom behind a white line, on direct instruction
+   * referencing Cresta's mark as a style cue — not traced (their two-loop
+   * layout isn't ours to copy; only the *treatment* is): no black outline,
+   * a bolder stroke than the flat mark's.
+   *
+   * The blur is masked by a circular radial gradient, not left to fall off
+   * on its own — this mark has 4-fold rotational symmetry (four arms, each
+   * reaching toward a different edge of the icon), and blurring a shape
+   * with discrete rotational symmetry produces a halo that inherits that
+   * symmetry: a soft *rounded square*, not a circle, dimmer along the
+   * diagonals than along the arms. At this mark's weight it read as a
+   * visible square-ish patch behind the line — reported back as "weird
+   * background color", which is exactly what it was: not a colour, a
+   * shape, but indistinguishable from one at a glance. Confirmed by
+   * rendering the raw filter output against a neutral mid-grey (where
+   * neither a "too dark" nor "too light" artifact could hide the way it
+   * would against black or white) before concluding it was real. Widening
+   * the filter's own region did not fix it, because the region was never
+   * clipping anything — the squareness is the blurred shape itself, not a
+   * cropped edge. A `mask` referencing a `radialGradient` forces the
+   * *visible* falloff back to a true circle regardless of what shape
+   * produced it underneath.
+   *
+   * The mask alone wasn't the whole fix: the four arms don't quite meet at
+   * the exact center, leaving a small natural gap there (visible as a tiny
+   * dark notch even on the flat, unblurred mark) — the *first* mask
+   * attempt was fully opaque at that center point, so the blur's own soft
+   * bleed into the gap passed straight through and read as a small grey
+   * smudge sitting on the mark. Making the mask transparent at the center
+   * too (a ring instead of a disc) made this worse, not better — it
+   * sharpened the gap into a harder-edged dark spot instead of softening
+   * it away. What actually worked: leaving the mask a plain disc and
+   * tightening both blur passes (0.9/2, down from 1.5/3.2) so there is
+   * simply less intensity to bleed into that gap in the first place. Tried
+   * in that order, on screenshots, not reasoned to in one step.
+   *
+   * Two rejected constructions before this one — see the decision doc's
+   * addenda: a flat `currentColor` stroke had no way to read as white on
+   * the one dark surface it needs to (the nav pill); a black-outline
+   * version put black on top of the mark, which at this stroke weight and
+   * four-arm overlap read as "a black mark with a thin white rim" rather
+   * than white. Self-adjusting the same way every version has: on a
+   * white/near-white surface the white blur and line both sit close
+   * enough to the ground to read as quiet, but on a dark surface (the
+   * nav's own floating pill) the identical markup produces real presence.
+   * Carries its own fixed colour, so it's an explicit per-instance choice,
+   * not the default: softens the silhouette at favicon scale, the same
+   * reason the flat mark drops detail below ~24px rather than keep it
+   * everywhere.
+   */
+  glow?: boolean;
 }) {
-  const common = {
-    width: size,
-    height: size,
-    viewBox: '0 0 32 32',
-    fill: 'none',
-    xmlns: 'http://www.w3.org/2000/svg',
-    role: title ? ('img' as const) : ('presentation' as const),
-    'aria-hidden': title ? undefined : true,
-  };
+  const uid = useId().replace(/:/g, '');
+  const filterId = `${uid}-glow`;
+  const gradientId = `${uid}-glow-grad`;
+  const maskId = `${uid}-glow-mask`;
+  const weight = glow ? 3.4 : 2.9;
 
-  // The cone, with the slight lean that makes a hat read as a *witch's* hat
-  // rather than a traffic cone.
-  const cone =
-    'M11.4 3.2c3.6 2.2 6.6 7 8.6 11.1.6 1.3 1.2 2.1 2 2.7H10.1c1.5-3.8 2-9.1 1.3-13.8Z';
-  const brim =
-    'M9.6 17h12.8c3.8.5 6.2 1.7 6.2 3 0 2-5.6 3.6-12.6 3.6S3.4 22 3.4 20c0-1.3 2.3-2.5 6.2-3Z';
-
-  switch (variant) {
-    /*
-     * The brand mark: black hat, green face, red lips.
-     *
-     * It carries its own green field because a black hat on a near-black page
-     * is invisible — this is a tile, the way app icons are. The brim crosses
-     * the face and hides the eyes, which is what makes the silhouette read as
-     * a witch at a glance and keeps the shape simple enough to survive.
-     *
-     * Drawn from scratch: a pointed hat and a green face are broad archetype,
-     * the cropped-face-under-brim composition of a particular poster is not.
-     */
-    case 'face':
-      return (
-        <svg {...common}>
-          {title && <title>{title}</title>}
-          <rect width="32" height="32" rx="7.5" fill="var(--brand-green, #00be2c)" />
-          {/* face — a soft oval tapering to a chin */}
-          <path
-            d="M16 7c4.6 0 6 3.6 6 9 0 4.2-1.2 8-3 10.2-1 1.2-2 2.3-3 2.3s-2-1.1-3-2.3c-1.8-2.2-3-6-3-10.2 0-5.4 1.4-9 6-9Z"
-            fill="var(--brand-face, #b6f5ce)"
-          />
-          {/* the smile — the one warm note in the mark */}
-          <path
-            d="M13.3 21.4c1.5 2.2 3.9 2.2 5.4 0"
-            stroke="var(--brand-red, #ff0080)"
-            strokeWidth="1.5"
-            strokeLinecap="round"
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      xmlns="http://www.w3.org/2000/svg"
+      role={title ? ('img' as const) : ('presentation' as const)}
+      aria-hidden={title ? undefined : true}
+    >
+      {title && <title>{title}</title>}
+      {glow && (
+        <defs>
+          <filter id={filterId} x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="0.9" result="b1" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b2" />
+            <feMerge>
+              <feMergeNode in="b2" />
+              <feMergeNode in="b1" />
+            </feMerge>
+          </filter>
+          {/* Forces the blur's falloff into a true circle — see the glow
+              prop's doc comment for why the raw blur can't be trusted to
+              do this on its own for a 4-fold-symmetric shape. */}
+          <radialGradient id={gradientId} cx="16" cy="16" r="15" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#fff" stopOpacity="1" />
+            <stop offset="45%" stopColor="#fff" stopOpacity="1" />
+            <stop offset="100%" stopColor="#fff" stopOpacity="0" />
+          </radialGradient>
+          <mask id={maskId}>
+            <rect x="-16" y="-16" width="64" height="64" fill={`url(#${gradientId})`} />
+          </mask>
+        </defs>
+      )}
+      {glow && (
+        <g mask={`url(#${maskId})`}>
+          <g
             fill="none"
-          />
-          {/* nose, barely — enough to make it a face and not an egg */}
-          <path
-            d="M16 18.4c.7.8 1.1 1.4 1.1 1.8 0 .4-.5.6-1.1.6"
-            stroke="var(--brand-green, #00be2c)"
-            strokeWidth="0.9"
+            stroke="#ffffff"
+            strokeWidth={weight}
             strokeLinecap="round"
-            opacity="0.5"
-            fill="none"
-          />
-          {/* hat last, so the brim shadows the eyes away */}
-          <g transform="rotate(-7 16 14)">
-          <path
-            d="M13.2.6c3.8 2.2 7 5.4 8.8 8.2H10.2c1.8-2.4 2.9-5.2 3-8.2Z"
-            fill="var(--brand-black, #07100b)"
-          />
-          <path
-            d="M9.8 8.6h12.4c5.8.5 9.5 2 9.5 3.7 0 2.7-7 5.1-15.7 5.1S.3 15 .3 12.3c0-1.7 3.7-3.2 9.5-3.7Z"
-            fill="var(--brand-black, #07100b)"
-          />
+            filter={`url(#${filterId})`}
+          >
+            <path d={HOOK} />
+            <path d={HOOK} transform="rotate(90 16 16)" />
+            <path d={HOOK} transform="rotate(180 16 16)" />
+            <path d={HOOK} transform="rotate(270 16 16)" />
           </g>
-        </svg>
-      );
-
-    case 'seal':
-      return (
-        <svg {...common}>
-          {title && <title>{title}</title>}
-          <circle cx="16" cy="16" r="14.5" stroke="currentColor" strokeWidth="1.6" opacity="0.55" />
-          <g transform="translate(0 -0.5) scale(0.82) translate(3.5 4)">
-            <path d={cone} fill="currentColor" />
-            <path d={brim} fill="currentColor" />
-          </g>
-        </svg>
-      );
-
-    case 'spec':
-      return (
-        <svg {...common}>
-          {title && <title>{title}</title>}
-          <g transform="translate(0 -2)">
-            <path d={cone} fill="currentColor" />
-            <path d={brim} fill="currentColor" />
-          </g>
-          <rect x="7" y="24" width="18" height="2.2" rx="1.1" fill="currentColor" opacity="0.85" />
-          <rect x="7" y="28.4" width="11" height="2.2" rx="1.1" fill="currentColor" opacity="0.45" />
-        </svg>
-      );
-
-    case 'plain':
-      return (
-        <svg {...common}>
-          {title && <title>{title}</title>}
-          <path d={cone} fill="currentColor" />
-          <path d={brim} fill="currentColor" />
-        </svg>
-      );
-
-    case 'check':
-    default:
-      // The brim IS the check. Crossing a separate tick through the hat
-      // destroyed the silhouette — the two shapes fought and neither read.
-      // Here one stroke sweeps under the cone and flicks up, so the hat reads
-      // first and the tick second, which is the order that matters.
-      return (
-        <svg {...common}>
-          {title && <title>{title}</title>}
-          <path d="M11.8 3c3.5 2.2 6.4 6.9 8.3 10.9.5 1.1 1 1.8 1.7 2.3H10.6C12 12.6 12.5 7.6 11.8 3Z" fill="currentColor" />
-          <path
-            d="M4 17.8c2.6 3.6 8 5.6 13.4 4.4l11-12.6"
-            stroke="currentColor"
-            strokeWidth="3.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            fill="none"
-          />
-        </svg>
-      );
-  }
+        </g>
+      )}
+      <g fill="none" stroke={glow ? '#ffffff' : 'currentColor'} strokeWidth={weight} strokeLinecap="round">
+        <path d={HOOK} />
+        <path d={HOOK} transform="rotate(90 16 16)" />
+        <path d={HOOK} transform="rotate(180 16 16)" />
+        <path d={HOOK} transform="rotate(270 16 16)" />
+      </g>
+    </svg>
+  );
 }
 
 /** Mark plus wordmark, as it appears in the nav. */
-export function Wordmark({
-  variant = 'check',
-  size = 26,
-}: {
-  variant?: LogoVariant;
-  size?: number;
-}) {
+export function Wordmark({ size = 26, glow = false }: { size?: number; glow?: boolean }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
-      <span style={{ color: 'var(--accent)', display: 'inline-flex' }}>
-        <Logo variant={variant} size={size} title="specd" />
+      <span style={{ color: 'var(--ink)', display: 'inline-flex' }}>
+        <Logo size={size} title="specd" glow={glow} />
       </span>
-      <span style={{ font: `700 ${size * 0.62}px/1 var(--serif)`, color: '#fff' }}>
-        spec<i style={{ color: 'var(--accent)', fontStyle: 'normal' }}>d</i>
+      <span style={{ font: `700 ${size * 0.62}px/1 var(--serif)`, color: 'var(--ink)' }}>
+        {/* No colour: the "d" is set apart by staying genuinely italic,
+            same treatment as landing.module.css's .logo i. */}
+        spec<i style={{ fontStyle: 'italic' }}>d</i>
       </span>
     </span>
   );

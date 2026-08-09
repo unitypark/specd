@@ -110,7 +110,7 @@ export function Pipeline({ light = false }: { light?: boolean }) {
         }
         .pipeline.light {
           background: var(--paper);
-          border-color: rgba(26, 36, 29, 0.15);
+          border-color: rgba(23, 23, 26, 0.15);
         }
         .pbar {
           display: flex;
@@ -126,7 +126,7 @@ export function Pipeline({ light = false }: { light?: boolean }) {
         }
         .light .ptitle,
         .light .pfixed {
-          color: rgba(26, 36, 29, 0.55);
+          color: rgba(23, 23, 26, 0.55);
         }
         .pfixed {
           letter-spacing: 0.08em;
@@ -152,15 +152,15 @@ export function Pipeline({ light = false }: { light?: boolean }) {
           color: inherit;
         }
         .light .stn {
-          background: rgba(26, 36, 29, 0.03);
-          border-color: rgba(26, 36, 29, 0.2);
+          background: rgba(23, 23, 26, 0.03);
+          border-color: rgba(23, 23, 26, 0.2);
         }
         .stn:hover,
         .stn.sel {
           border-color: var(--accent);
         }
         .stn.sel {
-          box-shadow: 0 0 0 3px rgba(0, 190, 44, 0.13);
+          box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.14);
         }
         .stn .no {
           display: block;
@@ -184,7 +184,7 @@ export function Pipeline({ light = false }: { light?: boolean }) {
           color: var(--ink-3);
         }
         .light .stn .d {
-          color: rgba(26, 36, 29, 0.6);
+          color: rgba(23, 23, 26, 0.6);
         }
         /* The gate wears the accent permanently — it is the one station whose
            meaning is "a human acts here". */
@@ -211,7 +211,7 @@ export function Pipeline({ light = false }: { light?: boolean }) {
           color: var(--ink-3);
         }
         .light .loopback {
-          color: rgba(26, 36, 29, 0.5);
+          color: rgba(23, 23, 26, 0.5);
         }
         .pinfo {
           border-top: 1px dashed var(--line);
@@ -223,8 +223,8 @@ export function Pipeline({ light = false }: { light?: boolean }) {
           min-height: 3.4rem;
         }
         .light .pinfo {
-          color: rgba(26, 36, 29, 0.75);
-          border-color: rgba(26, 36, 29, 0.15);
+          color: rgba(23, 23, 26, 0.75);
+          border-color: rgba(23, 23, 26, 0.15);
         }
         .pinfo b {
           font-family: var(--serif);

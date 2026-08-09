@@ -69,6 +69,51 @@ export async function callClaude<T = unknown>(opts: ClaudeCallOptions): Promise<
   }
 }
 
+/**
+ * The build station's invocation: editing tools, pointed at a real checkout.
+ *
+ * The exact inverse of `invoke()` above, and deliberately so. A spec draft
+ * runs in a scratch directory with every tool denied, because it must only
+ * think. A build task runs in the workspace with file tools granted, because
+ * editing is the whole job — but still no `Bash`: specd runs the repo's own
+ * verify command itself, so nothing a model emits ever becomes a shell
+ * command. Mirrors `ClaudeCodeProvider.code()` in the API.
+ */
+export async function callClaudeCode(opts: {
+  model: ModelId;
+  system: string;
+  user: string;
+  workspaceDir: string;
+  timeoutMs?: number;
+}): Promise<{ text: string; usage: TokenUsage; model: ModelId | null }> {
+  const args = [
+    '--print',
+    '--output-format',
+    'json',
+    '--model',
+    opts.model,
+    '--append-system-prompt',
+    opts.system,
+    '--permission-mode',
+    'acceptEdits',
+    '--allowedTools',
+    'Read',
+    'Write',
+    'Edit',
+    'Glob',
+    'Grep',
+    '--disallowed-tools',
+    'Bash',
+    'WebFetch',
+    'WebSearch',
+    'Task',
+    'NotebookEdit',
+  ];
+
+  const result = await exec(args, opts.user, opts.timeoutMs ?? 900_000, opts.workspaceDir);
+  return readEnvelope(result);
+}
+
 async function invoke(
   opts: ClaudeCallOptions,
   system: string,
@@ -98,44 +143,56 @@ async function invoke(
       'NotebookEdit',
     ];
 
-    const { stdout, stderr, code, timedOut } = await exec(
+    const result = await exec(
       args,
       user,
       opts.maxTokens && opts.maxTokens > 16_000 ? 900_000 : 300_000,
       scratch,
     );
 
-    if (timedOut) throw new Error('Claude Code did not respond in time; the job was cancelled.');
-    if (code !== 0) {
-      throw new Error(`Claude Code exited ${code}: ${(stderr || stdout).slice(0, 400).trim() || 'no output'}`);
-    }
-
-    let envelope: ClaudeCodeEnvelope;
-    try {
-      envelope = JSON.parse(stdout) as ClaudeCodeEnvelope;
-    } catch {
-      throw new Error(`Could not read Claude Code's JSON envelope: ${stdout.slice(0, 300).trim()}`);
-    }
-    if (envelope.is_error || envelope.api_error_status) {
-      throw new Error(`Claude Code reported an error: ${envelope.api_error_status ?? envelope.subtype ?? 'unknown'}`);
-    }
-
-    const modelKey = Object.keys(envelope.modelUsage ?? {})[0];
-    const canonical = modelKey ? (envelope.modelUsage?.[modelKey]?.canonicalModel ?? modelKey) : null;
-
-    return {
-      text: envelope.result ?? '',
-      usage: {
-        inputTokens: envelope.usage?.input_tokens ?? 0,
-        outputTokens: envelope.usage?.output_tokens ?? 0,
-        cacheReadInputTokens: envelope.usage?.cache_read_input_tokens ?? 0,
-        cacheCreationInputTokens: envelope.usage?.cache_creation_input_tokens ?? 0,
-      },
-      model: (canonical as ModelId | null) ?? null,
-    };
+    return readEnvelope(result);
   } finally {
     await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/** Turn one `claude --output-format json` run into a result, or throw why not. */
+function readEnvelope(result: {
+  stdout: string;
+  stderr: string;
+  code: number | null;
+  timedOut: boolean;
+}): { text: string; usage: TokenUsage; model: ModelId | null } {
+  const { stdout, stderr, code, timedOut } = result;
+
+  if (timedOut) throw new Error('Claude Code did not respond in time; the job was cancelled.');
+  if (code !== 0) {
+    throw new Error(`Claude Code exited ${code}: ${(stderr || stdout).slice(0, 400).trim() || 'no output'}`);
+  }
+
+  let envelope: ClaudeCodeEnvelope;
+  try {
+    envelope = JSON.parse(stdout) as ClaudeCodeEnvelope;
+  } catch {
+    throw new Error(`Could not read Claude Code's JSON envelope: ${stdout.slice(0, 300).trim()}`);
+  }
+  if (envelope.is_error || envelope.api_error_status) {
+    throw new Error(`Claude Code reported an error: ${envelope.api_error_status ?? envelope.subtype ?? 'unknown'}`);
+  }
+
+  const modelKey = Object.keys(envelope.modelUsage ?? {})[0];
+  const canonical = modelKey ? (envelope.modelUsage?.[modelKey]?.canonicalModel ?? modelKey) : null;
+
+  return {
+    text: envelope.result ?? '',
+    usage: {
+      inputTokens: envelope.usage?.input_tokens ?? 0,
+      outputTokens: envelope.usage?.output_tokens ?? 0,
+      cacheReadInputTokens: envelope.usage?.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: envelope.usage?.cache_creation_input_tokens ?? 0,
+    },
+    model: (canonical as ModelId | null) ?? null,
+  };
 }
 
 /** Exported for testing the timeout/backstop behavior directly. */

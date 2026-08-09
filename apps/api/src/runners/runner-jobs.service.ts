@@ -2,11 +2,16 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { eq } from 'drizzle-orm';
 import { agentRuns, type DbHandle, type Repository, type Runner } from '@specd/db';
 import type { DetectedStack } from '@specd/templates';
-import type { ModelId, RetrievedChunk, SpecContent, TokenUsage } from '@specd/shared';
+import type { ModelId, RetrievedChunk, SpecContent, SpecView, TokenUsage } from '@specd/shared';
 import { DB_HANDLE } from '../db/db.module.js';
 import { RunsService } from '../runs/runs.service.js';
 import { SpecAgent } from '../agents/spec.agent.js';
 import { OnboardingAgent, type DraftedDocs } from '../agents/onboarding.agent.js';
+import {
+  BuildAgent,
+  type BuildRunnerReport,
+  type PreparedBuildTask,
+} from '../agents/build.agent.js';
 import { SpecsService } from '../specs/specs.service.js';
 
 /** What a runner receives when it claims a `spec` job — everything `SpecAgent.prepare()` produced. */
@@ -49,7 +54,38 @@ export interface OnboardJobPayload {
   };
 }
 
-export type JobPayload = SpecJobPayload | OnboardJobPayload;
+/**
+ * What a runner receives when it claims a `build` job.
+ *
+ * Unlike the other two this is not "one prompt, one reply" — the runner runs
+ * the whole edit/commit/verify/push loop, because each model call edits files
+ * the next one reads, so there is no seam to split at
+ * (`knowledge/decisions/0009-...`). Note what is *not* here: any credential.
+ * The runner clones and pushes as itself.
+ */
+export interface BuildJobPayload {
+  kind: 'build';
+  model: ModelId;
+  system: string;
+  branch: string;
+  asBuiltPath: string;
+  asBuiltCommitMessage: string;
+  verifyCommand: string | null;
+  tasks: PreparedBuildTask[];
+  remote: { cloneUrl: string; baseBranch: string };
+  ticketKey: string;
+  // Carried through to finalize(), which opens the review surface once the
+  // runner reports the branch pushed. Neither field carries a secret.
+  ctx: { repo: Repository; spec: SpecView };
+}
+
+export type JobPayload = SpecJobPayload | OnboardJobPayload | BuildJobPayload;
+
+/** A line of narration from a running job, appended to the run log as it happens. */
+export interface JobProgressLine {
+  message: string;
+  level?: 'info' | 'warn' | 'error';
+}
 
 export interface ClaimedJob {
   id: string;
@@ -63,11 +99,15 @@ export type JobReport =
 
 /**
  * The runner's half of the pipeline: claim a queued job, execute it
- * elsewhere, report back. `spec` and `onboard` are dispatchable — both
- * reduce to "call the model, hand back JSON," with all VCS/DB work staying
- * server-side either way. `build` is not: it needs a real git checkout
- * (`WorkspaceService`) on the runner's own machine, which is a deliberately
- * separate follow-up (`knowledge/decisions/0004-runner-job-dispatch.md`).
+ * elsewhere, report back.
+ *
+ * `spec` and `onboard` reduce to "call the model, hand back JSON," with all
+ * VCS/DB work staying server-side. `build` is the exception: its loop is N
+ * model calls with file edits between them, so the whole loop executes on the
+ * runner, which clones and pushes with its own git credentials and never
+ * receives one from specd (`knowledge/decisions/0009-...`). What comes back
+ * is a finished result rather than something to finalize — the server's only
+ * remaining job is opening the review surface.
  *
  * Claiming is a single atomic `UPDATE ... WHERE id = (SELECT ... FOR UPDATE
  * SKIP LOCKED)`, expressed as raw SQL because that shape does not fit
@@ -84,8 +124,32 @@ export class RunnerJobsService {
     private readonly runs: RunsService,
     private readonly specAgent: SpecAgent,
     private readonly onboarding: OnboardingAgent,
+    private readonly build: BuildAgent,
     private readonly specs: SpecsService,
   ) {}
+
+  /**
+   * Narration from a job that is still running.
+   *
+   * A build takes minutes and logs continuously; without this the run's SSE
+   * viewer would show nothing at all until it finished, for the one job kind
+   * that most needs watching. Ownership is re-checked per call for the same
+   * reason `report()` re-checks it: a claim is not a standing permission.
+   */
+  async progress(runner: Runner, runId: string, lines: JobProgressLine[]): Promise<void> {
+    const [run] = await this.handle.db.select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1);
+    if (!run) throw new NotFoundException('Run not found');
+    if (run.runnerId !== runner.id) {
+      throw new ForbiddenException('This run was not claimed by you');
+    }
+    if (run.status !== 'running') {
+      throw new BadRequestException('This run is not running');
+    }
+
+    for (const line of lines) {
+      await this.runs.logRun(runId, line.message, line.level ?? 'info');
+    }
+  }
 
   async claim(runner: Runner): Promise<ClaimedJob | null> {
     const rows = await this.handle.sql<
@@ -173,6 +237,32 @@ export class RunnerJobsService {
         status: 'succeeded',
         result: { branch: result.branch, url: result.url, files: result.fileCount },
       });
+      return;
+    }
+
+    if (run.kind === 'build') {
+      const payload = run.jobPayload as unknown as BuildJobPayload | null;
+      if (!payload) throw new BadRequestException('This run has no stored job payload to finalize against');
+
+      // The runner already pushed the branch with its own credentials; the
+      // only thing left that needs a platform token is the review surface.
+      const result = await this.build.finalize(outcome.parsed as BuildRunnerReport, {
+        repo: payload.ctx.repo,
+        spec: payload.ctx.spec,
+        prepared: {
+          branch: payload.branch,
+          asBuiltPath: payload.asBuiltPath,
+          verifyCommand: payload.verifyCommand,
+          remote: payload.remote,
+        },
+      });
+
+      await this.runs.logRun(runId, `branch ${result.branch} ready · ${result.commits} commit(s) (via ${runner.name})`);
+      await this.runs.logRun(
+        runId,
+        'merge the branch to complete the loop — the as-built spec re-indexes on merge',
+      );
+      await this.runs.finish(runId, { status: 'succeeded', result: { ...result } });
       return;
     }
 

@@ -1,10 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { agentRuns, createDb, projects, tickets, type DbHandle } from '@specd/db';
+import { agentRuns, createDb, projects, runLogs, tickets, type DbHandle } from '@specd/db';
 import type { SpecContent } from '@specd/shared';
 import { RunnersService } from './runners.service.js';
-import { RunnerJobsService, type OnboardJobPayload, type SpecJobPayload } from './runner-jobs.service.js';
+import {
+  RunnerJobsService,
+  type BuildJobPayload,
+  type OnboardJobPayload,
+  type SpecJobPayload,
+} from './runner-jobs.service.js';
 import type { DraftedDocs, OnboardingAgent } from '../agents/onboarding.agent.js';
+import type { BuildAgent, BuildRunnerReport } from '../agents/build.agent.js';
 import { RunsService } from '../runs/runs.service.js';
 import { SpecsService } from '../specs/specs.service.js';
 import { SpecAgent } from '../agents/spec.agent.js';
@@ -28,6 +34,10 @@ let runs: RunsService;
 let projectId = '';
 let ticketId = '';
 const onboardFinalizeCalls: { parsed: DraftedDocs | null; ctx: OnboardJobPayload['ctx'] }[] = [];
+const buildFinalizeCalls: {
+  report: BuildRunnerReport;
+  ctx: { prepared: { branch: string; asBuiltPath: string } };
+}[] = [];
 
 const reachable = await (async () => {
   try {
@@ -85,7 +95,25 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
         return { branch: 'specd/setup', url: 'https://example.test/pr/1', reviewHint: 'Opened PR #1.', fileCount: 4 };
       },
     } as unknown as OnboardingAgent;
-    jobs = new RunnerJobsService(handle, runs, specAgent, onboardingAgent, specs);
+    // Same reasoning as the onboarding stub: `finalize()` opens a real PR
+    // through a VCS adapter, so a stub is what proves `build` reports route
+    // to it and finish the run — not that the adapter works.
+    const buildAgent = {
+      finalize: async (report: BuildRunnerReport, ctx: { prepared: { branch: string; asBuiltPath: string } }) => {
+        buildFinalizeCalls.push({ report, ctx });
+        return {
+          branch: ctx.prepared.branch,
+          tasksAttempted: report.tasksAttempted,
+          tasksCommitted: report.tasksCommitted,
+          commits: report.commits,
+          verifyPassed: report.verifyPassed,
+          verifyOutput: report.verifyOutput,
+          asBuiltPath: ctx.prepared.asBuiltPath,
+          reviewUrl: 'https://example.test/pr/9',
+        };
+      },
+    } as unknown as BuildAgent;
+    jobs = new RunnerJobsService(handle, runs, specAgent, onboardingAgent, buildAgent, specs);
 
     const [project] = await handle.db
       .insert(projects)
@@ -147,6 +175,40 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
       .values({
         projectId,
         kind: 'onboard',
+        runner: 'self_hosted',
+        status: 'queued',
+        jobPayload: payload as unknown as Record<string, unknown>,
+      })
+      .returning({ id: agentRuns.id });
+    return row!.id;
+  }
+
+  function buildPayload(): BuildJobPayload {
+    return {
+      kind: 'build',
+      model: 'claude-opus-5',
+      system: 'build system prompt',
+      branch: 'spec/jt-1-job-test-ticket',
+      asBuiltPath: 'knowledge/specs/JT-1-job-test-ticket.md',
+      asBuiltCommitMessage: 'JT-1: file as-built spec',
+      verifyCommand: 'pnpm test',
+      tasks: [{ id: 'T1', title: 'do the thing', prompt: 'implement T1', commitMessage: 'JT-1 T1: do the thing' }],
+      // No credential here, by design — the runner pushes as itself.
+      remote: { cloneUrl: 'https://github.com/acme/repo.git', baseBranch: 'main' },
+      ticketKey: 'JT-1',
+      ctx: {
+        repo: { id: 'repo-1', name: 'acme/repo', provider: 'github' } as unknown as BuildJobPayload['ctx']['repo'],
+        spec: { ticketKey: 'JT-1', title: 'Job test ticket', version: 1 } as unknown as BuildJobPayload['ctx']['spec'],
+      },
+    };
+  }
+
+  async function queueBuildRun(payload: BuildJobPayload) {
+    const [row] = await handle!.db
+      .insert(agentRuns)
+      .values({
+        projectId,
+        kind: 'build',
         runner: 'self_hosted',
         status: 'queued',
         jobPayload: payload as unknown as Record<string, unknown>,
@@ -278,6 +340,89 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
     const [row] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
     expect(row?.status).toBe('succeeded');
     expect((row?.result as { url?: string })?.url).toBe('https://example.test/pr/1');
+  });
+
+  it('routes a succeeded build report to BuildAgent.finalize() and stores the result', async () => {
+    const runId = await queueBuildRun(buildPayload());
+    const runner = await pairedRunner('build-report-runner');
+    await jobs.claim(runner);
+
+    const before = buildFinalizeCalls.length;
+    await jobs.report(runner, runId, {
+      status: 'succeeded',
+      parsed: {
+        tasksAttempted: 3,
+        tasksCommitted: 2,
+        commits: 3,
+        verifyPassed: true,
+        verifyOutput: 'ok',
+      },
+      model: 'claude-opus-5',
+      usage: { inputTokens: 900, outputTokens: 400 },
+    });
+
+    expect(buildFinalizeCalls.length).toBe(before + 1);
+    const call = buildFinalizeCalls.at(-1)!;
+    // The runner pushed the branch; finalize() is handed what it reported,
+    // plus the branch/path it was told to use — never a credential.
+    expect(call.report.tasksCommitted).toBe(2);
+    expect(call.ctx.prepared.branch).toBe('spec/jt-1-job-test-ticket');
+
+    const [row] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(row?.status).toBe('succeeded');
+    expect((row?.result as { reviewUrl?: string })?.reviewUrl).toBe('https://example.test/pr/9');
+    // Usage arrives as one summed total, so the run is still metered.
+    expect(row?.outputTokens).toBe(400);
+  });
+
+  it('refuses a build report from a runner that did not claim it', async () => {
+    const runId = await queueBuildRun(buildPayload());
+    const claimer = await pairedRunner('build-claimer');
+    const stranger = await pairedRunner('build-stranger');
+    await jobs.claim(claimer);
+
+    await expect(
+      jobs.report(stranger, runId, {
+        status: 'succeeded',
+        parsed: { tasksAttempted: 1, tasksCommitted: 1, commits: 1, verifyPassed: null, verifyOutput: null },
+        model: 'claude-opus-5',
+        usage: { inputTokens: 1, outputTokens: 1 },
+      }),
+    ).rejects.toThrow(/not claimed by you/);
+  });
+
+  it('appends progress lines to a running job, and only for the runner that claimed it', async () => {
+    const runId = await queueBuildRun(buildPayload());
+    const runner = await pairedRunner('progress-runner');
+    const stranger = await pairedRunner('progress-stranger');
+    await jobs.claim(runner);
+
+    await jobs.progress(runner, runId, [
+      { message: 'cloning acme/repo at main' },
+      { message: 'verify could not run here', level: 'warn' },
+    ]);
+
+    const logs = await handle!.db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.map((l) => l.message)).toEqual([
+      'cloning acme/repo at main',
+      'verify could not run here',
+    ]);
+    expect(logs.find((l) => l.level === 'warn')).toBeTruthy();
+
+    await expect(jobs.progress(stranger, runId, [{ message: 'not mine' }])).rejects.toThrow(
+      /not claimed by you/,
+    );
+  });
+
+  it('refuses progress for a job that already finished', async () => {
+    const runId = await queueBuildRun(buildPayload());
+    const runner = await pairedRunner('progress-late-runner');
+    await jobs.claim(runner);
+    await jobs.report(runner, runId, { status: 'failed', error: 'gave up' });
+
+    await expect(jobs.progress(runner, runId, [{ message: 'too late' }])).rejects.toThrow(
+      /not running/,
+    );
   });
 
   it('refuses a second report for an already-finished run', async () => {

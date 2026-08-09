@@ -99,15 +99,22 @@
    * Safari-specific fixes (filter-id cache-busting, a source-size ceiling,
    * a cheaper specular-pass region) and a parallel WebGL path for canvas/
    * video. Replicating that whole pipeline is a much larger system than a
-   * design refinement calls for here. `--glass-blur` is deliberately kept
-   * as a separate, complete fallback rather than folded into
-   * `--glass-refract` — a `url()` a browser can't apply to backdrop-filter
-   * is dropped per spec (not an error, not a broken render), so
-   * `--glass-refract`'s consumers list `--glass-blur` after it in the
-   * same property and get the refraction where it renders, plain frosted
-   * glass everywhere else. Verified only in headless Chrome, the only
-   * engine available in this environment — not independently confirmed in
-   * Safari or Firefox.
+   * design refinement calls for here. `--glass-blur` is kept as the
+   * separate, complete plain-frosted version.
+   *
+   * KNOWN GAP (2026-08-10): the two are not chained. Every
+   * `--glass-refract` consumer sets it alone, and `.card.good` — the VS
+   * comparison card — uses `--glass-blur` alone instead. So on an engine
+   * that cannot apply a `url()` filter reference to backdrop-filter, the
+   * seven refract surfaces get no backdrop treatment at all rather than
+   * degrading to frosted glass. Note that listing both in the same
+   * property would not fix it either: the declaration parses fine
+   * everywhere, so this is a render-time gap, not a parse-time one, and
+   * a real fallback needs an `@supports` probe rather than a fallback
+   * declaration. Verified only in headless Chrome, the one engine
+   * available here; the Safari/Firefox consequence above is reasoned
+   * from the spec, NOT observed. Fixing it means testing on those
+   * engines first.
    */
   --glass-bg: rgba(255, 255, 255, 0.55);
   --glass-border: rgba(255, 255, 255, 0.6);
@@ -125,8 +132,10 @@
   --magenta: #ff5cd6;
   --magenta-soft: #ff9ee6;
   /*
-   * Text-safe sibling. Raw --magenta scores 2.33 on `--panel`, far under
-   * AA. --magenta-text scores 6.89. The chip fill/border stay in the raw
+   * Text-safe sibling. Raw --magenta scores 2.71 on `--panel` and 2.33 on
+   * `--panel-2` (the worst case), both far under AA — it fails even the
+   * 3.0 large-text floor. --magenta-text scores 6.89. The chip fill/border
+   * stay in the raw
    * hue's family at low alpha (a tint, not body text), so the marker
    * still reads as magenta at a glance; the marker text itself is
    * --magenta-text.

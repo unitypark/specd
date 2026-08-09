@@ -29,8 +29,10 @@ import { BuildAgent } from './build.agent.js';
  *
  * Runs are executed in-process and awaited. That is honest for P1: a spec
  * draft is a single model call, and pretending it is a distributed job would
- * add a queue with nothing to schedule. The BullMQ worker in `queue/` takes
- * over for the long-running build station in P2 without changing this surface.
+ * add a queue with nothing to schedule. Dispatch to a self-hosted runner is
+ * the one exception, and it is a poll, not a queue — the runner claims a
+ * queued `agent_runs` row. A real queue is only warranted once runs execute
+ * somewhere other than this process; see knowledge/decisions/0008.
  */
 @Injectable()
 export class PipelineService {

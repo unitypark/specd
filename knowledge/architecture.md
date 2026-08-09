@@ -30,11 +30,10 @@ From `docker-compose.yml` (evidence):
 | Service | Image | Host port |
 | --- | --- | --- |
 | postgres | `pgvector/pgvector:pg17` | 5433 → 5432 |
-| redis | `redis:7-alpine`, `--appendonly yes` | 6380 → 6379 |
 
-Dev credentials are `specd/specd`, database `specd`. Both have healthchecks; data lives in named volumes `specd-pgdata`, `specd-redisdata`.
+Dev credentials are `specd/specd`, database `specd`. It has a healthcheck; data lives in the named volume `specd-pgdata`.
 
-README names Redis/BullMQ and the Anthropic SDK as part of the stack. UNVERIFIED — no queue definition or Anthropic client was seen; confirm BullMQ is actually wired in `apps/api` and which queues exist.
+Postgres is the only runtime dependency. This doc previously flagged `UNVERIFIED` that Redis/BullMQ — advertised in the README and provisioned in compose — might not be wired at all. That doubt was correct: nothing imported either, and both were removed (see `decisions/0008-remove-unused-queue.md`). Runner dispatch polls a `queued` row in `agent_runs`; it is not a queue.
 
 ## Ports and entry points
 

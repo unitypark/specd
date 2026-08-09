@@ -172,11 +172,19 @@ var (
 // does, and still reads as the same idea: an open loop, a gap with a
 // flare at it. This glyph predates the web mark's most recent
 // construction change (golden spiral → interlocking hooks) and was never
-// redrawn for it — arguably needs it less now than before, since "a ring"
-// is a closer literal description of four overlapping circular arcs than
-// it ever was of a logarithmic spiral. Left as-is, not re-confirmed by
-// rendering it fresh; if it ever gets touched again, verify rather than
-// assume the old confirmation still holds for the new geometry.
+// redrawn for it.
+//
+// Re-confirmed 2026-08-10 by rendering it fresh rather than assuming the
+// old confirmation carried over, which the previous version of this
+// comment flagged as owed. It holds, and for the reason predicted: "a
+// ring" describes four overlapping 220° arcs better than it ever
+// described a logarithmic spiral, so the construction change made this
+// glyph *more* faithful, not less. The one real divergence is the gap
+// count — the web mark has four openings (one per hook, 90° apart), this
+// has one. That is a cell-budget concession, not an oversight: four
+// openings across 13×7 cells are single-cell notches, and single-cell
+// notches in a block-character ring read as damage rather than as
+// design. Verify by rendering again if the geometry changes.
 var markGlyph = []string{
 	"    ▄▄▄▄     ",
 	"  ▄██████▄   ",

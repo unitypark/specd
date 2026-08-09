@@ -190,8 +190,10 @@ export function SettingsView({
             <p className="pairLabel">Run this on the machine you want to pair:</p>
             <pre>{`specd runner pair ${justPaired.pairCode} --api ${API_BASE}`}</pre>
             <p className="hint">
-              Pairing proves the machine and stores its credential — the job-polling daemon that
-              actually executes builds and specs on it is not built yet.
+              Pairing proves the machine and stores its credential. To run work on it, start the
+              daemon there too: <code>SPECD_RUNNER_TOKEN=$(specd runner token) pnpm --filter
+              @specd/runner start</code>. It executes spec and onboarding jobs; builds still run
+              here.
             </p>
             <button type="button" className="btn sm" onClick={() => setJustPaired(null)}>
               Done

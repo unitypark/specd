@@ -24,13 +24,14 @@ Magenta is the one deliberate exception: still kept, still only for
 | `--emphasis` | `linear-gradient(160deg, #2e2e2e 0%, #000 100%)` | The one visual "accent" left — a dark gradient fill for a point of application: primary buttons, the closing CTA, a badge worth noticing. |
 | `--emphasis-hover` | `linear-gradient(160deg, #3c3c3c 0%, #111 100%)` | Hover — one step lighter, not a hue shift. |
 | `--emphasis-shadow` / `--emphasis-shadow-hover` | `box-shadow`, black at low alpha (see "Emphasis" below) | The glow half of "gradation and glow" — pairs with `--emphasis`, never used alone. |
-| `--glass-bg` / `--glass-border` / `--glass-blur` | `rgba(255,255,255,.55)` / `rgba(255,255,255,.6)` / `blur(16px) saturate(180%)` | Glassmorphism, opt-in — see "Glass" below. |
+| `--glass-*` (six tokens) | `-bg` `rgba(255,255,255,.55)` · `-border` `rgba(255,255,255,.6)` · `-blur` `blur(16px) saturate(180%)` · `-refract` `url(#liquid-glass) blur(2px) saturate(180%)` · `-specular` · `-rim` | Glassmorphism, opt-in — see "Glass" below. |
 | `--ink` | `#0f0f0f` | Everything that used to be `--green-text` — links, labels, the wordmark's "d" — is now just ink. See "What the colours mean" for what that distinction cost. |
 | `--magenta` | `#ff5cd6` | Raw magenta. Fills and borders for `UNVERIFIED` — never small text. |
 | `--magenta-text` | `#a51684` | Magenta wherever magenta **is** the text — the `UNVERIFIED` marker itself. |
 | `--paper` | `#ffffff` | Pure white — same value as `--panel` now that the whole page is this register. |
 
-Raw `--magenta` scores **2.71** on `--panel` — well under AA, same rule as
+Raw `--magenta` scores **2.71** on `--panel` and **2.33** on `--panel-2`, the
+worst case — well under AA either way, same rule as
 before: anywhere a chip *fills* with magenta and puts dark or white text on
 top, raw is right; anywhere magenta *is* the text sitting on the page, it's
 `--magenta-text` or it fails AA. `--green`/`--green-text`/`--green-dim` are
@@ -96,8 +97,9 @@ were.
 Two consequences, and they are rules rather than suggestions:
 
 - **Raw `--magenta` is not a text colour, full stop, on this palette.** Not
-  "at small sizes," not "usually" — 2.71 on `--panel` fails even the
-  large-text floor (3.0). Every text usage routes through `--magenta-text`.
+  "at small sizes," not "usually" — 2.71 on `--panel`, 2.33 on `--panel-2`,
+  failing even the large-text floor (3.0) on the *best* of the two surfaces.
+  Every text usage routes through `--magenta-text`.
 - **Which surface is "worst case" flipped with the ground, and stays
   flipped.** Under the old dark theme, light ink's worst case was the
   *lightest* dark surface (closest to its own tone). Under this one, dark
@@ -289,8 +291,8 @@ slightly uneven fill.
 
 **Emphasis is not everywhere `--accent` used to point.** `--accent` /
 `--accent-dim` / `--accent-soft` still exist in `globals.css`, but only as a
-safety net pointing at `--ink` / `--ink-3` / a black-based rgba — roughly 70
-call sites across the app route through them and were not individually
+safety net pointing at `--ink` / `--ink-3` / a black-based rgba — 91 call
+sites across 15 files route through them and were not individually
 revisited for this pass. `--emphasis` is the deliberate, upgraded treatment
 for a *specific* point of application; plain `--ink` via `--accent` is the
 quiet default for everything that merely used to be tinted with the old
@@ -298,12 +300,32 @@ accent without being a moment worth a gradient.
 
 ### Glass
 
-`backdrop-filter: blur(16px) saturate(180%)` over a half-opaque white — an
-explicit opt-in (the global `.glass` class, or a component's own rule
-composing the same three `--glass-*` tokens), never the default for
-data-dense product surfaces, where blur-behind costs legibility for no real
-gain. Reads as a marketing moment: the nav's existing blur, and the "your
-specd agent" card in the VS comparison (`app/page.tsx`).
+A refracting half-opaque white — an explicit opt-in (the global `.glass`
+class, or a component's own rule composing the same six `--glass-*` tokens),
+never the default for data-dense product surfaces, where blur-behind costs
+legibility for no real gain. Reads as a marketing moment: the nav's blur, and
+the "your specd agent" card in the VS comparison (`app/page.tsx`).
+
+Three of the six tokens are the *liquid* glass added after the flat version
+shipped, and they are what makes it read as a lens rather than frosting:
+`--glass-refract` is the `backdrop-filter` itself, an SVG displacement filter
+(`url(#liquid-glass)`, defined once in `app/layout.tsx`) that bends the
+backdrop before blurring it; `--glass-specular` is the diagonal highlight
+that gives the surface a direction the light comes from; `--glass-rim` is the
+pair of inset shadows that reads as the edge thickness of a physical pane.
+`--glass-blur` is the plain-frosted version, kept separate.
+
+**The two are not chained, and that is a known gap** (found in the rev-28
+truth pass, recorded in `globals.css`): the seven `--glass-refract` surfaces
+set it alone, and `.card.good` — the card this section calls the showcase —
+uses `--glass-blur` alone rather than as a fallback behind it. An engine that
+cannot apply a `url()` filter reference to `backdrop-filter` therefore gets no
+backdrop treatment on those seven, not frosted glass. A fallback *declaration*
+would not fix it: the property parses fine everywhere, so the gap is at render
+time and closing it needs an `@supports` probe. Left unfixed deliberately —
+it was verified only in headless Chrome, and the Safari/Firefox behaviour is
+reasoned from the spec rather than observed, which is not a good enough basis
+for shipping a visual fallback.
 
 Two things both have to be true for glass to actually read as glass, and
 neither is obvious from the property list alone — both were caught by

@@ -23,7 +23,6 @@ export class Config {
   readonly apiPublicUrl = process.env.API_PUBLIC_URL ?? `http://localhost:${num('PORT', 4000)}`;
 
   readonly databaseUrl = required('DATABASE_URL');
-  readonly redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6380';
 
   readonly jwtSecret = required('JWT_SECRET');
   readonly vaultMasterKey = required('VAULT_MASTER_KEY');

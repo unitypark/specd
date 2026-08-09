@@ -562,9 +562,9 @@ func cmdRunnerToken() error {
 
 // cmdRunnerPair completes the handshake and verifies the two things it
 // promises to: that the code was valid, and that this machine can actually
-// reach the API outbound. It does not run any jobs — a runner is only paired
-// here, not started; the daemon that polls for and executes work is not
-// built yet (§9, remote runner pairing is landing in stages).
+// reach the API outbound. It does not run any jobs — pairing only stores the
+// credential. Executing work is the @specd/runner daemon's job, started
+// separately with the token `specd runner token` prints.
 func cmdRunnerPair(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: specd runner pair <code>")
@@ -592,7 +592,8 @@ func cmdRunnerPair(args []string) error {
 		return nil
 	}
 	fmt.Println("Outbound connectivity to the API: OK.")
-	fmt.Println("\nThe job-polling daemon is not built yet — this command only completes pairing.")
+	fmt.Println("\nThis machine is paired but idle. Start the daemon to run jobs on it:")
+	fmt.Println("  SPECD_RUNNER_TOKEN=$(specd runner token) pnpm --filter @specd/runner start")
 	return nil
 }
 

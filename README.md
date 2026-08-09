@@ -33,7 +33,7 @@ station 01 takes configuration; the gate at 04 is structural.
 ```bash
 cp .env.example .env          # dev defaults work as-is
 pnpm install
-pnpm infra:up                 # Postgres + pgvector, Redis
+pnpm infra:up                 # Postgres + pgvector
 pnpm db:migrate
 pnpm db:seed                  # creates a fixture git repo to onboard
 
@@ -92,14 +92,14 @@ clear error rather than inventing content.
 ### Prerequisites
 
 - Node ≥ 22, pnpm `10.32.1` (pinned via `packageManager` — `corepack enable` picks it up)
-- Docker, for Postgres + pgvector and Redis (`docker-compose.yml`)
+- Docker, for Postgres + pgvector (`docker-compose.yml`)
 
 ### First run
 
 ```bash
 cp .env.example .env
 pnpm install
-pnpm infra:up      # Postgres on :5433, Redis on :6380 (docker compose)
+pnpm infra:up      # Postgres on :5433 (docker compose)
 pnpm db:migrate
 pnpm db:seed       # writes a fixture git repo to onboard
 pnpm dev           # API on :4000, web on :3000
@@ -116,8 +116,8 @@ Troubleshooting.
 
 `pnpm dev` runs the API (`--watch`, restarts itself on save) and the web app
 (Next.js, fast refresh) in parallel; Ctrl-C stops both. `pnpm infra:up` /
-`pnpm infra:down` control Postgres and Redis independently — leave them
-running across sessions, there's no reason to tear them down between restarts
+`pnpm infra:down` control Postgres independently — leave it
+running across sessions, there's no reason to tear it down between restarts
 of `pnpm dev` itself.
 
 ### Verify it's actually up
@@ -133,7 +133,7 @@ open http://localhost:3000
 | --- | --- | --- |
 | `DATABASE_URL is required — copy .env.example to .env` (API), or `db:migrate`'s `DATABASE_URL is not set` | No `.env` at the repo root yet | `cp .env.example .env`, then retry. This is the one thing auto-loading cannot paper over — there is nothing to load. |
 | Same error, and `.env` already exists | It's not at the repo root, or the value is empty | `grep DATABASE_URL .env` from the repo root should print a real value — the loader looks there specifically, not at the shell's `cwd`. |
-| API can't reach Postgres/Redis (connection refused) | `pnpm infra:up` was never run, or Docker isn't running | `docker ps` should list `specd-postgres` and `specd-redis`, both `healthy`. Run `pnpm infra:up` if not. |
+| API can't reach Postgres (connection refused) | `pnpm infra:up` was never run, or Docker isn't running | `docker ps` should list `specd-postgres`, `healthy`. Run `pnpm infra:up` if not. |
 | `EADDRINUSE` on `:3000` or `:4000` | A previous `pnpm dev` is still running elsewhere | `lsof -nP -iTCP:3000 -sTCP:LISTEN` (swap the port), stop that process, then start a new one. |
 | A schema-shaped error right after pulling new commits | New migrations landed | `pnpm db:migrate` — idempotent, applies only what's new (tracked in `_specd_migrations`). |
 | Web dev server starts 500ing everything after a `pnpm build` | `next build` and `next dev` both write `apps/web/.next`, in incompatible shapes — running the former while the latter is live corrupts it | Don't run `pnpm build` against an `apps/web` a dev server is using. If it already happened: stop the dev server, `rm -rf apps/web/.next`, `pnpm --filter @specd/web dev` again. |
@@ -141,7 +141,7 @@ open http://localhost:3000
 ### Resetting
 
 No script wipes data — `pnpm infra:down` is a plain `docker compose down`, so
-the named volumes (`specd-pgdata`, `specd-redisdata`) survive it. For a true
+the named volume (`specd-pgdata`) survives it. For a true
 reset: `docker compose down -v`, then `pnpm infra:up && pnpm db:migrate && pnpm db:seed`.
 
 ---
@@ -152,6 +152,7 @@ reset: `docker compose down -v`, then `pnpm infra:up && pnpm db:migrate && pnpm 
 | --- | --- |
 | `apps/api` | NestJS API — auth, projects, the pipeline, agents, knowledge index |
 | `apps/web` | Next.js — landing, wizard, dashboard, board, spec review, knowledge, runs |
+| `apps/runner` | `@specd/runner` — the self-hosted daemon that claims and executes jobs |
 | `cli` | `specd` — Go, single static binary (`pnpm cli:build`) |
 | `packages/shared` | Spec lifecycle, EARS rendering, model rate card, cost metering |
 | `packages/db` | Drizzle schema + SQL migrations (Postgres + pgvector) |
@@ -159,7 +160,7 @@ reset: `docker compose down -v`, then `pnpm infra:up && pnpm db:migrate && pnpm 
 
 ### Stack
 
-Next.js · NestJS · Postgres + pgvector · Redis/BullMQ · Anthropic SDK · Go CLI.
+Next.js · NestJS · Postgres + pgvector · Anthropic SDK · Go CLI.
 Boring on purpose (§9) — the only interesting decisions are the VCS adapter
 split and keeping git as the source of truth for knowledge.
 
@@ -268,12 +269,21 @@ specd specs list --status approved
 
 specd connect .              # register a local repo (code stays on your machine)
 specd runner pair XXXXX-XXXXX  # pair this machine as a self-hosted runner
+specd runner token           # print the stored runner token (for the daemon)
 specd open CRM-131           # open the spec in the web app
 ```
 
 `specd login` needs the **web app running**, because a human confirms the code
 at `/cli-login` — a machine cannot mint its own token. The token is stored in
 your login keychain on macOS, or `0600` under your config directory elsewhere.
+
+Run `specd` with no arguments at a terminal and you get an interactive shell
+instead: the same capabilities as slash commands (`/status`, `/spec-pull`,
+`/specs`, `/runner-pair`, `/help` lists all 16), with arguments prompted rather
+than remembered. It opens only when stdin is a TTY, so scripts and CI keep
+getting the plain command behaviour. See
+[`docs/cli-repl.md`](docs/cli-repl.md) and
+[`knowledge/specs/S-104-improve-cli-app-like-claude-code-or-copilot.md`](knowledge/specs/S-104-improve-cli-app-like-claude-code-or-copilot.md).
 
 It fetches, registers and reports. It never authors, reviews or approves —
 those live in the app, and the server refuses them for CLI tokens regardless of
@@ -325,11 +335,27 @@ lands in its own keychain slot, separate from a signed-in user's own CLI
 token, and the command verifies outbound connectivity to the API before
 saying so. Generate a pairing code from the project's Settings page.
 
-**This is pairing only.** Nothing yet asks a paired runner to actually do
-anything — there is no job queue, no claim/report protocol, and the daemon
-that would poll for and execute work does not exist. What's built and what
-isn't, and why they shipped separately: [`docs/runners.md`](docs/runners.md),
-[`knowledge/decisions/0003-runner-pairing-before-dispatch.md`](knowledge/decisions/0003-runner-pairing-before-dispatch.md).
+Once paired, start the daemon that polls for and executes work — `apps/runner`,
+published as `@specd/runner`:
+
+```bash
+SPECD_RUNNER_TOKEN=$(specd runner token) SPECD_API=http://localhost:4000/api \
+  pnpm --filter @specd/runner start
+```
+
+It claims `spec` and `onboard` jobs (`POST /runners/jobs/claim`), drives the
+machine's own local Claude Code, and reports the parsed result back. It never
+touches the database, the knowledge index, or a repository's VCS credential —
+the server does all of that on either side of the daemon's one job. Dispatch
+happens automatically when a project's AI mode is `subscription_runner` and a
+runner is paired; with no runner paired, the synchronous path runs unchanged.
+
+`build` dispatch is **not** built — a build needs a real git checkout on the
+runner, which raises the unsolved question of how a repo's VCS credential gets
+there. What's built and what isn't, and why they shipped in stages:
+[`docs/runners.md`](docs/runners.md),
+[`knowledge/decisions/0003-runner-pairing-before-dispatch.md`](knowledge/decisions/0003-runner-pairing-before-dispatch.md),
+[`knowledge/decisions/0004-runner-job-dispatch.md`](knowledge/decisions/0004-runner-job-dispatch.md).
 
 ## The Build station
 

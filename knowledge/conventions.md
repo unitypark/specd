@@ -40,7 +40,7 @@ Workspace packages are scoped `@specd/*` (`@specd/api`, `@specd/web`, `@specd/db
 
 - `.env.example` is committed; `cp .env.example .env` and dev defaults work as-is. Keep new variables documented there.
 - Known env vars from the README: `SPECD_AI_MODE` (`subscription_runner`), `ANTHROPIC_API_KEY`. UNVERIFIED — the full variable set is in `.env.example`, which was not shown.
-- Postgres is on **5433** and Redis on **6380** on the host (non-default, to avoid clashing with local installs).
+- Postgres is on **5433** on the host (non-default, to avoid clashing with local installs). It is the only runtime dependency — Redis was removed with the unused queue (`decisions/0008-remove-unused-queue.md`).
 
 ## Writing conventions the product itself enforces
 

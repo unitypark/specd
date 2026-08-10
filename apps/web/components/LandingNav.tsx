@@ -6,8 +6,8 @@ import { Logo } from './Logo';
 import styles from '../app/landing.module.css';
 
 /**
- * The landing nav (mockup rev 21–23): APPS · PRICING · DOCS · COMMUNITY, then
- * the sign-in link and the primary CTA.
+ * The landing nav (mockup rev 21–23): APPS · TEMPLATES · PRICING · DOCS ·
+ * COMMUNITY, then the sign-in link and the primary CTA.
  *
  * The section links that once lived here (THE SYSTEM / TICKET → SPEC / …) were
  * deliberately removed in rev 23 — a nav of anchors competes with the page's
@@ -94,6 +94,9 @@ export function LandingNav() {
         )}
       </div>
 
+      <Link href="/templates" className={styles.lk}>
+        TEMPLATES
+      </Link>
       <Link href="/pricing" className={styles.lk}>
         PRICING
       </Link>

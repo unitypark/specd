@@ -1,0 +1,160 @@
+/*
+ * The template gallery. Reuses the landing pages' shell (`landing.module.css`)
+ * and adds only what a catalogue needs: a card grid, a facts pair, and a code
+ * block that can hold a whole AGENTS.md without pushing the page sideways.
+ */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.9rem;
+  margin: 1.4rem 0 2.4rem;
+}
+
+.card {
+  display: block;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 1rem 1.1rem;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.2s, transform 0.15s;
+}
+.card:hover {
+  border-color: var(--ink);
+  box-shadow: 0 8px 24px -14px rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
+}
+.card h2 {
+  font: 600 1.02rem/1.2 var(--sans);
+  margin: 0 0 0.35rem;
+}
+.card p {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--ink-3);
+  margin: 0 0 0.7rem;
+}
+
+/* The detected line, styled as machine output rather than prose — it is. */
+.detected {
+  display: block;
+  font: 500 0.68rem/1.5 var(--mono);
+  color: var(--ink-2);
+  margin-bottom: 0.35rem;
+}
+.verify {
+  display: block;
+  font: 500 0.68rem/1.5 var(--mono);
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.8rem;
+  margin: 0.7rem 0 0.5rem;
+}
+.facts > div {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  padding: 0.75rem 0.9rem;
+  background: var(--bg-2);
+}
+.facts dt {
+  font: 600 0.62rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 0.35rem;
+}
+.facts dd {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  font-size: 0.78rem;
+  line-height: 1.65;
+  color: var(--ink-3);
+  max-width: 62ch;
+  margin: 0 0 1.6rem;
+}
+
+/* A whole AGENTS.md fits here. It scrolls inside itself rather than making
+   the page scroll sideways. */
+.code {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  max-height: 32rem;
+  overflow-y: auto;
+  font: 0.72rem/1.7 var(--mono);
+  white-space: pre;
+  margin: 0.6rem 0 2rem;
+}
+
+.tree {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 0.6rem 0 2rem;
+}
+.treeRow {
+  display: grid;
+  grid-template-columns: minmax(11rem, 15rem) 1fr;
+  gap: 0.9rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+.treeRow:last-child {
+  border-bottom: none;
+}
+.treeRow code {
+  font: 500 0.72rem/1.6 var(--mono);
+  overflow-wrap: anywhere;
+}
+.treeRow span {
+  color: var(--ink-3);
+}
+@media (max-width: 640px) {
+  .treeRow {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
+
+.cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1.6rem 0 1rem;
+}
+.ctaBtn,
+.ctaAlt {
+  display: inline-block;
+  border-radius: var(--radius);
+  padding: 0.6rem 1.1rem;
+  font: 600 0.82rem/1 var(--sans);
+  text-decoration: none;
+}
+.ctaBtn {
+  background: var(--ink);
+  color: var(--field);
+  border: 1px solid var(--ink);
+}
+.ctaAlt {
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+}
+.ctaAlt:hover {
+  border-color: var(--ink);
+}

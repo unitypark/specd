@@ -314,7 +314,7 @@ export class PipelineService {
     const model = this.resolveModel(ai.model, project.defaultModel);
 
     // Ground the build in the same knowledge the spec was drafted against.
-    const chunks = await this.knowledge.retrieve(
+    const { chunks } = await this.knowledge.retrieve(
       project.id,
       `${spec.title}\n${spec.content.design.map((d) => d.text).join('\n')}`,
       10,

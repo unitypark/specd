@@ -31,7 +31,27 @@ export interface RetrievedChunk {
   text: string;
   score: number;
   /** How the chunk was found — hybrid retrieval reports its own provenance. */
-  via: 'vector' | 'fulltext' | 'both';
+  via: 'vector' | 'fulltext' | 'both' | 'graph';
+  /**
+   * For `via: 'graph'` only: the edge that pulled this chunk in, e.g.
+   * `citation from knowledge/specs/S-104-….md#design`. Provenance for the
+   * run log and the reviewer — an expanded chunk must be able to say WHY it
+   * arrived (S-102).
+   */
+  viaEdge?: string;
+}
+
+/**
+ * Retrieval result with its own honesty accounting (S-102): how many chunks
+ * matched at all vs how many fit the budget, so prompt assembly can announce
+ * truncation instead of letting an agent read a cut as an absence.
+ */
+export interface RetrievalResult {
+  chunks: RetrievedChunk[];
+  /** Distinct chunks that matched either retrieval arm before the cut. */
+  matchedCount: number;
+  /** How many matched chunks were left out for budget. */
+  truncatedCount: number;
 }
 
 /** A citation the SpecAgent may use: `knowledge/architecture.md#auth`. */

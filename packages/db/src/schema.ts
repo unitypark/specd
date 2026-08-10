@@ -343,6 +343,8 @@ export const knowledgeDocs = pgTable(
     /** True while the file still carries generated UNVERIFIED markers. */
     hasUnverified: boolean('has_unverified').notNull().default(false),
     isStub: boolean('is_stub').notNull().default(false),
+    /** Link-extractor version that last processed this doc (S-102). 0 = never. */
+    linksVersion: integer('links_version').notNull().default(0),
   },
   (t) => [
     uniqueIndex('knowledge_docs_repo_path_key').on(t.repositoryId, t.path),
@@ -374,6 +376,42 @@ export const knowledgeChunks = pgTable(
   (t) => [
     index('knowledge_chunks_doc_idx').on(t.docId),
     index('knowledge_chunks_project_idx').on(t.projectId),
+  ],
+);
+
+/**
+ * The knowledge graph (S-102): one row per outbound link found in a doc.
+ * Deterministically extracted, replaced per source doc on re-index, kept
+ * (never dropped) when unresolved — a broken link is a health signal.
+ */
+export const knowledgeDocLinks = pgTable(
+  'knowledge_doc_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sourceDocId: uuid('source_doc_id')
+      .notNull()
+      .references(() => knowledgeDocs.id, { onDelete: 'cascade' }),
+    /** wikilink | citation | mdlink | pathref */
+    kind: text('kind').notNull(),
+    /** Nearest heading anchor at the link's location — the relation site. */
+    site: text('site'),
+    rawTarget: text('raw_target').notNull(),
+    resolvedDocId: uuid('resolved_doc_id').references(() => knowledgeDocs.id, {
+      onDelete: 'set null',
+    }),
+    resolvedAnchor: text('resolved_anchor'),
+    /** resolved | unresolved | dangling_anchor */
+    resolutionState: text('resolution_state').notNull().default('unresolved'),
+    /** 'deterministic' today; a later LLM tier coexists, never overwrites. */
+    originTier: text('origin_tier').notNull().default('deterministic'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('knowledge_doc_links_source_idx').on(t.projectId, t.sourceDocId),
+    index('knowledge_doc_links_target_idx').on(t.projectId, t.resolvedDocId),
   ],
 );
 

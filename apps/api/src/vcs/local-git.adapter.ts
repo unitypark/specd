@@ -126,7 +126,7 @@ export class LocalGitAdapter implements VcsAdapter {
 
   async listFiles(repo: RepoTarget, prefix: string): Promise<string[]> {
     const { git } = this.git(repo);
-    const raw = await git.raw(['ls-files', '--', prefix]);
+    const raw = await git.raw(['ls-files', ...pathspec(prefix)]);
     return raw.split('\n').filter(Boolean);
   }
 
@@ -136,7 +136,7 @@ export class LocalGitAdapter implements VcsAdapter {
   ): Promise<{ path: string; sha: string }[]> {
     const { git } = this.git(repo);
     // `-s` prints "<mode> <sha> <stage>\t<path>".
-    const raw = await git.raw(['ls-files', '-s', '--', prefix]);
+    const raw = await git.raw(['ls-files', '-s', ...pathspec(prefix)]);
     return raw
       .split('\n')
       .filter(Boolean)
@@ -291,6 +291,21 @@ function realpathOr(path: string): string {
 }
 
 /** Two paths name the same directory when they share a device and inode. */
+/**
+ * Turn a prefix into git arguments.
+ *
+ * An empty prefix means "the whole tree", and git refuses to read it that
+ * way: `git ls-files -- ''` is a hard error, `empty string is not a valid
+ * pathspec`. So the pathspec is omitted entirely rather than passed empty.
+ *
+ * This was live for two releases and no test saw it, because every suite that
+ * indexes uses a fake adapter that ignores the prefix. It surfaced the first
+ * time a real local repository was indexed by a running server.
+ */
+function pathspec(prefix: string): string[] {
+  return prefix ? ['--', prefix] : [];
+}
+
 async function sameDirectory(a: string, b: string): Promise<boolean> {
   if (a === b) return true;
   try {

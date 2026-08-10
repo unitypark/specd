@@ -18,7 +18,10 @@
 | CLI build/install | `pnpm cli:build` → `./bin/specd`; `pnpm cli:install` → `go install` + `scripts/check-cli-path.mjs` |
 | Headless pipeline | `pnpm --filter @specd/api loop` |
 
-Verify command for changes: `pnpm typecheck && pnpm test`.
+Verify command for changes: `pnpm typecheck && pnpm test`. CI runs exactly
+that on every push and pull request (`.github/workflows/ci.yml`), against a
+real pgvector service, and fails the run if the suites that need Postgres
+skipped themselves instead of passing.
 
 ## Package naming
 

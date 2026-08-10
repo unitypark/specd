@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -13,6 +14,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -28,6 +30,7 @@ import { ConnectionsService } from './connections.service.js';
 import { KnowledgeService } from '../knowledge/knowledge.service.js';
 import { ModelRouter } from '../agents/model.router.js';
 import { Vault } from '../common/vault.js';
+import { JiraAdapter } from '../tracker/jira.adapter.js';
 
 class CreateProjectDto {
   @IsString() @MinLength(1) @MaxLength(80) name!: string;
@@ -71,6 +74,15 @@ class ConnectVcsDto {
 class ConnectTrackerDto {
   @IsIn(['board', 'jira']) provider!: string;
   @IsOptional() @IsString() projectKey?: string;
+  /** Jira Cloud only: `https://your-team.atlassian.net`. */
+  @IsOptional() @IsString() siteUrl?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() apiToken?: string;
+  /**
+   * specd lifecycle state → Jira status name. Optional and empty by default;
+   * an unmapped status simply is not mirrored (decision 0010).
+   */
+  @IsOptional() @IsObject() statusMap?: Record<string, string>;
 }
 
 @Controller('projects')
@@ -285,14 +297,49 @@ export class ProjectsController {
   ) {
     const project = await this.projects.bySlug(slug);
     await this.projects.requireRole(user.sub, project.id, ['owner', 'maintainer']);
+
+    if (dto.provider !== 'jira') {
+      await this.connections.upsert({
+        projectId: project.id,
+        kind: 'tracker',
+        provider: dto.provider,
+        label: 'built-in board',
+        settings: { projectKey: dto.projectKey ?? null },
+      });
+      return { ok: true };
+    }
+
+    if (!dto.siteUrl || !dto.email || !dto.apiToken) {
+      throw new BadRequestException(
+        'Jira needs siteUrl, email and apiToken. Create a token at id.atlassian.com → Security → API tokens.',
+      );
+    }
+
+    // Prove the credential here, in front of whoever is connecting it, rather
+    // than letting it fail later inside a spec run where nobody is looking.
+    const identity = await new JiraAdapter(dto.siteUrl, dto.email, dto.apiToken)
+      .verify()
+      .catch((err: unknown) => {
+        throw new BadRequestException(
+          `Jira rejected that credential: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+
     await this.connections.upsert({
       projectId: project.id,
       kind: 'tracker',
-      provider: dto.provider,
-      label: dto.provider === 'jira' ? `Jira ${dto.projectKey ?? ''}`.trim() : 'built-in board',
-      settings: { projectKey: dto.projectKey ?? null },
+      provider: 'jira',
+      label: `Jira ${dto.projectKey ?? ''}`.trim(),
+      settings: {
+        projectKey: dto.projectKey ?? null,
+        siteUrl: dto.siteUrl.replace(/\/+$/, ''),
+        email: dto.email,
+        statusMap: dto.statusMap ?? {},
+      },
+      secret: dto.apiToken,
     });
-    return { ok: true };
+
+    return { ok: true, connectedAs: identity.displayName };
   }
 
   // ─── knowledge ──────────────────────────────────────────────────────────────

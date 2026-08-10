@@ -25,6 +25,13 @@ import { EmbeddingService } from './embeddings.js';
 import { CHUNKER_VERSION, chunkMarkdown, headingAnchor } from './chunker.js';
 import { extractLinks } from './link-extract.js';
 import {
+  EDGE_WEIGHT,
+  LINK_KINDS,
+  ORIGIN_TIERS,
+  RESOLUTION_STATES,
+  type LinkKind,
+} from './graph-schema.js';
+import {
   headingAnchorsOf,
   resolvePathTarget,
   resolveWikiStem,
@@ -79,16 +86,6 @@ interface PreparedDoc {
 
 /** Resolves a doc's heading anchors once per run, not once per link. */
 type AnchorLookup = (docId: string) => Promise<Set<string>>;
-
-/** Edge-kind weights for expansion: an authored citation outranks a bare
- *  path mention. Tuned by rank only — the absolute values never mix with
- *  RRF scores. */
-const EDGE_WEIGHT: Record<string, number> = {
-  citation: 1.0,
-  wikilink: 0.9,
-  mdlink: 0.6,
-  pathref: 0.4,
-};
 
 /** Expansion adds at most this many chunks; RRF picks are never displaced. */
 const GRAPH_EXPANSION_BUDGET: number = 4;
@@ -554,7 +551,7 @@ export class KnowledgeService {
     >();
     for (const edge of edges) {
       if (edge.degree > HUB_DEGREE) continue;
-      const weight = EDGE_WEIGHT[edge.kind] ?? 0.3;
+      const weight = EDGE_WEIGHT[edge.kind as LinkKind] ?? 0.3;
       const seedOrd = seedRank.get(edge.seed_doc_id) ?? seedDocIds.length;
       const label = `${edge.kind} ${edge.site ? `at ${edge.source_path}#${edge.site}` : `from ${edge.source_path}`}`;
       const current = byNeighbor.get(edge.neighbor_id);
@@ -785,7 +782,13 @@ export class KnowledgeService {
     // Graph health (S-102): links that point nowhere, anchors that no longer
     // exist, and docs nothing links to. Cheap SQL over the links table.
     const [graph] = await ctx.sql<
-      { broken: number; dangling: number; orphans: number; total_links: number }[]
+      {
+        broken: number;
+        dangling: number;
+        orphans: number;
+        total_links: number;
+        undeclared: number;
+      }[]
     >`
       SELECT
         (SELECT count(*) FROM knowledge_doc_links
@@ -794,6 +797,15 @@ export class KnowledgeService {
           WHERE project_id = ${projectId} AND resolution_state = 'dangling_anchor')::int AS dangling,
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId})::int AS total_links,
+        -- Integrity audit: rows using vocabulary this build does not declare.
+        -- Should always be zero; if it is not, a producer or a migration has
+        -- written something no consumer knows how to weight or resolve, and
+        -- silence about that is how a graph rots invisibly.
+        (SELECT count(*) FROM knowledge_doc_links
+          WHERE project_id = ${projectId}
+            AND (kind <> ALL(${LINK_KINDS.map((k) => k.kind)})
+              OR resolution_state <> ALL(${[...RESOLUTION_STATES]})
+              OR origin_tier <> ALL(${[...ORIGIN_TIERS]})))::int AS undeclared,
         (SELECT count(*) FROM knowledge_docs kd
           WHERE kd.project_id = ${projectId}
             -- The map itself is nobody's target. An index page having no
@@ -811,6 +823,7 @@ export class KnowledgeService {
     const danglingAnchors = Number(graph?.dangling ?? 0);
     const orphanDocs = Number(graph?.orphans ?? 0);
     const totalLinks = Number(graph?.total_links ?? 0);
+    const undeclaredEdges = Number(graph?.undeclared ?? 0);
     const unknownFreshness = docs.filter(
       (d) => freshnessOf(d.docUpdatedAt, d.isStub, d.codeCommitsSince).unknown && !d.isStub,
     ).length;
@@ -870,6 +883,14 @@ export class KnowledgeService {
       notes.push({
         icon: '⚓',
         text: `${danglingAnchors} citation anchor${danglingAnchors === 1 ? '' : 's'} no longer exist in their target doc.`,
+      });
+    }
+    if (undeclaredEdges > 0) {
+      notes.push({
+        icon: '🧬',
+        text:
+          `${undeclaredEdges} edge${undeclaredEdges === 1 ? '' : 's'} use a kind, state or tier ` +
+          `this build does not declare — retrieval cannot weight them correctly.`,
       });
     }
     if (docCount > 3 && orphanDocs > 0) {

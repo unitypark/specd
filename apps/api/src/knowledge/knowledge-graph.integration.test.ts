@@ -453,6 +453,28 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     fakeCodeCommits = 0;
   });
 
+  it('gives a chunk an anchor the coverage set actually contains', async () => {
+    // The invariant citation checking rests on: the anchor a retrieved chunk
+    // advertises must be findable in the doc's real heading set. Two
+    // slugifiers meant that failed for anything outside ASCII, so a sound
+    // citation to a unicode heading was reported as unchecked.
+    files.set(
+      'knowledge/unicode.md',
+      '# Unicode\n\n## Café notes\n\nSigned URLs expire after fifteen minutes in München.\n',
+    );
+    await service.indexRepository(repo);
+
+    const result = await service.retrieve(projectId, 'café notes münchen signed urls', 6);
+    const chunk = result.chunks.find((c) => c.path === 'knowledge/unicode.md');
+    expect(chunk?.heading).toBe('café-notes');
+
+    const coverage = await service.coverageFor(projectId, ['knowledge/unicode.md']);
+    expect(coverage.anchorsByPath['knowledge/unicode.md']).toContain(chunk!.heading!);
+
+    files.delete('knowledge/unicode.md');
+    await service.indexRepository(repo);
+  });
+
   it('rolls the whole run back when a step fails partway through', async () => {
     // The failure this exists to prevent: a doc's chunks are deleted before
     // its new ones are written, so a run that dies in between leaves the doc

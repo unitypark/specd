@@ -1,3 +1,5 @@
+import { anchorOf } from './link-resolve.js';
+
 export interface Chunk {
   ord: number;
   heading: string | null;
@@ -107,10 +109,19 @@ export function estimateTokens(text: string): number {
 }
 
 /** Anchor form used in citations: "Auth flow" → "auth-flow". */
+/**
+ * Anchor for a chunk's heading — the `#auth` half of a citation.
+ *
+ * Delegates to the shared resolver rather than slugifying here. It used to
+ * have its own recipe (`[^a-z0-9]+`), which disagreed with the resolver's on
+ * anything outside ASCII: "Café notes" became `caf-notes` on this side and
+ * `café-notes` on that one, and a CJK heading collapsed to the empty string.
+ * Once citation checking began comparing the two namespaces — a chunk's
+ * anchor against a doc's real headings — that disagreement stopped being
+ * cosmetic and started reporting sound citations as unchecked. S-102 asked
+ * for one shared normalize module; this is it.
+ */
 export function headingAnchor(heading: string | null): string | null {
   if (!heading) return null;
-  return heading
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return anchorOf(heading) || null;
 }

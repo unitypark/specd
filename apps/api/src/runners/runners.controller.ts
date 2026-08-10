@@ -16,7 +16,7 @@ import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { TokenClaims } from '../auth/auth.service.js';
 import { ProjectsService } from '../projects/projects.service.js';
 import { RunnersService } from './runners.service.js';
-import { RunnerJobsService } from './runner-jobs.service.js';
+import { RunnerJobsService, type JobProgressLine } from './runner-jobs.service.js';
 
 class CreateRunnerDto {
   @IsString() @MinLength(1) @MaxLength(80) name!: string;
@@ -116,6 +116,22 @@ export class RunnersController {
     const runner = await this.runnerFrom(authorization);
     const job = await this.jobs.claim(runner);
     return { job };
+  }
+
+  /**
+   * Narration from a job still in flight. Builds run for minutes and log as
+   * they go; without this the run's live log would stay empty until the end.
+   */
+  @Public()
+  @Post('runners/jobs/:id/progress')
+  async progressJob(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: { lines: JobProgressLine[] },
+  ) {
+    const runner = await this.runnerFrom(authorization);
+    await this.jobs.progress(runner, id, Array.isArray(body?.lines) ? body.lines.slice(0, 200) : []);
+    return { ok: true };
   }
 
   @Public()

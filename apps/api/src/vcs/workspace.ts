@@ -172,36 +172,11 @@ export class WorkspaceService {
         // failing on a non-fast-forward. The branch belongs to this spec.
         await git.raw([...this.authArgs('x-access-token', token), 'push', '--force', cloneUrl, `HEAD:${branch}`]);
 
-        const adapter = new GitHubAdapter(token, this.config.githubApiBase);
-        try {
-          const opened = await adapter.openPullRequest(repo.name, {
-            branch,
-            base: baseBranch,
-            title: pr.title,
-            body: pr.body,
-          });
-
-          return {
-            url: opened.url,
-            reviewHint: opened.existing
-              ? `Updated PR #${opened.number} on ${repo.name}. Merging is adopting.`
-              : `Opened PR #${opened.number} on ${repo.name}. Merging is adopting.`,
-          };
-        } catch (err) {
-          // The branch is safely pushed; only the review surface is missing.
-          // Failing the whole build here would throw away work that survived,
-          // over something the reviewer can do in one click.
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`pushed ${branch} but could not open a PR: ${message}`);
-          return {
-            url: `${this.config.githubBase}/${repo.name}/compare/${encodeURIComponent(
-              baseBranch,
-            )}...${encodeURIComponent(branch)}?expand=1`,
-            reviewHint:
-              `Pushed ${branch}, but opening the PR failed (${message.slice(0, 120)}). ` +
-              'The work is safe on the branch — open the PR from the compare link.',
-          };
-        }
+        return this.openGitHubReview(
+          repo,
+          { branch, base: baseBranch, title: pr.title, body: pr.body },
+          token,
+        );
       },
       dispose: async () => {
         await rm(dir, { recursive: true, force: true }).catch(() => undefined);
@@ -259,33 +234,12 @@ export class WorkspaceService {
       publish: async (pr) => {
         await git.raw([...this.authArgs('oauth2', token), 'push', '--force', cloneUrl, `HEAD:${branch}`]);
 
-        const adapter = new GitLabAdapter(token, instanceUrl);
-        try {
-          const opened = await adapter.openMergeRequest(repo.name, {
-            branch,
-            base: baseBranch,
-            title: pr.title,
-            body: pr.body,
-          });
-
-          return {
-            url: opened.url,
-            reviewHint: opened.existing
-              ? `Updated MR !${opened.iid} on ${repo.name}. Merging is adopting.`
-              : `Opened MR !${opened.iid} on ${repo.name}. Merging is adopting.`,
-          };
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`pushed ${branch} but could not open an MR: ${message}`);
-          return {
-            url: `${instanceUrl.replace(/\/+$/, '')}/${repo.name}/-/compare/${encodeURIComponent(
-              baseBranch,
-            )}...${encodeURIComponent(branch)}`,
-            reviewHint:
-              `Pushed ${branch}, but opening the MR failed (${message.slice(0, 120)}). ` +
-              'The work is safe on the branch — open the MR from the compare link.',
-          };
-        }
+        return this.openGitLabReview(
+          repo,
+          { branch, base: baseBranch, title: pr.title, body: pr.body },
+          token,
+          instanceUrl,
+        );
       },
       dispose: async () => {
         await rm(dir, { recursive: true, force: true }).catch(() => undefined);
@@ -310,6 +264,121 @@ export class WorkspaceService {
     await git.raw(['worktree', 'remove', '--force', dir]).catch(() => undefined);
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     await git.raw(['worktree', 'prune']).catch(() => undefined);
+  }
+
+  /**
+   * Where a *different machine* would clone this repository from.
+   *
+   * Deliberately returns no credential. A dispatched build clones and pushes
+   * with the runner machine's own git access — specd never ships a VCS token
+   * to a runner (`knowledge/decisions/0009-...`). Local repositories have no
+   * remote a runner could use, so they get null and stay in-process.
+   */
+  async remoteFor(repo: Repository): Promise<{ cloneUrl: string; baseBranch: string } | null> {
+    switch (repo.provider) {
+      case 'github':
+        return {
+          cloneUrl: `${this.config.githubCloneBase}/${repo.name}.git`,
+          baseBranch: repo.defaultBranch,
+        };
+      case 'gitlab': {
+        const { instanceUrl } = await this.vcs.gitlabCredential(repo.projectId);
+        return {
+          cloneUrl: `${instanceUrl.replace(/\/+$/, '')}/${repo.name}.git`,
+          baseBranch: repo.defaultBranch,
+        };
+      }
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Open the review surface for a branch that is *already* on the remote.
+   *
+   * The push half of `publish()` has already happened elsewhere — on a runner,
+   * with its own credentials. All that is left is the API call, which needs
+   * the platform token and therefore belongs here.
+   */
+  async openReview(
+    repo: Repository,
+    pr: { branch: string; base: string; title: string; body: string },
+  ): Promise<PublishResult> {
+    switch (repo.provider) {
+      case 'github': {
+        const token = await this.vcs.githubToken(repo.projectId);
+        return this.openGitHubReview(repo, pr, token);
+      }
+      case 'gitlab': {
+        const { token, instanceUrl } = await this.vcs.gitlabCredential(repo.projectId);
+        return this.openGitLabReview(repo, pr, token, instanceUrl);
+      }
+      default:
+        return {
+          url: null,
+          reviewHint: `Branch ${pr.branch} is ready. Review it where this repository lives.`,
+        };
+    }
+  }
+
+  private async openGitHubReview(
+    repo: Repository,
+    pr: { branch: string; base: string; title: string; body: string },
+    token: string,
+  ): Promise<PublishResult> {
+    const adapter = new GitHubAdapter(token, this.config.githubApiBase);
+    try {
+      const opened = await adapter.openPullRequest(repo.name, pr);
+      return {
+        url: opened.url,
+        reviewHint: opened.existing
+          ? `Updated PR #${opened.number} on ${repo.name}. Merging is adopting.`
+          : `Opened PR #${opened.number} on ${repo.name}. Merging is adopting.`,
+      };
+    } catch (err) {
+      // The branch is safely pushed; only the review surface is missing.
+      // Failing here would throw away work that survived, over something the
+      // reviewer can do in one click.
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`pushed ${pr.branch} but could not open a PR: ${message}`);
+      return {
+        url: `${this.config.githubBase}/${repo.name}/compare/${encodeURIComponent(
+          pr.base,
+        )}...${encodeURIComponent(pr.branch)}?expand=1`,
+        reviewHint:
+          `Pushed ${pr.branch}, but opening the PR failed (${message.slice(0, 120)}). ` +
+          'The work is safe on the branch — open the PR from the compare link.',
+      };
+    }
+  }
+
+  private async openGitLabReview(
+    repo: Repository,
+    pr: { branch: string; base: string; title: string; body: string },
+    token: string,
+    instanceUrl: string,
+  ): Promise<PublishResult> {
+    const adapter = new GitLabAdapter(token, instanceUrl);
+    try {
+      const opened = await adapter.openMergeRequest(repo.name, pr);
+      return {
+        url: opened.url,
+        reviewHint: opened.existing
+          ? `Updated MR !${opened.iid} on ${repo.name}. Merging is adopting.`
+          : `Opened MR !${opened.iid} on ${repo.name}. Merging is adopting.`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`pushed ${pr.branch} but could not open an MR: ${message}`);
+      return {
+        url: `${instanceUrl.replace(/\/+$/, '')}/${repo.name}/-/compare/${encodeURIComponent(
+          pr.base,
+        )}...${encodeURIComponent(pr.branch)}`,
+        reviewHint:
+          `Pushed ${pr.branch}, but opening the MR failed (${message.slice(0, 120)}). ` +
+          'The work is safe on the branch — open the MR from the compare link.',
+      };
+    }
   }
 
   /** Paths the agent changed, relative to the workspace. */

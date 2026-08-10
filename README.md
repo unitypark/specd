@@ -229,11 +229,17 @@ metadata, run history. Delete a project and nothing you would miss is gone.
 ### Tests
 
 ```bash
-pnpm test        # 232 tests
+pnpm test        # 274 TypeScript tests + the Go CLI suite
 ```
 
-The gate and webhook tests run against real Postgres and skip themselves if
-none is reachable, so the suite still works on a laptop with nothing running.
+The gate, webhook and migration tests run against real Postgres and skip
+themselves if none is reachable, so the suite still works on a laptop with
+nothing running. The migration suite builds a throwaway database and applies
+every migration from zero — the path a deployment takes, and the one that never
+happens locally, where the schema arrives one migration at a time. The runner's
+git layer is likewise tested against the real `git` binary rather than a mock,
+since talking to the actual binary with the machine's actual credentials is the
+whole reason that module exists.
 Webhook signatures are tested with real HMAC and App JWTs with real RSA keys —
 a mocked signer would prove nothing about the only property that matters, which
 is that GitHub can verify what we send. GitLab's webhook trust boundary is a
@@ -343,19 +349,22 @@ SPECD_RUNNER_TOKEN=$(specd runner token) SPECD_API=http://localhost:4000/api \
   pnpm --filter @specd/runner start
 ```
 
-It claims `spec` and `onboard` jobs (`POST /runners/jobs/claim`), drives the
-machine's own local Claude Code, and reports the parsed result back. It never
-touches the database, the knowledge index, or a repository's VCS credential —
-the server does all of that on either side of the daemon's one job. Dispatch
-happens automatically when a project's AI mode is `subscription_runner` and a
-runner is paired; with no runner paired, the synchronous path runs unchanged.
+It claims `spec`, `onboard` and `build` jobs (`POST /runners/jobs/claim`),
+drives the machine's own local Claude Code, and reports back. It never touches
+the database or the knowledge index — the server does that on either side.
+Dispatch happens automatically when a project's AI mode is
+`subscription_runner` and a runner is paired; with no runner paired, the
+synchronous path runs unchanged.
 
-`build` dispatch is **not** built — a build needs a real git checkout on the
-runner, which raises the unsolved question of how a repo's VCS credential gets
-there. What's built and what isn't, and why they shipped in stages:
+**A dispatched build clones and pushes with the runner machine's own git
+credentials.** specd sends no VCS token — the runner needs `git` on PATH and
+push access to the repository as itself, which is checked before the first
+model call rather than discovered at the end. That is the same trust story as
+subscription mode, one noun changed: your machine, your auth. Local-provider
+repositories are never dispatched, since their path means nothing on another
+machine. Full detail and the SSH setup one-liner:
 [`docs/runners.md`](docs/runners.md),
-[`knowledge/decisions/0003-runner-pairing-before-dispatch.md`](knowledge/decisions/0003-runner-pairing-before-dispatch.md),
-[`knowledge/decisions/0004-runner-job-dispatch.md`](knowledge/decisions/0004-runner-job-dispatch.md).
+[`knowledge/decisions/0009-build-dispatch-runner-git-credentials.md`](knowledge/decisions/0009-build-dispatch-runner-git-credentials.md).
 
 ## The Build station
 
@@ -490,12 +499,9 @@ otherwise:
   self-managed instances need a token regardless, since an OAuth app would
   have to be registered per instance. A gitlab.com app narrowing this to a
   click is optional wiring on top of the adapter, not built yet.
-- **`build` runner dispatch** (P2) — a paired runner (`specd runner pair
-  <code>`) can be dispatched `spec`- and `onboard`-drafting jobs today,
-  executed by the `@specd/runner` daemon on the runner's own machine. `build`
-  jobs still only run in-process — a build needs a real git checkout on the
-  runner, which also raises the still-unsolved question of how a repo's VCS
-  credential would reach it. See `docs/runners.md`.
+- **Runner concurrency and job leases** — a runner claims one job at a time,
+  and a job whose runner dies mid-run stays `running` with nothing to reclaim
+  it. See `docs/runners.md`.
 - **Spend billing** — spend is metered and capped; Stripe is not wired (P3).
 
 ---

@@ -90,6 +90,50 @@ export function slugify(title: string): string {
 }
 
 /** Renders a spec as the plain markdown `specd spec pull` hands to any agent. */
+/**
+ * The as-built record filed into `knowledge/specs/` when a spec is built.
+ *
+ * It lives here, not beside the build agent, because two different processes
+ * write it: the in-process build station and the `@specd/runner` daemon on a
+ * paired machine (`knowledge/decisions/0009-...`). Both must produce the same
+ * bytes for the same spec, and the only way to guarantee that is one function.
+ *
+ * A model never writes this file. It is a verbatim record of what a human
+ * approved, so asking a model to reproduce it would invite drift in the one
+ * document that has to be exact — a runner executing this function is still
+ * specd writing the file, not the model.
+ */
+export function renderAsBuiltMarkdown(
+  spec: {
+    ticketKey: string;
+    title: string;
+    version: number;
+    status: SpecStatus;
+    approvedBy?: string | null;
+    approvedAt?: string | null;
+    content: SpecContent;
+  },
+  verify: { passed: boolean | null; command: string | null },
+): string {
+  const header = [
+    `<!-- Filed automatically by specd when ${spec.ticketKey} was built. -->`,
+    '<!-- This is a historical record: never rewrite it. If reality later -->',
+    '<!-- diverged, append a "## Deviations" section below.              -->',
+    '',
+  ].join('\n');
+
+  // "passed", "failed" and "never ran" are three different things to whoever
+  // reads this later. Collapsing the third into either of the others would
+  // make the record claim something nobody checked.
+  const verification = verify.command
+    ? `\n## Verification\n\n\`${verify.command}\` — ${
+        verify.passed === null ? 'not run' : verify.passed ? 'passed' : '**failed** at build time'
+      }\n`
+    : '\n## Verification\n\nNo verify command was detected for this repository.\n';
+
+  return header + renderSpecMarkdown(spec) + verification;
+}
+
 export function renderSpecMarkdown(input: {
   ticketKey: string;
   title: string;

@@ -1,5 +1,6 @@
 import type { ModelId, TokenUsage } from '@specd/shared';
 import { callClaude, isClaudeAvailable } from './claude.js';
+import { runBuildJob, type BuildJob } from './build.js';
 
 /**
  * The daemon `specd runner pair` promised was coming: this polls the API for
@@ -11,9 +12,11 @@ import { callClaude, isClaudeAvailable } from './claude.js';
  * request and returns a parsed reply.
  *
  * `spec` and `onboard` jobs both reduce to "call the model, hand back JSON" —
- * every VCS/DB-touching step for either stays server-side. `build` still
- * does not dispatch here: it needs a real git checkout on this machine,
- * which is a separate, larger piece of work (§9 follow-up).
+ * every VCS/DB-touching step for either stays server-side. `build` is the
+ * exception: its loop edits real files between model calls, so the whole
+ * thing runs here, cloning and pushing with this machine's own git
+ * credentials (`knowledge/decisions/0009-...`). The server never sends a
+ * token, and this daemon never asks for one.
  */
 
 interface JobPayload {
@@ -29,10 +32,10 @@ interface JobPayload {
 interface ClaimedJob {
   id: string;
   kind: string;
-  payload: JobPayload;
+  payload: JobPayload | BuildJob;
 }
 
-const DISPATCHABLE_KINDS = new Set(['spec', 'onboard']);
+const DISPATCHABLE_KINDS = new Set(['spec', 'onboard', 'build']);
 
 const API = (process.env.SPECD_API ?? 'http://localhost:4000/api').replace(/\/$/, '');
 const TOKEN = process.env.SPECD_RUNNER_TOKEN;
@@ -84,12 +87,25 @@ async function pollOnce() {
   }
 
   try {
+    if (job.kind === 'build') {
+      const outcome = await runBuildJob(job.payload as BuildJob, narrator(job.id));
+      await report(job.id, {
+        status: 'succeeded',
+        parsed: outcome.report,
+        model: outcome.model,
+        usage: outcome.usage,
+      });
+      console.log(`specd-runner: reported ${job.id} succeeded`);
+      return;
+    }
+
+    const payload = job.payload as JobPayload;
     const result = await callClaude({
-      model: job.payload.model,
-      system: job.payload.system,
-      user: job.payload.user,
-      schema: job.payload.schema,
-      maxTokens: job.payload.maxTokens,
+      model: payload.model,
+      system: payload.system,
+      user: payload.user,
+      schema: payload.schema,
+      maxTokens: payload.maxTokens,
     });
     await report(job.id, {
       status: 'succeeded',
@@ -103,6 +119,28 @@ async function pollOnce() {
     await report(job.id, { status: 'failed', error: message });
     console.error(`specd-runner: job ${job.id} failed: ${message}`);
   }
+}
+
+/**
+ * Narration for a job that takes minutes. Each line goes to this machine's
+ * console *and* to the run's live log in the app, so whoever pressed Build
+ * can watch it happen rather than staring at nothing until it ends.
+ *
+ * A failure to post progress must never fail the build — the work is real
+ * even when the commentary is lost, so these are logged and swallowed.
+ */
+function narrator(jobId: string) {
+  return async (message: string, level: 'info' | 'warn' | 'error' = 'info'): Promise<void> => {
+    console.log(`specd-runner: ${message}`);
+    try {
+      await call(`/runners/jobs/${jobId}/progress`, {
+        method: 'POST',
+        body: JSON.stringify({ lines: [{ message, level }] }),
+      });
+    } catch (err) {
+      console.error(`specd-runner: could not post progress: ${err instanceof Error ? err.message : err}`);
+    }
+  };
 }
 
 async function claim(): Promise<ClaimedJob | null> {

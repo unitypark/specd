@@ -165,6 +165,30 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     expect(rows.some((r) => r.heading === 'Preamble')).toBe(true);
   });
 
+  it('re-embeds a doc whose chunker or embedder changed, though its sha did not', async () => {
+    // The blind spot in a content-hash skip: the source is identical, but the
+    // rows behind it were built by a chunker or an embedder that is no longer
+    // the one in use. Left alone, that puts two vector spaces in one index.
+    const before = await docByPath('knowledge/architecture.md');
+    await handle!.db
+      .update(knowledgeDocs)
+      .set({ indexFingerprint: 'chunk=v0/900/50;embed=hash/hash-ngram-v0/512' })
+      .where(eq(knowledgeDocs.id, before!.id));
+
+    const logs: string[] = [];
+    await service.indexRepository(repo, async (msg) => {
+      logs.push(msg);
+    });
+
+    expect(logs.some((l) => l.includes('re-embedded'))).toBe(true);
+    expect(logs.some((l) => l.includes('indexed knowledge/architecture.md'))).toBe(true);
+
+    const after = await docByPath('knowledge/architecture.md');
+    expect(after?.sha).toBe(before?.sha); // the source never moved
+    expect(after?.indexFingerprint).toContain('embed=hash/hash-ngram-v1/1024');
+    expect(await chunkCount(after!.id)).toBeGreaterThan(0);
+  });
+
   it('marks a citation whose anchor does not exist as dangling, not resolved', async () => {
     const links = await linkRows();
     const anchors = links.filter((l) => l.rawTarget === 'knowledge/architecture.md');
@@ -247,6 +271,28 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
 
     // The orphan is not reachable by any edge and must not be expanded to.
     expect(graph.some((c) => c.path === 'knowledge/orphan.md')).toBe(false);
+  });
+
+  it('reports truncation only when the corpus really had more to give', async () => {
+    // The notice has to mean something. Counting the fusion pool made it fire
+    // on every query — the dense arm has no relevance threshold, so it always
+    // returns a full pool — and an agent that sees "42 omitted" on every draft
+    // stops reading the line.
+    const generous = await service.retrieve(projectId, 'atomic claim ordering', 14);
+    expect(generous.chunks.length).toBeGreaterThan(0);
+    expect(generous.matchedCount).toBeLessThanOrEqual(generous.chunks.length);
+    expect(generous.truncatedCount).toBe(0);
+
+    // A query matching nothing lexically claims nothing was cut.
+    const nomatch = await service.retrieve(projectId, 'zzzqqq nonexistent vocabulary', 14);
+    expect(nomatch.matchedCount).toBe(0);
+    expect(nomatch.truncatedCount).toBe(0);
+
+    // And a genuinely narrow window does report the remainder.
+    const narrow = await service.retrieve(projectId, 'postgres', 1);
+    if (narrow.matchedCount > 1) {
+      expect(narrow.truncatedCount).toBe(narrow.matchedCount - 1);
+    }
   });
 
   it('does not expand through a hub that was not itself a seed', async () => {

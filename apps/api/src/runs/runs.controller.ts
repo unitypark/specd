@@ -96,20 +96,15 @@ export class RunsController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<Observable<{ data: string }>> {
     const project = await this.scope(slug, user);
-    const run = await this.runs.get(project.id, runId);
-    const history = await this.runs.logs(runId);
+    // Scope check only: the subscription replays the run's history itself, so
+    // fetching it here would both duplicate the read and reopen the gap where
+    // a line written between the fetch and the subscribe reached nobody.
+    await this.runs.get(project.id, runId);
 
     res.setHeader('X-Accel-Buffering', 'no');
 
     return new Observable<{ data: string }>((subscriber) => {
       const emit = (line: RunLogLine) => subscriber.next({ data: JSON.stringify(line) });
-      for (const line of history) emit(line);
-
-      if (run.status !== 'running' && run.status !== 'queued') {
-        subscriber.next({ data: JSON.stringify({ type: 'end', status: run.status }) });
-        subscriber.complete();
-        return;
-      }
 
       const unsubscribe = this.runs.subscribe(
         runId,

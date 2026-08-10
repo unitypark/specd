@@ -71,7 +71,7 @@ describe.skipIf(!reachable)('index queue (integration)', () => {
 
     // ProjectsService is only reached by assertCanRun, which this path never
     // calls — an index run is not a model call and costs no tokens.
-    runs = new RunsService(handle.db, config, {} as ProjectsService);
+    runs = new RunsService(handle.db, handle, config, {} as ProjectsService);
 
     const [project] = await handle.db
       .insert(projects)

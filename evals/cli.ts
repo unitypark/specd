@@ -59,3 +59,27 @@ if (score.worstFalseNegatives.length) {
 const out = join(process.cwd(), 'evals/results/symbols.json');
 writeFileSync(out, `${JSON.stringify({ target, ...score }, null, 2)}\n`);
 console.log(`\nwritten to ${out}\n`);
+
+// ─── retrieval ───────────────────────────────────────────────────────────────
+// Needs a database, so it is reported as skipped rather than failing when
+// there is none — an eval that cannot run should say so, not look like a zero.
+async function retrieval(): Promise<void> {
+  const { scoreRetrieval } = await import('./retrieval.eval.js');
+  const r = await scoreRetrieval();
+  console.log(`retrieval over ${r.questions} labelled questions`);
+  console.log(`recall      ${pct(r.recall)}   (answer doc returned at all)`);
+  console.log(`recall@3    ${pct(r.recallAt3)}`);
+  console.log(`mrr         ${r.mrr.toFixed(3)}`);
+  if (r.misses.length) {
+    console.log(`\nmissed:`);
+    for (const m of r.misses) console.log(`  · ${m}`);
+  }
+  writeFileSync(join(process.cwd(), 'evals/results/retrieval.json'), `${JSON.stringify(r, null, 2)}\n`);
+  console.log('');
+}
+
+if (at === -1) {
+  retrieval().catch((err: unknown) => {
+    console.log(`\nretrieval eval skipped: ${err instanceof Error ? err.message : String(err)}\n`);
+  });
+}

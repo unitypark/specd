@@ -111,6 +111,18 @@ interface PreparedDoc {
 /** Resolves a doc's heading anchors once per run, not once per link. */
 type AnchorLookup = (docId: string) => Promise<Set<string>>;
 
+/**
+ * Chunks one doc may contribute to a single RRF result.
+ *
+ * Without a cap, a long doc that matches well takes every slot: its sections
+ * are near-duplicates of each other for the query's purposes, and the ninth
+ * paragraph of the right doc is worth less to an agent than the first
+ * paragraph of the second-best one. The same pathology the benchmarked
+ * engine's seed selection guards against, one layer up
+ * (per knowledge/research/code-graph-rag-engine-analysis.md#7-the-clever-parts).
+ */
+const MAX_CHUNKS_PER_DOC = 2;
+
 /** Expansion adds at most this many chunks; RRF picks are never displaced. */
 const GRAPH_EXPANSION_BUDGET: number = 4;
 
@@ -649,16 +661,23 @@ export class KnowledgeService {
                COALESCE(1.0 / (${k} + d.rank), 0) + COALESCE(1.0 / (${k} + l.rank), 0) AS score
         FROM dense d
         FULL OUTER JOIN lexical l ON l.id = d.id
+      ),
+      ranked AS (
+        SELECT f.*,
+               row_number() OVER (PARTITION BY c.doc_id ORDER BY f.score DESC, c.id) AS per_doc
+        FROM fused f
+        JOIN knowledge_chunks c ON c.id = f.id
       )
       SELECT c.doc_id, r.name AS repo_name, kd.path, c.heading, c.text,
              f.vector_rank, f.text_rank, f.score,
              (SELECT count(*) FROM knowledge_chunks mc
                WHERE mc.project_id = ${projectId}
                  AND mc.tsv @@ plainto_tsquery('english', ${query}))::int AS matched_total
-      FROM fused f
+      FROM ranked f
       JOIN knowledge_chunks c ON c.id = f.id
       JOIN knowledge_docs kd ON kd.id = c.doc_id
       JOIN repositories r ON r.id = kd.repository_id
+      WHERE f.per_doc <= ${MAX_CHUNKS_PER_DOC}
       ORDER BY f.score DESC
       LIMIT ${limit}
     `;
@@ -789,13 +808,16 @@ export class KnowledgeService {
     }
     if (byNeighbor.size === 0) return [];
 
-    const ranked = [...byNeighbor.entries()]
-      .sort((a, b) => b[1].weight - a[1].weight || a[1].seedOrd - b[1].seedOrd)
-      .slice(0, GRAPH_EXPANSION_BUDGET)
-      .map(([docId]) => docId);
+    // Every neighbour that passed the hub gate is a candidate, and the query
+    // decides between them. Ranking on edge weight alone picked whichever
+    // neighbours the index page happened to list first: for "how do I run this
+    // locally", the README is the seed, its fifteen links all weigh the same,
+    // and the runbook that actually answers the question lost to alphabetical
+    // luck. An edge says two docs are related; only the query says which
+    // relation matters now.
+    const candidates = [...byNeighbor.keys()];
 
-    // Best chunk per neighbor doc for THIS query — same two arms, restricted
-    // to the neighbor docs, one row per doc.
+    // Best chunk per neighbour doc for THIS query, with how well it matched.
     const chunks = await this.handle.sql<
       {
         doc_id: string;
@@ -803,23 +825,36 @@ export class KnowledgeService {
         path: string;
         heading: string | null;
         text: string;
+        relevance: number;
       }[]
     >`
       SELECT DISTINCT ON (c.doc_id)
-             c.doc_id, r.name AS repo_name, kd.path, c.heading, c.text
+             c.doc_id, r.name AS repo_name, kd.path, c.heading, c.text,
+             (CASE WHEN c.tsv @@ plainto_tsquery('english', ${query})
+                   THEN ts_rank_cd(c.tsv, plainto_tsquery('english', ${query})) ELSE 0 END)
+               + greatest(0, 1 - (c.embedding <=> ${EmbeddingService.toSqlVector(queryVec)}::vector)) * 0.05
+               AS relevance
       FROM knowledge_chunks c
       JOIN knowledge_docs kd ON kd.id = c.doc_id
       JOIN repositories r ON r.id = kd.repository_id
-      WHERE c.doc_id = ANY(${ranked})
-      ORDER BY c.doc_id,
-               (CASE WHEN c.tsv @@ plainto_tsquery('english', ${query})
-                     THEN ts_rank_cd(c.tsv, plainto_tsquery('english', ${query})) ELSE 0 END) DESC,
-               (c.embedding <=> ${EmbeddingService.toSqlVector(queryVec)}::vector) ASC
+      WHERE c.doc_id = ANY(${candidates})
+      ORDER BY c.doc_id, relevance DESC
     `;
 
-    const order = new Map(ranked.map((id, i) => [id, i]));
-    return chunks
-      .sort((a, b) => (order.get(a.doc_id) ?? 99) - (order.get(b.doc_id) ?? 99))
+    const picked = chunks
+      .map((row) => ({
+        row,
+        // Edge weight still orders the tie: a citation from the seed beats a
+        // bare path mention when both neighbours answer the query equally.
+        rank:
+          (byNeighbor.get(row.doc_id)?.weight ?? 0.3) *
+          (Number(row.relevance) + 0.01),
+      }))
+      .sort((a, b) => b.rank - a.rank || (byNeighbor.get(a.row.doc_id)?.seedOrd ?? 0) - (byNeighbor.get(b.row.doc_id)?.seedOrd ?? 0))
+      .slice(0, GRAPH_EXPANSION_BUDGET);
+
+    return picked
+      .map((p) => p.row)
       .map((row) => ({
         docId: row.doc_id,
         repoName: row.repo_name,

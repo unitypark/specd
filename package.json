@@ -21,7 +21,7 @@
     "cli:build": "cd cli && go build -o ../bin/specd ./cmd/specd && echo \"built \u2192 ./bin/specd  (run 'pnpm cli:install' to put it on your PATH)\"",
     "cli:install": "cd cli && go install ./cmd/specd && node ../scripts/check-cli-path.mjs",
     "cli:test": "cd cli && go vet ./... && go test ./...",
-    "eval": "tsx evals/cli.ts"
+    "eval": "tsx --tsconfig evals/tsconfig.json evals/cli.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -47,6 +47,35 @@ wrong trade here. A symbol we *miss* whose container we did index reads as
 "this symbol was deleted", so a false negative manufactures a false finding,
 while a false positive only indexes a declaration nobody references.
 
+### Retrieval against a labelled set
+
+`retrieval.eval.ts`. Fifteen questions whose answer is a specific doc in this
+repository's knowledge base, scored on recall, recall@3 and MRR. It indexes
+into a scratch project, asks, and cleans up, so it needs a database and says
+so rather than reporting a zero when there is none.
+
+Fifteen is small, and the number should be read as a regression guard and a
+direction rather than a score worth quoting. Saying that matters here because
+the failure this is modelled on is the opposite: the benchmarked engine
+reports a 12-point lift on **six** graded questions, which is not a
+measurement.
+
+| | baseline | now |
+| --- | --- | --- |
+| recall | 93.3% | 93.3% |
+| recall@3 | 80.0% | 80.0% |
+| MRR | 0.750 | ~0.795 |
+
+The MRR figure moves by a few thousandths between runs: the scratch project is
+recreated each time, so ties break on different row ids. A change smaller than
+about 0.01 is noise, not a result.
+
+The one persistent miss is honest about the corpus rather than the engine:
+"how do I run the platform locally for the first time" returns
+`knowledge/README.md` where the label says `runbooks/local-dev.md`. That
+runbook is still a generated stub, and the README genuinely answers the
+question better. A fair benchmark occasionally tells you the corpus is wrong.
+
 ## What is not graded, and why that is stated rather than hidden
 
 - **Go and Python have no oracle.** They are extracted and ungraded. That is

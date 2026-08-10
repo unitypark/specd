@@ -26,6 +26,8 @@ import { KnowledgeService } from './knowledge/knowledge.service.js';
 import { BoardService } from './board/board.service.js';
 import { BoardController } from './board/board.controller.js';
 import { SpecsService } from './specs/specs.service.js';
+import { TrackerController } from './tracker/tracker.controller.js';
+import { TrackerService } from './tracker/tracker.service.js';
 
 import { RunsService } from './runs/runs.service.js';
 import { RunsController } from './runs/runs.controller.js';
@@ -62,6 +64,7 @@ import { RunnersController } from './runners/runners.controller.js';
     GitHubController,
     GitLabController,
     RunnersController,
+    TrackerController,
   ],
   providers: [
     Config,
@@ -78,6 +81,7 @@ import { RunnersController } from './runners/runners.controller.js';
     KnowledgeService,
     BoardService,
     SpecsService,
+    TrackerService,
     RunsService,
     AnthropicService,
     ClaudeCodeProvider,

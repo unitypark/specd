@@ -53,6 +53,10 @@ never rewritten as the analyzed system evolves.
 - [graphify engine analysis](research/graphify-engine-analysis.md) — what the
   knowledge-graph engine ([S-102](specs/S-102-knowledge-graph-link-aware-retrieval-and-health.md))
   learned from Graphify-Labs/graphify, and what it deliberately did not copy
+- [code-graph-rag engine analysis](research/code-graph-rag-engine-analysis.md) —
+  benchmarking read for the code-aware phase: validates the deterministic-index
+  and Postgres-only bets, and carries the cost evidence for scoping code
+  awareness to a symbol index rather than a call graph
 
 ## How this stays alive
 

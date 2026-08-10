@@ -17,7 +17,7 @@ import { DB_HANDLE } from '../db/db.module.js';
 import type { DbHandle } from '@specd/db';
 import { VcsService } from '../vcs/vcs.service.js';
 import { EmbeddingService } from './embeddings.js';
-import { chunkMarkdown, headingAnchor } from './chunker.js';
+import { CHUNKER_VERSION, chunkMarkdown, headingAnchor } from './chunker.js';
 import { extractLinks } from './link-extract.js';
 import {
   headingAnchorsOf,
@@ -101,6 +101,16 @@ export class KnowledgeService {
   ) {}
 
   /**
+   * What currently turns a doc into rows: the chunking rules and the embedder
+   * behind them. Stamped on every doc the indexer writes and compared on the
+   * next run, so changing either re-indexes docs whose source never moved —
+   * the case a content hash alone cannot see.
+   */
+  private indexFingerprint(): string {
+    return `chunk=${CHUNKER_VERSION};embed=${this.embeddings.fingerprint}`;
+  }
+
+  /**
    * Re-index one repo's knowledge/ directory from git. Called on merge and on
    * demand. Docs whose sha is unchanged are skipped, so the common case costs
    * a directory listing and nothing else.
@@ -134,22 +144,33 @@ export class KnowledgeService {
         path: knowledgeDocs.path,
         sha: knowledgeDocs.sha,
         linksVersion: knowledgeDocs.linksVersion,
+        indexFingerprint: knowledgeDocs.indexFingerprint,
       })
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.repositoryId, repo.id));
     const storedByPath = new Map(stored.map((doc) => [doc.path, doc]));
 
+    // What would build this doc's chunks today. A sha match only means the
+    // source is unchanged; it says nothing about whether the chunker and
+    // embedder that produced the stored rows are still the ones in use.
+    const fingerprint = this.indexFingerprint();
+
     const seen = new Set<string>();
     const changed: PreparedDoc[] = [];
     const relink: { docId: string; path: string; content: string }[] = [];
     let skipped = 0;
+    let restamped = 0;
 
     for (const file of files) {
       seen.add(file.path);
       const sha = createHash('sha256').update(file.content).digest('hex');
       const existing = storedByPath.get(file.path);
 
-      if (existing && existing.sha === sha) {
+      if (existing && existing.sha === sha && existing.indexFingerprint !== fingerprint) {
+        restamped += 1;
+      }
+
+      if (existing && existing.sha === sha && existing.indexFingerprint === fingerprint) {
         if (existing.linksVersion !== LINKS_VERSION) {
           // Content unchanged, extractor newer (or the doc predates the graph
           // entirely): refresh links only. No re-chunk, no re-embed.
@@ -191,6 +212,12 @@ export class KnowledgeService {
       }
     }
 
+    if (restamped > 0) {
+      await log(
+        `  ${restamped} unchanged doc(s) re-embedded: chunker/embedder is now ${fingerprint}`,
+      );
+    }
+
     // Docs that no longer exist in git — the index is derived data and must
     // never outlive its source.
     const removals = stored.filter((doc) => !seen.has(doc.path));
@@ -204,7 +231,7 @@ export class KnowledgeService {
       const touched = new Set<string>();
 
       for (const doc of changed) {
-        doc.docId = await upsertDoc(tx, repo, doc);
+        doc.docId = await upsertDoc(tx, repo, doc, fingerprint);
         touched.add(doc.docId);
       }
 
@@ -333,7 +360,7 @@ export class KnowledgeService {
     query: string,
     limit = 12,
   ): Promise<RetrievalResult> {
-    const queryVec = await this.embeddings.embedOne(query);
+    const queryVec = await this.embeddings.embedQuery(query);
     const k = 60; // RRF damping — standard, keeps any single rank-1 from dominating.
     const pool = Math.max(limit * 4, 40);
 
@@ -377,7 +404,9 @@ export class KnowledgeService {
       )
       SELECT c.doc_id, r.name AS repo_name, kd.path, c.heading, c.text,
              f.vector_rank, f.text_rank, f.score,
-             (SELECT count(*) FROM fused)::int AS matched_total
+             (SELECT count(*) FROM knowledge_chunks mc
+               WHERE mc.project_id = ${projectId}
+                 AND mc.tsv @@ plainto_tsquery('english', ${query}))::int AS matched_total
       FROM fused f
       JOIN knowledge_chunks c ON c.id = f.id
       JOIN knowledge_docs kd ON kd.id = c.doc_id
@@ -401,6 +430,17 @@ export class KnowledgeService {
             : 'fulltext',
     }));
 
+    // How much of the corpus actually matched, counted over the whole project
+    // rather than over the fusion pool.
+    //
+    // The lexical arm is the only one with a relevance *predicate*: `tsv @@
+    // query` either matches or it does not. The dense arm is a ranker — with
+    // no distance threshold it returns its top `pool` rows for any query at
+    // all, relevant or not. Counting the fused pool therefore reported
+    // "matched" ≈ pool on every single query, so the truncation notice fired
+    // on essentially every draft with a number that meant nothing. A notice
+    // that always fires is a notice the agent learns to skip, which is worse
+    // than no notice at all.
     const matchedCount = Number(rows[0]?.matched_total ?? 0);
 
     // Stage 2 (S-102): one hop across the doc graph. The RRF picks above are
@@ -782,7 +822,12 @@ export class KnowledgeService {
 }
 
 /** Insert or update one doc row. Transaction-scoped: no ambient handle. */
-async function upsertDoc(tx: DbContext, repo: Repository, doc: PreparedDoc): Promise<string> {
+async function upsertDoc(
+  tx: DbContext,
+  repo: Repository,
+  doc: PreparedDoc,
+  fingerprint: string,
+): Promise<string> {
   const values = {
     projectId: repo.projectId,
     repositoryId: repo.id,
@@ -796,6 +841,7 @@ async function upsertDoc(tx: DbContext, repo: Repository, doc: PreparedDoc): Pro
     hasUnverified: doc.hasUnverified,
     isStub: doc.isStub,
     linksVersion: LINKS_VERSION,
+    indexFingerprint: fingerprint,
   };
 
   if (doc.existingId) {

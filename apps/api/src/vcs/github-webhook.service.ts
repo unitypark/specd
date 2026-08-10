@@ -393,7 +393,7 @@ export class GitHubWebhookService {
 
   /** Station 06. Failures are logged on the delivery, never thrown at GitHub. */
   private async reindex(repo: Repository, why: string, actorLogin: string | null): Promise<void> {
-    await this.pipeline.reindex({
+    await this.pipeline.enqueueReindex({
       projectId: repo.projectId,
       repositoryIds: [repo.id],
       // A merge has no specd user behind it — attributing it to one would be a
@@ -402,7 +402,7 @@ export class GitHubWebhookService {
       triggeredByName: actorLogin ? `github webhook (merged by ${actorLogin})` : 'github webhook',
     });
     this.logger.log(
-      `re-indexed ${repo.name}: ${why}${actorLogin ? ` (merged by ${actorLogin})` : ''}`,
+      `queued re-index of ${repo.name}: ${why}${actorLogin ? ` (merged by ${actorLogin})` : ''}`,
     );
   }
 

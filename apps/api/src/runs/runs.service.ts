@@ -101,6 +101,101 @@ export class RunsService {
   }
 
   /**
+   * Create a run that is waiting to be picked up rather than already running
+   * (0012). Unlike `queueForRunner` this is the run's *first* state: nothing
+   * has happened yet, and `startedAt` stays null until something claims it.
+   */
+  async enqueue(input: {
+    projectId: string;
+    kind: AgentRunKind;
+    triggeredByUserId?: string | null;
+    triggeredByName?: string | null;
+    repositoryId?: string | null;
+    jobPayload?: Record<string, unknown> | null;
+  }): Promise<string> {
+    const [row] = await this.db
+      .insert(agentRuns)
+      .values({
+        projectId: input.projectId,
+        kind: input.kind,
+        runner: 'hosted',
+        status: 'queued',
+        triggeredByUserId: input.triggeredByUserId ?? null,
+        triggeredByName: input.triggeredByName ?? null,
+        repositoryId: input.repositoryId ?? null,
+        jobPayload: input.jobPayload ?? null,
+      })
+      .returning({ id: agentRuns.id });
+
+    if (!row) throw new Error('failed to enqueue agent run');
+    return row.id;
+  }
+
+  /**
+   * A queued index run for this project, if one is already waiting (0012).
+   * Only `queued` counts: a run already executing has passed the point where
+   * a new request could be folded into it.
+   */
+  async pendingIndexRun(projectId: string): Promise<{ id: string; repositoryIds: string[] } | null> {
+    const [row] = await this.db
+      .select({ id: agentRuns.id, jobPayload: agentRuns.jobPayload })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.projectId, projectId),
+          eq(agentRuns.kind, 'index'),
+          eq(agentRuns.status, 'queued'),
+        ),
+      )
+      .orderBy(agentRuns.createdAt)
+      .limit(1);
+
+    if (!row) return null;
+    const payload = row.jobPayload as { repositoryIds?: string[] } | null;
+    return { id: row.id, repositoryIds: payload?.repositoryIds ?? [] };
+  }
+
+  /**
+   * Widen a queued index run to also cover `repositoryIds`. An empty list
+   * means "every repository in the project", so it absorbs any narrower scope
+   * rather than being narrowed by it.
+   */
+  async widenIndexScope(runId: string, repositoryIds: string[]): Promise<void> {
+    const [row] = await this.db
+      .select({ jobPayload: agentRuns.jobPayload })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+
+    const current = (row?.jobPayload as { repositoryIds?: string[] } | null)?.repositoryIds ?? [];
+    const widened =
+      current.length === 0 || repositoryIds.length === 0
+        ? []
+        : [...new Set([...current, ...repositoryIds])];
+
+    await this.db
+      .update(agentRuns)
+      .set({ jobPayload: { repositoryIds: widened } })
+      .where(eq(agentRuns.id, runId));
+  }
+
+  /**
+   * A `RunHandle` for a run that already exists — the counterpart to `logRun`
+   * and `meterRun` for a caller that wants the same interface `start()` gives.
+   * Sequence numbers come from the table rather than a closure, because the
+   * process that created the run is not the one holding this handle.
+   */
+  handleFor(runId: string): RunHandle {
+    return {
+      id: runId,
+      log: (message: string, level: 'info' | 'warn' | 'error' = 'info') =>
+        this.logRun(runId, message, level),
+      meter: (model: ModelId, usage: TokenUsage, billable = true) =>
+        this.meterRun(runId, model, usage, billable),
+    };
+  }
+
+  /**
    * Move an already-created run into the queue for a self-hosted runner to
    * claim, carrying everything the runner needs to execute it and everything
    * this service needs to finish it once a result comes back. Used instead of

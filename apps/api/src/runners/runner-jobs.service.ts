@@ -15,6 +15,13 @@ import {
 import { SpecsService } from '../specs/specs.service.js';
 import { Config } from '../config.js';
 
+/**
+ * Run kinds a paired runner can execute and this service can finish. The
+ * runner daemon keeps its own copy of this list; both must agree, and
+ * `report()` throwing for anything else is the backstop if they ever do not.
+ */
+export const DISPATCHABLE_JOB_KINDS = ['spec', 'onboard', 'build'] as const;
+
 /** What a runner receives when it claims a `spec` job — everything `SpecAgent.prepare()` produced. */
 export interface SpecJobPayload {
   kind: 'spec';
@@ -201,6 +208,11 @@ export class RunnerJobsService {
         LEFT JOIN runners r ON r.id = ar.runner_id
         WHERE ar.project_id = ${runner.projectId}
           AND ar.job_payload IS NOT NULL
+          -- Only kinds this service can actually finish. Keying on the payload
+          -- alone was enough while nothing else carried one, but index runs now
+          -- do (0012) and a runner claiming one would strand it: report() has
+          -- no finisher for the kind and would throw.
+          AND ar.kind = ANY(${[...DISPATCHABLE_JOB_KINDS]})
           AND (
             (ar.status = 'queued' AND ar.runner_id IS NULL)
             OR (

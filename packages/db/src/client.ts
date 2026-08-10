@@ -23,7 +23,25 @@ export interface DbContext {
   sql: postgres.ISql;
 }
 
+/** Stops a subscription opened with {@link DbHandle.listen}. */
+export type Unlisten = () => Promise<void>;
+
 export interface DbHandle extends DbContext {
+  /**
+   * Subscribe to a Postgres NOTIFY channel. Uses its own connection (a
+   * listening one cannot run queries) and re-subscribes automatically after a
+   * reconnect, calling `onListen` each time it does.
+   *
+   * Delivery is best-effort by design: nothing is queued for a listener that
+   * is disconnected. Treat a notification as "look now", never as the fact
+   * itself — the durable row is the fact.
+   */
+  listen: (channel: string, onNotify: (payload: string) => void, onListen?: () => void) => Promise<Unlisten>;
+  /**
+   * Fire a NOTIFY. Inside a transaction Postgres holds it until commit, so a
+   * listener can never be woken for work that then rolls back.
+   */
+  notify: (channel: string, payload?: string) => Promise<void>;
   /**
    * Run `fn` inside one transaction. The context handed to it is bound to the
    * transaction's connection; using the outer handle inside `fn` would open a
@@ -60,6 +78,13 @@ export function createDb(connectionString: string, opts: { max?: number } = {}):
         // `tx.sql.savepoint` if that is ever needed.
         return fn({ db: drizzle(client, { schema }), sql: txSql });
       }) as Promise<T>,
+    listen: async (channel, onNotify, onListen) => {
+      const sub = await sql.listen(channel, onNotify, onListen);
+      return () => sub.unlisten();
+    },
+    notify: async (channel, payload = '') => {
+      await sql.notify(channel, payload);
+    },
     close: () => sql.end({ timeout: 5 }),
   };
 }

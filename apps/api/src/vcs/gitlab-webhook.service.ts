@@ -345,14 +345,14 @@ export class GitLabWebhookService {
 
   /** Station 06. Failures are logged on the delivery, never thrown at GitLab. */
   private async reindex(repo: Repository, why: string, actorUsername: string | null): Promise<void> {
-    await this.pipeline.reindex({
+    await this.pipeline.enqueueReindex({
       projectId: repo.projectId,
       repositoryIds: [repo.id],
       actor: null,
       triggeredByName: actorUsername ? `gitlab webhook (merged by ${actorUsername})` : 'gitlab webhook',
     });
     this.logger.log(
-      `re-indexed ${repo.name}: ${why}${actorUsername ? ` (merged by ${actorUsername})` : ''}`,
+      `queued re-index of ${repo.name}: ${why}${actorUsername ? ` (merged by ${actorUsername})` : ''}`,
     );
   }
 

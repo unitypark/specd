@@ -24,6 +24,7 @@ import type {
 import { OnboardingAgent } from './onboarding.agent.js';
 import { SpecAgent } from './spec.agent.js';
 import { BuildAgent } from './build.agent.js';
+import { IndexQueueService } from './index-queue.service.js';
 
 /**
  * Orchestration. Each public method here is one station of the fixed pipeline
@@ -54,6 +55,7 @@ export class PipelineService {
     private readonly onboarding: OnboardingAgent,
     private readonly specAgent: SpecAgent,
     private readonly build: BuildAgent,
+    private readonly indexQueue: IndexQueueService,
   ) {}
 
   /** Station 02 — Ground. Opens one setup PR (or branch) per repository. */
@@ -451,8 +453,16 @@ export class PipelineService {
     }
   }
 
-  /** Station 06 — Learn. Re-index knowledge/ after a merge. */
-  async reindex(input: {
+  /**
+   * Station 06 — Learn. Queue a re-index of knowledge/ and return (0012).
+   *
+   * The caller is usually a webhook handler with a ten-second budget from
+   * GitHub, so nothing here does any indexing: it writes one queued row and
+   * nudges the worker. Bursts fold together — three merges in a minute should
+   * cost one index, not three — so an existing queued run for this project is
+   * reused, widened to cover both requests' repositories.
+   */
+  async enqueueReindex(input: {
     projectId: string;
     repositoryIds?: string[];
     actor: { userId: string; name: string } | null;
@@ -462,19 +472,49 @@ export class PipelineService {
      * trigger is not a person, and the run log should not imply one.
      */
     triggeredByName?: string;
+  }): Promise<{ runId: string; status: 'queued'; coalescedInto?: string }> {
+    const requested = input.repositoryIds ?? [];
+
+    const existing = await this.runs.pendingIndexRun(input.projectId);
+    if (existing) {
+      await this.runs.widenIndexScope(existing.id, requested);
+      await this.runs.logRun(
+        existing.id,
+        `another re-index was requested${input.triggeredByName ? ` by ${input.triggeredByName}` : ''} ` +
+          `before this one started — folded into this run`,
+      );
+      await this.indexQueue.wake();
+      return { runId: existing.id, status: 'queued', coalescedInto: existing.id };
+    }
+
+    const runId = await this.runs.enqueue({
+      projectId: input.projectId,
+      kind: 'index',
+      triggeredByUserId: input.actor?.userId ?? null,
+      triggeredByName: input.actor?.name ?? input.triggeredByName ?? 'scheduler',
+      repositoryId: requested.length === 1 ? requested[0]! : null,
+      jobPayload: { repositoryIds: requested },
+    });
+    await this.runs.logRun(runId, 'queued — waiting for the indexer');
+    await this.indexQueue.wake();
+    return { runId, status: 'queued' };
+  }
+
+  /**
+   * Execute a queued index run. Called by the worker that claimed it, never
+   * from a request path.
+   */
+  async runReindex(input: {
+    runId: string;
+    projectId: string;
+    repositoryIds?: string[];
   }) {
+    const run = this.runs.handleFor(input.runId);
     const repos = input.repositoryIds?.length
       ? await Promise.all(
           input.repositoryIds.map((id) => this.repositories.get(input.projectId, id)),
         )
       : await this.repositories.list(input.projectId);
-
-    const run = await this.runs.start({
-      projectId: input.projectId,
-      kind: 'index',
-      triggeredByUserId: input.actor?.userId ?? null,
-      triggeredByName: input.actor?.name ?? input.triggeredByName ?? 'scheduler',
-    });
 
     let indexed = 0;
     let skipped = 0;

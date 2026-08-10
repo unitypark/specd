@@ -47,6 +47,25 @@ async function call<T = unknown>(
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
+/**
+ * Wait for a queued run to reach a terminal state and hand back its result.
+ * Polling is right here and nowhere else: this is an external script, not the
+ * server, and it has no listen connection to be woken on.
+ */
+async function awaitRun<T>(slug: string, runId: string, timeoutMs = 120_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const run = await call<{ status: string; result: T; error?: string | null }>(
+      'GET',
+      `/projects/${slug}/runs/${runId}`,
+    );
+    if (run.status === 'succeeded') return run.result;
+    if (run.status === 'failed') throw new Error(`run ${runId} failed: ${run.error ?? 'no reason given'}`);
+    if (Date.now() > deadline) throw new Error(`run ${runId} still ${run.status} after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 function step(label: string): void {
   passed += 1;
   console.log(`  [32m✓[0m ${label}`);
@@ -165,11 +184,10 @@ async function main(): Promise<void> {
 
   await call('POST', `/projects/${slug}/repositories/${repo.id}/setup-merged`);
 
-  const reindexed = await call<{ indexed: number; health: number }>(
-    'POST',
-    `/projects/${slug}/reindex`,
-    {},
-  );
+  // Re-indexing is queued now (0012), so the script waits for the run the way
+  // any other client would rather than expecting counts from the POST.
+  const queued = await call<{ runId: string }>('POST', `/projects/${slug}/reindex`, {});
+  const reindexed = await awaitRun<{ indexed: number; health: number }>(slug, queued.runId);
   step(`indexed ${reindexed.indexed} knowledge docs · health ${Math.round(reindexed.health)}%`);
 
   const knowledge = await call<{

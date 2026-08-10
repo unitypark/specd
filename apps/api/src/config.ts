@@ -52,6 +52,19 @@ export class Config {
   /** Reclaims allowed before the run is failed as repeatedly abandoned. */
   readonly runnerMaxReclaims = num('SPECD_RUNNER_MAX_RECLAIMS', 3);
 
+  // ─── Index worker (0012) ───────────────────────────────────────────────────
+  // Indexing left the webhook request path: a merge queues a run and a worker
+  // in this process executes it, woken by Postgres LISTEN/NOTIFY.
+  /** Off for a process that should serve requests but execute no index runs. */
+  readonly indexWorkerEnabled = (process.env.SPECD_INDEX_WORKER_ENABLED ?? 'true') !== 'false';
+  /**
+   * Backstop only. NOTIFY is the primary wake-up; this covers a dropped listen
+   * connection, so it is deliberately far slower than the runner's poll.
+   */
+  readonly indexPollMs = num('SPECD_INDEX_POLL_MS', 60_000);
+  /** An index run still 'running' after this is treated as abandoned. */
+  readonly indexLeaseSeconds = num('SPECD_INDEX_LEASE_SECONDS', 900);
+
   // ─── GitHub App (§11) ──────────────────────────────────────────────────────
   // Absent by default: the whole product works in local mode without an App,
   // and every code path that needs one says so by name rather than failing

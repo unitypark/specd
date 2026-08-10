@@ -59,6 +59,28 @@ export function citationRef(chunk: RetrievedChunk): string {
   return chunk.heading ? `${chunk.path}#${chunk.heading}` : chunk.path;
 }
 
+/**
+ * What the corpus could and could not be asked, captured when retrieval ran.
+ *
+ * Citation checking without this can only say "was it retrieved", which makes
+ * every gap in coverage look like a fabrication. With it, a claim pointing at
+ * a doc that exists but never reached the prompt is reported as unchecked
+ * rather than as wrong — and the reason is specific enough to act on.
+ */
+export interface CitationCoverage {
+  /** Every knowledge doc path in the project when retrieval ran. */
+  knownPaths: string[];
+  /**
+   * Heading anchors of the docs that were retrieved. Tells a fabricated
+   * `#section` apart from a real one that simply was not among the chunks.
+   */
+  anchorsByPath: Record<string, string[]>;
+  /** Docs holding no indexed chunk — retrieval can never surface these. */
+  unretrievablePaths: string[];
+  /** Matching chunks left out for budget. */
+  truncatedCount: number;
+}
+
 export interface SpecDraftResult {
   content: SpecContent;
   model: ModelId;

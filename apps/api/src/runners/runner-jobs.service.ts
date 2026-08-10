@@ -2,7 +2,14 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { eq } from 'drizzle-orm';
 import { agentRuns, type DbHandle, type Repository, type Runner } from '@specd/db';
 import type { DetectedStack } from '@specd/templates';
-import type { ModelId, RetrievedChunk, SpecContent, SpecView, TokenUsage } from '@specd/shared';
+import type {
+  CitationCoverage,
+  ModelId,
+  RetrievedChunk,
+  SpecContent,
+  SpecView,
+  TokenUsage,
+} from '@specd/shared';
 import { DB_HANDLE } from '../db/db.module.js';
 import { RunsService } from '../runs/runs.service.js';
 import { SpecAgent } from '../agents/spec.agent.js';
@@ -35,6 +42,8 @@ export interface SpecJobPayload {
   // runner itself never needs to understand any of this, only echo the
   // model's reply back.
   chunks: RetrievedChunk[];
+  /** Captured with the retrieval, so a verdict reflects what the model saw. */
+  coverage?: CitationCoverage;
   slug: string;
   ticketKey: string;
   ticketId: string;
@@ -335,6 +344,7 @@ export class RunnerJobsService {
         ticketKey: payload.ticketKey,
         slug: payload.slug,
         primaryRepo: payload.primaryRepo,
+        coverage: payload.coverage,
       });
 
       const spec = await this.specs.createVersion({

@@ -11,7 +11,12 @@ import {
   type DbContext,
   type Repository,
 } from '@specd/db';
-import type { KnowledgeDocKind, RetrievalResult, RetrievedChunk } from '@specd/shared';
+import type {
+  CitationCoverage,
+  KnowledgeDocKind,
+  RetrievalResult,
+  RetrievedChunk,
+} from '@specd/shared';
 import { DB } from '../db/db.module.js';
 import { DB_HANDLE } from '../db/db.module.js';
 import type { DbHandle } from '@specd/db';
@@ -574,6 +579,41 @@ export class KnowledgeService {
         via: 'graph' as const,
         viaEdge: byNeighbor.get(row.doc_id)?.edgeLabel,
       }));
+  }
+
+  /**
+   * What the corpus could have answered, alongside what it did (S-102 T-verdict).
+   *
+   * Citation checking that only knows the retrieved set can say "not
+   * retrieved" but not "not real", so every gap in coverage reads as a
+   * fabrication. These two queries are what let the two be told apart.
+   */
+  async coverageFor(projectId: string, retrievedPaths: string[]): Promise<CitationCoverage> {
+    const docs = await this.handle.sql<{ path: string; has_chunks: boolean }[]>`
+      SELECT kd.path,
+             EXISTS (SELECT 1 FROM knowledge_chunks c WHERE c.doc_id = kd.id) AS has_chunks
+      FROM knowledge_docs kd
+      WHERE kd.project_id = ${projectId}
+    `;
+
+    const anchorsByPath: Record<string, string[]> = {};
+    const wanted = [...new Set(retrievedPaths)];
+    if (wanted.length > 0) {
+      const bodies = await this.handle.sql<{ path: string; content: string }[]>`
+        SELECT path, content FROM knowledge_docs
+        WHERE project_id = ${projectId} AND path = ANY(${wanted})
+      `;
+      for (const doc of bodies) {
+        anchorsByPath[doc.path] = [...headingAnchorsOf(doc.content)];
+      }
+    }
+
+    return {
+      knownPaths: docs.map((d) => d.path),
+      anchorsByPath,
+      unretrievablePaths: docs.filter((d) => !d.has_chunks).map((d) => d.path),
+      truncatedCount: 0,
+    };
   }
 
   async listDocs(projectId: string, repositoryId?: string) {

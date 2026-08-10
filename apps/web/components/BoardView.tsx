@@ -28,7 +28,7 @@ interface Column {
 
 interface SpecContent {
   requirements: { story: string; criteria: { keyword: string; trigger: string; response: string }[] }[];
-  design: { text: string; citation?: string; unverified?: string }[];
+  design: { text: string; citation?: string; unverified?: string; verdict?: string }[];
   tasks: { id: string; title: string; size: string; repo?: string; asBuilt?: boolean }[];
   outOfScope?: string[];
   openQuestions?: string[];
@@ -423,11 +423,21 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                               <div key={i} className={styles.claimblock}>
                                 <p className={styles.claim}>
                                   {claim.text}{' '}
+                                  {/* A claim carrying both is an `unknown`: the
+                                      citation is real but was not confirmed
+                                      against what was retrieved, so a tick
+                                      beside it would be the exact lie the
+                                      verdict exists to prevent. */}
                                   {claim.citation && (
-                                    <span className={styles.cite}>{claim.citation} ✓</span>
+                                    <span className={styles.cite}>
+                                      {claim.citation} {claim.unverified ? '?' : '✓'}
+                                    </span>
                                   )}
                                   {claim.unverified && (
-                                    <span className={styles.unv}>⚠ UNVERIFIED — {claim.unverified}</span>
+                                    <span className={styles.unv}>
+                                      ⚠ {claim.citation ? 'UNCONFIRMED' : 'UNVERIFIED'} —{' '}
+                                      {claim.unverified}
+                                    </span>
                                   )}
                                 </p>
 

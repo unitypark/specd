@@ -47,7 +47,8 @@ Workspace packages are scoped `@specd/*` (`@specd/api`, `@specd/web`, `@specd/db
 These apply to generated content and to knowledge docs in this repo:
 
 - Every design claim is either **cited** or flagged `UNVERIFIED`. A citation that cannot be followed is treated as worse than none.
-- Citations are validated against what was actually retrieved; invented paths get demoted to `UNVERIFIED`.
+- Citations are checked against what was actually retrieved, and the result is one of three verdicts, not two. `supported` matched a retrieved chunk. `unsupported` was checked and is wrong — no such doc, or no such section in it. `unknown` could not be checked: the doc is real but never reached the prompt, or holds no indexed content, or the material was cut for budget. An `unknown` keeps its citation *and* carries the caveat, because "I found no evidence" and "no evidence exists" are different answers and only one of them is safe to write into a spec.
+- Only `supported` claims count toward the grounding metric. Letting a coverage gap inflate it is the metric lying about the thing it exists to measure.
 - Skipped work is **labelled as skipped**, never silently passed (the headless `loop` does this for model-dependent steps).
 - Money is integer EUR cents — no floats for spend.
 

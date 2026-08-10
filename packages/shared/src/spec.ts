@@ -24,14 +24,36 @@ export interface SpecRequirement {
 }
 
 /**
+ * How a claim's citation stood up to checking.
+ *
+ * The distinction that matters is between the last two. "I checked and the
+ * evidence is not there" and "I could not check" are different answers, and
+ * collapsing them into one marker makes a coverage gap read as a refutation —
+ * or worse, an absence read as a pass.
+ */
+export type CitationVerdict =
+  /** The cited chunk was in the retrieved set. */
+  | 'supported'
+  /** Checked and wrong: no such doc, or no such section in it. */
+  | 'unsupported'
+  /** Not checkable from what was retrieved — the doc is real, we just did not see that part of it. */
+  | 'unknown';
+
+/**
  * A design claim carries its ground. `citation` points at a knowledge doc the
  * agent actually retrieved; when it couldn't ground the claim it must say so
  * rather than sound confident — the UNVERIFIED marker is load-bearing (§6).
+ *
+ * An `unknown` claim keeps its citation *and* carries `unverified`: the
+ * pointer is probably useful to a reviewer, and the caveat is why they still
+ * have to look.
  */
 export interface DesignClaim {
   text: string;
   citation?: string;
   unverified?: string;
+  /** Absent on specs drafted before verdicts existed. */
+  verdict?: CitationVerdict;
 }
 
 export interface SpecTask {
@@ -63,8 +85,14 @@ export interface SpecVersionSummary {
   createdAt: string;
 }
 
+/**
+ * Citations that actually held up. A claim carrying both a citation and an
+ * UNVERIFIED note is an `unknown` — counting it here would let a coverage gap
+ * inflate the grounding metric, which is the opposite of what the metric is
+ * for. Legacy claims have a citation and no note, so they still count.
+ */
 export function countCitations(content: SpecContent): number {
-  return content.design.filter((c) => c.citation).length;
+  return content.design.filter((c) => c.citation && !c.unverified).length;
 }
 
 export function countUnverified(content: SpecContent): number {
@@ -168,10 +196,15 @@ export function renderSpecMarkdown(input: {
   lines.push('## Design');
   lines.push('');
   for (const claim of content.design) {
-    const suffix = claim.citation
-      ? ` _(per ${claim.citation})_`
-      : claim.unverified
-        ? ` _(**UNVERIFIED** — ${claim.unverified})_`
+    // A claim with both is an `unknown`: the pointer is worth showing, but not
+    // as though it had been confirmed. Rendering the citation alone there
+    // would hide the exact caveat the verdict exists to surface.
+    const suffix = claim.unverified
+      ? claim.citation
+        ? ` _(cites ${claim.citation} — **UNCONFIRMED**: ${claim.unverified})_`
+        : ` _(**UNVERIFIED** — ${claim.unverified})_`
+      : claim.citation
+        ? ` _(per ${claim.citation})_`
         : '';
     lines.push(`- ${claim.text}${suffix}`);
   }

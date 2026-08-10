@@ -580,11 +580,21 @@ function buildUserPrompt(input: {
   const knowledge = input.chunks.length
     ? truncationNotice +
       input.chunks
-        .map(
-          (chunk, i) =>
-            `[${i + 1}] CITE-AS: ${citationRef(chunk)}   (repo: ${chunk.repoName})` +
-            `${chunk.via === 'graph' ? `   (via ${chunk.viaEdge ?? 'doc link'})` : ''}\n${chunk.text.slice(0, 2_200)}`,
-        )
+        .map((chunk, i) => {
+          const provenance =
+            chunk.via === 'graph'
+              ? `   (via ${chunk.viaEdge ?? 'doc link'})`
+              : chunk.via === 'code'
+                ? `   (source code, via ${chunk.viaEdge ?? 'doc reference'})`
+                : '';
+          // Code is fenced so the model reads it as code, not as prose to
+          // paraphrase — and its CITE-AS is citable exactly like a doc's.
+          const body =
+            chunk.via === 'code'
+              ? `\`\`\`\n${chunk.text.slice(0, 2_200)}\n\`\`\``
+              : chunk.text.slice(0, 2_200);
+          return `[${i + 1}] CITE-AS: ${citationRef(chunk)}   (repo: ${chunk.repoName})${provenance}\n${body}`;
+        })
         .join('\n\n---\n\n')
     : '(The knowledge base is empty or nothing matched. Every design claim must be UNVERIFIED.)';
 

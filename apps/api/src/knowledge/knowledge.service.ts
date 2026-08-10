@@ -136,6 +136,22 @@ const GRAPH_EXPANSION_BUDGET: number = 4;
 const GRAPH_SCORE_DISCOUNT = 0.5;
 
 /**
+ * Code snippets appended to a retrieval, at most. Separate from the doc
+ * budget and smaller: a snippet is raw source the model must read whole,
+ * where a doc chunk is prose it can skim — and on a hosted repository each
+ * snippet is an HTTP read at retrieval time.
+ */
+const CODE_EXPANSION_BUDGET: number = 2;
+
+/**
+ * Lines served per snippet. A symbol's recorded span is its declaration line
+ * (the extractor stores no end), so the snippet is a bounded window from
+ * there — enough to read a function, not enough to smuggle a whole file into
+ * the prompt.
+ */
+const CODE_SNIPPET_LINES = 40;
+
+/**
  * Docs with more resolved edges than this are hubs (READMEs, indexes).
  * Expansion never travels THROUGH a hub that was not itself a seed — the
  * "everything is one hop from the index page" blowup. A hub that IS a seed
@@ -729,8 +745,12 @@ export class KnowledgeService {
     // returned first, in their exact order — expansion only ever appends.
     const expansion = await this.expandViaGraph(projectId, query, queryVec, rrfChunks);
 
+    // Stage 3 (0014): the code the seed docs reference. Same append-only
+    // contract; a failure to read a file costs the enrichment, never the run.
+    const codeExpansion = await this.expandViaCode(projectId, rrfChunks);
+
     return {
-      chunks: [...rrfChunks, ...expansion],
+      chunks: [...rrfChunks, ...expansion, ...codeExpansion],
       matchedCount,
       truncatedCount: Math.max(0, matchedCount - rrfChunks.length),
     };
@@ -1099,6 +1119,141 @@ export class KnowledgeService {
       truncatedCount: 0,
       staleSections,
     };
+  }
+
+
+  /**
+   * Serve the code the seed docs point at (0014's last promise).
+   *
+   * A doc citing `RunnerJobsService.claim()` gives specd a resolved edge to a
+   * code node with a path and a line — everything needed to show the SpecAgent
+   * the function itself, and until now nothing did. The snippet is read from
+   * the repository at retrieval time rather than stored, because git is the
+   * source of truth and Postgres holds only the index; the cost is at most
+   * CODE_EXPANSION_BUDGET reads per retrieval, which on a hosted repo is that
+   * many HTTP GETs.
+   *
+   * The snippet is current HEAD. When the doc's frozen sha disagrees with the
+   * file's — the stale case #50 flags on the citation — the label says so, and
+   * serving the *current* code is the point: the model grounds against what
+   * exists, while the verdict tells the reviewer the doc has not caught up.
+   */
+  private async expandViaCode(
+    projectId: string,
+    seeds: RetrievedChunk[],
+  ): Promise<RetrievedChunk[]> {
+    if (seeds.length === 0 || CODE_EXPANSION_BUDGET === 0) return [];
+
+    const seedDocIds = [...new Set(seeds.map((c) => c.docId))];
+    const seedRank = new Map(seedDocIds.map((id, i) => [id, i]));
+    const seedScore = new Map(seeds.map((c) => [c.docId, c.score]));
+
+    const edges = await this.handle.sql<
+      {
+        edge_id: string;
+        kind: string;
+        site: string | null;
+        source_doc_id: string;
+        source_path: string;
+        target_blob_sha: string | null;
+        node_id: string;
+        node_kind: string;
+        code_path: string;
+        qualified_name: string;
+        start_line: number | null;
+        blob_sha: string | null;
+        repository_id: string;
+        repo_name: string;
+      }[]
+    >`
+      SELECT l.id AS edge_id, l.kind, l.site, l.source_doc_id, l.target_blob_sha,
+             skd.path AS source_path,
+             cn.id AS node_id, cn.kind AS node_kind, cn.path AS code_path,
+             cn.qualified_name, cn.start_line, cn.blob_sha, cn.repository_id,
+             r.name AS repo_name
+      FROM knowledge_doc_links l
+      JOIN knowledge_docs skd ON skd.id = l.source_doc_id
+      JOIN code_nodes cn ON cn.id = l.resolved_code_id
+      JOIN repositories r ON r.id = cn.repository_id
+      WHERE l.project_id = ${projectId}
+        AND l.source_doc_id = ANY(${seedDocIds})
+        AND l.resolution_state = 'resolved'
+        AND l.resolved_code_id IS NOT NULL
+    `;
+    if (edges.length === 0) return [];
+
+    // Best edge per code node; a symbolref outranks a bare path mention
+    // (graph-schema weights), and the seed's own rank breaks ties — the same
+    // rules doc expansion uses, so the two stages stay explainable together.
+    const byNode = new Map<string, (typeof edges)[number] & { weight: number; seedOrd: number }>();
+    for (const edge of edges) {
+      const weight = EDGE_WEIGHT[edge.kind as LinkKind] ?? 0.3;
+      const seedOrd = seedRank.get(edge.source_doc_id) ?? seedDocIds.length;
+      const current = byNode.get(edge.node_id);
+      if (!current || weight > current.weight || (weight === current.weight && seedOrd < current.seedOrd)) {
+        byNode.set(edge.node_id, { ...edge, weight, seedOrd });
+      }
+    }
+
+    const picked = [...byNode.values()]
+      .sort((a, b) => b.weight - a.weight || a.seedOrd - b.seedOrd)
+      .slice(0, CODE_EXPANSION_BUDGET);
+    if (picked.length === 0) return [];
+
+    // One read per repository, batched paths. A repo we cannot read right now
+    // costs its snippets and nothing else — this is enrichment, and the
+    // citation verdicts already carry the correctness story.
+    const contentByPath = new Map<string, string>();
+    const byRepo = new Map<string, typeof picked>();
+    for (const hit of picked) {
+      byRepo.set(hit.repository_id, [...(byRepo.get(hit.repository_id) ?? []), hit]);
+    }
+    for (const [repositoryId, hits] of byRepo) {
+      try {
+        const [repo] = await this.db
+          .select()
+          .from(repositories)
+          .where(eq(repositories.id, repositoryId))
+          .limit(1);
+        if (!repo) continue;
+        const adapter = await this.vcs.adapterFor(repo);
+        const files = await adapter.readFiles(
+          this.vcs.toTarget(repo),
+          [...new Set(hits.map((h) => h.code_path))],
+        );
+        for (const file of files) contentByPath.set(`${repositoryId}:${file.path}`, file.content);
+      } catch {
+        // Skip this repo's snippets; the rest still serve.
+      }
+    }
+
+    const chunks: RetrievedChunk[] = [];
+    for (const hit of picked) {
+      const content = contentByPath.get(`${hit.repository_id}:${hit.code_path}`);
+      if (content === undefined) continue;
+
+      const lines = content.split('\n');
+      const from = hit.node_kind === 'file' ? 0 : Math.max(0, (hit.start_line ?? 1) - 1);
+      const text = lines.slice(from, from + CODE_SNIPPET_LINES).join('\n').slice(0, 2_000);
+      if (!text.trim()) continue;
+
+      const stale =
+        hit.target_blob_sha !== null && hit.blob_sha !== null && hit.target_blob_sha !== hit.blob_sha;
+      chunks.push({
+        docId: hit.node_id,
+        repoName: hit.repo_name,
+        path: hit.code_path,
+        heading: hit.node_kind === 'file' ? null : hit.qualified_name,
+        text,
+        score: (seedScore.get(hit.source_doc_id) ?? 0) * hit.weight * GRAPH_SCORE_DISCOUNT,
+        via: 'code',
+        viaEdge:
+          `${hit.kind} ${hit.site ? `at ${hit.source_path}#${hit.site}` : `from ${hit.source_path}`}` +
+          (stale ? ' — code changed since the doc last touched it' : ''),
+        viaEdgeId: hit.edge_id,
+      });
+    }
+    return chunks;
   }
 
   async listDocs(projectId: string, repositoryId?: string) {

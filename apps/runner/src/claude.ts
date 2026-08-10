@@ -258,6 +258,19 @@ export function exec(
       settle();
     });
 
+    // A child that exits before reading its prompt leaves this pipe with
+    // nowhere to write, and Node reports that as an `error` on stdin rather
+    // than on the child. Unhandled, an EPIPE here takes the whole runner
+    // daemon down — for a condition the exit code and stderr below already
+    // describe. Found by CI: the timeout test's fake `claude` exits at once,
+    // and whether the write wins that race is a matter of scheduling.
+    child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') return;
+      // Anything else is worth seeing, and still not worth crashing over —
+      // what this function returns is the child's outcome, not the pipe's.
+      stderr += `\n[runner] could not write to claude's stdin: ${err.message}`;
+    });
+
     child.stdin.write(stdin);
     child.stdin.end();
   });

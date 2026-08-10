@@ -156,7 +156,7 @@ reset: `docker compose down -v`, then `pnpm infra:up && pnpm db:migrate && pnpm 
 | `cli` | `specd` — Go, single static binary (`pnpm cli:build`) |
 | `packages/shared` | Spec lifecycle, EARS rendering, model rate card, cost metering |
 | `packages/db` | Drizzle schema + SQL migrations (Postgres + pgvector) |
-| `packages/templates` | `AGENTS.md`, `CLAUDE.md` and the `knowledge/` scaffold |
+| `packages/templates` | `AGENTS.md`, `CLAUDE.md` and the `knowledge/` scaffold — also what `/templates` renders |
 
 ### Stack
 

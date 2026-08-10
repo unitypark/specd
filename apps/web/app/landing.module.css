@@ -893,11 +893,15 @@
   max-width: var(--shell);
   margin: 0 auto;
 }
+/* The back link and the section tag that follows it are both inline, so
+   without a right margin they render as one run-on word ("BACK TO
+   SITETEMPLATES"). Affects every sub-page using this shell. */
 .back {
   font: 700 0.6rem/1 var(--mono);
   letter-spacing: 0.14em;
   color: var(--ink-3);
   display: inline-block;
+  margin-right: 1.1rem;
   margin-bottom: 1.6rem;
   transition: color 0.15s;
 }

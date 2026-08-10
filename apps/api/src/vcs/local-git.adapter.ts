@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { Config } from '../config.js';
+import { parseCommitLog, type HistoryCommit } from '../knowledge/history.js';
 import {
   IGNORED_DIRS,
   MANIFEST_FILES,
@@ -189,6 +190,30 @@ export class LocalGitAdapter implements VcsAdapter {
       return trimmed ? new Date(trimmed) : null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Commits in a window with the files each touched (0013). One `git log`
+   * walk; both the parsing and the coupling rules live in knowledge/history.ts
+   * so they stay testable without a fixture repository.
+   */
+  async commitFiles(repo: RepoTarget, since: Date): Promise<HistoryCommit[]> {
+    const { git } = this.git(repo);
+    try {
+      const out = await git.raw([
+        'log',
+        `--since=${since.toISOString()}`,
+        '--name-only',
+        '--no-merges',
+        '--no-renames',
+        // NUL starts each record; the header is one line, so the parser never
+        // has to tell a field separator from a record separator.
+        '--pretty=format:%x00%H %cI',
+      ]);
+      return parseCommitLog(out);
+    } catch {
+      return [];
     }
   }
 

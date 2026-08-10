@@ -40,6 +40,8 @@ const files = new Map<string, string>();
 /** Mutable so a test can give the repo a commit history to drift against. */
 let fakeCommitDate: Date | null = null;
 let fakeCodeCommits = 0;
+/** Commit history the fake repo reports, for coupling (0013). */
+let fakeHistory: { sha: string; at: Date; files: string[] }[] = [];
 
 const fakeVcs = {
   adapterFor: async () => ({
@@ -51,6 +53,7 @@ const fakeVcs = {
   localAdapter: {
     lastCommitDate: async () => fakeCommitDate,
     commitsSince: async () => fakeCodeCommits,
+    commitFiles: async () => fakeHistory,
   },
 } as unknown as VcsService;
 
@@ -472,6 +475,61 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     expect(coverage.anchorsByPath['knowledge/unicode.md']).toContain(chunk!.heading!);
 
     files.delete('knowledge/unicode.md');
+    await service.indexRepository(repo);
+  });
+
+  it('mines doc↔code coupling from history and drifts on it', async () => {
+    // The signal the file tree cannot give: files that change together are
+    // coupled whatever the imports say. Here architecture.md moved with the
+    // API twice, and the API has moved twelve times since — past the drift
+    // threshold — so the doc is drifted even though it was edited two days ago.
+    const at = (n: number) => new Date(Date.UTC(2026, 0, n));
+    fakeCommitDate = new Date(Date.now() - 2 * 86_400_000);
+    fakeHistory = [
+      { sha: 'a1', at: at(1), files: ['knowledge/architecture.md', 'apps/api/src/knowledge/x.ts'] },
+      { sha: 'a2', at: at(2), files: ['knowledge/architecture.md', 'apps/api/src/knowledge/y.ts'] },
+      ...Array.from({ length: 12 }, (_, i) => ({
+        sha: `b${i}`,
+        at: at(3 + i),
+        files: [`apps/api/src/knowledge/z${i}.ts`],
+      })),
+      // A sweep that must not couple anything to everything.
+      {
+        sha: 'sweep',
+        at: at(20),
+        files: [
+          'knowledge/glossary.md',
+          ...Array.from({ length: 60 }, (_, i) => `apps/web/src/f${i}.ts`),
+        ],
+      },
+    ];
+
+    files.set('knowledge/architecture.md', '# Architecture\n\n## Runtime\n\nPostgres only. Retrieval is hybrid. Edited.\n');
+    await service.indexRepository(repo);
+
+    const doc = await docByPath('knowledge/architecture.md');
+    const coupling = await service.docCoupling(projectId, doc!.id);
+    expect(coupling[0]).toMatchObject({
+      codePath: 'apps/api/src/',
+      commitsTogether: 2,
+      commitsSince: 12,
+    });
+
+    // Two days old, so the 90-day timer would call it fresh; the codebase
+    // disagrees, and the reason names the area to go and read.
+    const listed = (await service.listDocs(projectId)).find(
+      (d) => d.path === 'knowledge/architecture.md',
+    );
+    expect(listed?.freshness.stale).toBe(true);
+    expect(listed?.freshness.reason).toContain('apps/api/src/');
+
+    // The sweep is excluded, so the glossary is coupled to nothing.
+    const glossary = await docByPath('knowledge/orphan.md');
+    expect(await service.docCoupling(projectId, glossary!.id)).toEqual([]);
+
+    fakeHistory = [];
+    fakeCommitDate = null;
+    files.set('knowledge/architecture.md', '# Architecture\n\n## Runtime\n\nPostgres only. Retrieval is hybrid.\n');
     await service.indexRepository(repo);
   });
 

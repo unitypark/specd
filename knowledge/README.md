@@ -36,6 +36,7 @@ everything else is a consequence of it.
 - [0010 — Jira via API token](decisions/0010-jira-via-api-token-and-a-mirror-that-cannot-fail.md)
 - [0011 — specd develops specd](decisions/0011-specd-develops-specd.md)
 - [0012 — index runs are queued rows woken by LISTEN/NOTIFY](decisions/0012-index-runs-queued-and-woken-by-listen-notify.md)
+- [0013 — doc↔code coupling is mined from git history](decisions/0013-doc-code-coupling-from-git-history.md)
 
 New decisions join this list in the PR that adds them — the map rides the
 change like everything else.
@@ -63,9 +64,11 @@ never rewritten as the analyzed system evolves.
 
 - Docs ride the change: update them in the **same PR** as the code (AGENTS.md rule 3).
 - Delivered specs are appended to `specs/` automatically as the last task of every spec.
-- specd re-indexes on merge and flags docs that have drifted from the code —
-  measured as commits touching code since the doc last changed, not as time
-  elapsed. Where the provider gives no commit date, freshness is reported as
-  unmeasured rather than as good.
+- specd re-indexes on merge and flags docs that have drifted from the code.
+  Drift is measured against the code a doc *historically changes with*
+  ([[0013-doc-code-coupling-from-git-history]]), so it names the area to go and
+  read; where history cannot be mined it falls back to a repo-wide commit
+  count, and where the provider gives no commit date at all, freshness is
+  reported as unmeasured rather than as good.
 
 Stack: JavaScript · pnpm · Vitest

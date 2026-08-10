@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import {
   knowledgeChunks,
+  knowledgeDocCoupling,
   knowledgeDocLinks,
   knowledgeDocs,
   knowledgeHealth,
@@ -24,6 +25,7 @@ import { VcsService } from '../vcs/vcs.service.js';
 import { EmbeddingService } from './embeddings.js';
 import { CHUNKER_VERSION, chunkMarkdown, headingAnchor } from './chunker.js';
 import { extractLinks } from './link-extract.js';
+import { couplingFrom } from './history.js';
 import {
   EDGE_WEIGHT,
   LINK_KINDS,
@@ -45,6 +47,15 @@ const STALE_AFTER_DAYS = 90;
  * churn beneath a doc is normal; this many says the ground moved.
  */
 const DRIFT_COMMITS = 10;
+
+/**
+ * History window for coupling (0013). Twelve months, not "all": a long-lived
+ * repository's early commits describe an architecture that no longer exists,
+ * and coupling to a deleted module outvotes the truth.
+ */
+const COUPLING_WINDOW_DAYS = 365;
+/** Coupled areas kept per doc. Beyond a handful it stops being a signal. */
+const COUPLING_PER_DOC = 5;
 
 /**
  * Bump when link-extraction rules change (S-102). A doc whose content sha is
@@ -618,10 +629,12 @@ export class KnowledgeService {
    */
   private async refreshDrift(repo: Repository, target: ReturnType<VcsService['toTarget']>): Promise<void> {
     const docs = await this.db
-      .select({ id: knowledgeDocs.id, docUpdatedAt: knowledgeDocs.docUpdatedAt })
+      .select({ id: knowledgeDocs.id, path: knowledgeDocs.path, docUpdatedAt: knowledgeDocs.docUpdatedAt })
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.repositoryId, repo.id));
 
+    // Repo-wide fallback: blunt, but it is all there is for a doc that has
+    // never moved with any code.
     for (const doc of docs) {
       if (!doc.docUpdatedAt) continue;
       try {
@@ -634,6 +647,60 @@ export class KnowledgeService {
         // A hint that cannot be computed is left null, never guessed at.
       }
     }
+
+    await this.refreshCoupling(repo, target, docs);
+  }
+
+  /**
+   * Doc↔code coupling from one history walk (0013).
+   *
+   * Replaced wholesale per run rather than merged: coupling is a function of
+   * the window, and a stale edge from outside it would linger forever with no
+   * commit left to justify it.
+   */
+  private async refreshCoupling(
+    repo: Repository,
+    target: ReturnType<VcsService['toTarget']>,
+    docs: { id: string; path: string }[],
+  ): Promise<void> {
+    const since = new Date(Date.now() - COUPLING_WINDOW_DAYS * 86_400_000);
+    let commits;
+    try {
+      commits = await this.vcs.localAdapter.commitFiles(target, since);
+    } catch {
+      return;
+    }
+    if (commits.length === 0) return;
+
+    const idByPath = new Map(docs.map((d) => [d.path, d.id]));
+    const perDoc = new Map<string, number>();
+    const rows: (typeof knowledgeDocCoupling.$inferInsert)[] = [];
+
+    // couplingFrom returns strongest-first, so taking the first few per doc
+    // keeps the rows worth reading.
+    for (const edge of couplingFrom(commits)) {
+      const docId = idByPath.get(edge.docPath);
+      if (!docId) continue;
+      const taken = perDoc.get(docId) ?? 0;
+      if (taken >= COUPLING_PER_DOC) continue;
+      perDoc.set(docId, taken + 1);
+      rows.push({
+        projectId: repo.projectId,
+        docId,
+        codePath: edge.codePath,
+        commitsTogether: edge.commitsTogether,
+        lastTogetherAt: edge.lastTogetherAt,
+        commitsSince: edge.commitsSince,
+      });
+    }
+
+    await this.handle.transaction(async (tx) => {
+      await tx.sql`
+        DELETE FROM knowledge_doc_coupling
+        WHERE doc_id IN (SELECT id FROM knowledge_docs WHERE repository_id = ${repo.id})
+      `;
+      if (rows.length > 0) await tx.db.insert(knowledgeDocCoupling).values(rows);
+    });
   }
 
   /**
@@ -693,9 +760,45 @@ export class KnowledgeService {
       .where(where)
       .orderBy(knowledgeDocs.path);
 
+    const coupling = await this.topCoupling(projectId);
     return rows.map((row) => ({
       ...row,
-      freshness: freshnessOf(row.docUpdatedAt, row.isStub, row.codeCommitsSince),
+      coupledTo: coupling.get(row.id) ?? null,
+      freshness: freshnessOf(row.docUpdatedAt, row.isStub, row.codeCommitsSince, coupling.get(row.id)),
+    }));
+  }
+
+  /** The most-drifted coupled area per doc — one row each, for the doc list. */
+  private async topCoupling(
+    projectId: string,
+  ): Promise<Map<string, { codePath: string; commitsSince: number }>> {
+    const rows = await this.handle.sql<
+      { doc_id: string; code_path: string; commits_since: number }[]
+    >`
+      SELECT DISTINCT ON (doc_id) doc_id, code_path, commits_since
+      FROM knowledge_doc_coupling
+      WHERE project_id = ${projectId}
+      ORDER BY doc_id, commits_since DESC, commits_together DESC
+    `;
+    return new Map(
+      rows.map((r) => [r.doc_id, { codePath: r.code_path, commitsSince: Number(r.commits_since) }]),
+    );
+  }
+
+  /** Everything history says a doc moves with (0013), strongest first. */
+  async docCoupling(projectId: string, docId: string) {
+    const rows = await this.handle.sql<
+      { code_path: string; commits_together: number; commits_since: number }[]
+    >`
+      SELECT code_path, commits_together, commits_since
+      FROM knowledge_doc_coupling
+      WHERE project_id = ${projectId} AND doc_id = ${docId}
+      ORDER BY commits_together DESC, commits_since DESC
+    `;
+    return rows.map((r) => ({
+      codePath: r.code_path,
+      commitsTogether: Number(r.commits_together),
+      commitsSince: Number(r.commits_since),
     }));
   }
 
@@ -760,6 +863,7 @@ export class KnowledgeService {
   async recomputeHealth(projectId: string, ctx: DbContext = this.handle): Promise<void> {
     const docs = await ctx.db
       .select({
+        id: knowledgeDocs.id,
         docUpdatedAt: knowledgeDocs.docUpdatedAt,
         indexedAt: knowledgeDocs.indexedAt,
         isStub: knowledgeDocs.isStub,
@@ -774,9 +878,10 @@ export class KnowledgeService {
     const docCount = docs.length;
     const asBuiltCount = docs.filter((d) => d.kind === 'spec').length;
     const stubs = docs.filter((d) => d.isStub);
-    const stale = docs.filter(
-      (d) => freshnessOf(d.docUpdatedAt, d.isStub, d.codeCommitsSince).stale && !d.isStub,
-    );
+    const coupling = await this.topCoupling(projectId);
+    const freshnessFor = (d: (typeof docs)[number]) =>
+      freshnessOf(d.docUpdatedAt, d.isStub, d.codeCommitsSince, coupling.get(d.id));
+    const stale = docs.filter((d) => freshnessFor(d).stale && !d.isStub);
     const unverified = docs.filter((d) => d.hasUnverified);
 
     // Graph health (S-102): links that point nowhere, anchors that no longer
@@ -824,9 +929,7 @@ export class KnowledgeService {
     const orphanDocs = Number(graph?.orphans ?? 0);
     const totalLinks = Number(graph?.total_links ?? 0);
     const undeclaredEdges = Number(graph?.undeclared ?? 0);
-    const unknownFreshness = docs.filter(
-      (d) => freshnessOf(d.docUpdatedAt, d.isStub, d.codeCommitsSince).unknown && !d.isStub,
-    ).length;
+    const unknownFreshness = docs.filter((d) => freshnessFor(d).unknown && !d.isStub).length;
 
     let score = 100;
     if (docCount === 0) {
@@ -847,7 +950,7 @@ export class KnowledgeService {
 
     const notes: { icon: string; text: string }[] = [];
     for (const doc of stale.slice(0, 3)) {
-      const reason = freshnessOf(doc.docUpdatedAt, doc.isStub, doc.codeCommitsSince).reason;
+      const reason = freshnessFor(doc).reason;
       notes.push({ icon: '⚠', text: `${doc.path} — ${reason ?? 'stale'}.` });
     }
     if (unknownFreshness > 0) {
@@ -1238,7 +1341,13 @@ function firstHeading(content: string): string | null {
  * hiding exactly the rot the number exists to expose, so unmeasurable is now
  * its own answer rather than a good one.
  */
-function freshnessOf(docUpdatedAt: Date | null, isStub: boolean, codeCommitsSince?: number | null) {
+function freshnessOf(
+  docUpdatedAt: Date | null,
+  isStub: boolean,
+  codeCommitsSince?: number | null,
+  /** The strongest coupled area, when history has been mined (0013). */
+  coupling?: { codePath: string; commitsSince: number } | null,
+) {
   if (!docUpdatedAt) {
     return {
       score: null,
@@ -1254,7 +1363,11 @@ function freshnessOf(docUpdatedAt: Date | null, isStub: boolean, codeCommitsSinc
   const ageDays = Math.floor((Date.now() - docUpdatedAt.getTime()) / 86_400_000);
   // Measured drift beats the calendar: a doc untouched for a year beside code
   // untouched for a year has not drifted from anything.
-  const drifted = (codeCommitsSince ?? 0) >= DRIFT_COMMITS;
+  // Coupled drift wins when we have it: "6 commits touched apps/api/src/"
+  // names the code to compare against, where "25 commits touched code" only
+  // says the repository is alive.
+  const driftCommits = coupling?.commitsSince ?? codeCommitsSince ?? 0;
+  const drifted = driftCommits >= DRIFT_COMMITS;
   const stale = drifted || ageDays > STALE_AFTER_DAYS;
   return {
     score: Math.max(0, 100 - (ageDays / STALE_AFTER_DAYS) * 100),
@@ -1264,7 +1377,9 @@ function freshnessOf(docUpdatedAt: Date | null, isStub: boolean, codeCommitsSinc
     reason: isStub
       ? 'generated stub, never filled in'
       : drifted
-        ? `${codeCommitsSince} commits touched code since this doc last changed`
+        ? coupling
+          ? `${coupling.commitsSince} commits touched ${coupling.codePath} since this doc last moved with it`
+          : `${codeCommitsSince} commits touched code since this doc last changed`
         : stale
           ? `${ageDays}d since last change`
           : undefined,

@@ -41,6 +41,7 @@ let ticketId = '';
 let userId = '';
 let specId = '';
 
+const recordedCommits: { sha: string; files: string[] }[] = [];
 const reindexCalls: { projectId: string; repositoryIds?: string[]; triggeredByName?: string }[] = [];
 const forgotten: string[] = [];
 
@@ -178,11 +179,17 @@ describe.skipIf(!reachable)('github webhooks (integration)', () => {
       },
     } as unknown as PipelineService;
 
+    const knowledge = {
+      recordCommits: async (_r: unknown, c: unknown[]) => {
+        recordedCommits.push(...(c as { sha: string; files: string[] }[]));
+      },
+    } as unknown as KnowledgeService;
+
     const app = {
       forget: (id: string) => forgotten.push(id),
     } as unknown as GitHubAppService;
 
-    service = new GitHubWebhookService(handle.db, repositoriesService, specs, pipeline, app);
+    service = new GitHubWebhookService(handle.db, repositoriesService, specs, pipeline, app, knowledge);
   });
 
   afterAll(async () => {
@@ -382,6 +389,7 @@ describe.skipIf(!reachable)('github webhooks (integration)', () => {
         },
       } as unknown as PipelineService,
       { forget: () => undefined } as unknown as GitHubAppService,
+      { recordCommits: async () => undefined } as unknown as KnowledgeService,
     );
 
     const deliveryId = randomUUID();

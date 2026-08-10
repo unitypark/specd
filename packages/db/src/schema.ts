@@ -452,6 +452,28 @@ export const deviceCodes = pgTable(
 
 /** Freshness/health snapshot, recomputed on every index run. */
 /**
+ * Commits on the default branch, recorded from push webhooks for repositories
+ * specd cannot clone (0013). The same history a `git log` gives locally,
+ * accumulated forward instead of read backwards.
+ */
+export const repoCommits = pgTable(
+  'repo_commits',
+  {
+    repositoryId: uuid('repository_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    sha: text('sha').notNull(),
+    committedAt: timestamp('committed_at', { withTimezone: true }).notNull(),
+    files: jsonb('files').$type<string[]>().notNull().default([]),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.repositoryId, t.sha] }),
+    index('repo_commits_window_idx').on(t.repositoryId, t.committedAt),
+  ],
+);
+
+/**
  * Doc↔code coupling mined from git history (0013). Separate from
  * `knowledgeDocLinks` because the target is a code path, not a doc.
  */

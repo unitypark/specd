@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, sql } from 'drizzle-orm';
-import { agentRuns, runLogs, type Db } from '@specd/db';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  type OnModuleDestroy,
+  type OnModuleInit,
+} from '@nestjs/common';
+import { and, desc, eq, gt, sql } from 'drizzle-orm';
+import { agentRuns, runLogs, type Db, type DbHandle } from '@specd/db';
 import {
   costEurCents,
   type AgentRunKind,
@@ -9,7 +15,7 @@ import {
   type RunLogLine,
   type TokenUsage,
 } from '@specd/shared';
-import { DB } from '../db/db.module.js';
+import { DB, DB_HANDLE } from '../db/db.module.js';
 import { Config } from '../config.js';
 import { redactSecrets } from '../common/vault.js';
 import { AgentsPaused, SpendCapExceeded } from '../common/errors.js';
@@ -27,17 +33,60 @@ export interface RunHandle {
  * which model, how many tokens, what it cost, and the full log. Immutable
  * once finished.
  */
+/**
+ * Channel a run announces new log lines on. The payload is the run id and
+ * whether it just finished — never the line itself. A viewer re-reads from
+ * `run_logs` by sequence, so the table stays the truth and a notification only
+ * decides when to look (the same contract as the index queue, 0012).
+ */
+export const RUN_LOG_CHANNEL = 'specd_run_log';
+
 @Injectable()
-export class RunsService {
-  /** In-process fan-out for live SSE viewers. Persisted lines are the truth. */
+export class RunsService implements OnModuleInit, OnModuleDestroy {
+  /**
+   * Fan-out to live viewers *in this process*. Kept as a fast path alongside
+   * the Postgres channel: if LISTEN cannot start, a single-instance deployment
+   * still streams. Both paths trigger the same sequence-based read, so being
+   * poked twice delivers each line once.
+   */
   private readonly bus = new EventEmitter();
+  private unlisten: (() => Promise<void>) | null = null;
 
   constructor(
     @Inject(DB) private readonly db: Db,
+    @Inject(DB_HANDLE) private readonly handle: DbHandle,
     private readonly config: Config,
     private readonly projects: ProjectsService,
   ) {
     this.bus.setMaxListeners(0);
+  }
+
+  async onModuleInit(): Promise<void> {
+    try {
+      this.unlisten = await this.handle.listen(RUN_LOG_CHANNEL, (payload) => {
+        try {
+          const { r, e } = JSON.parse(payload) as { r: string; e?: boolean };
+          this.bus.emit(r, Boolean(e));
+        } catch {
+          // A payload we cannot read is not worth taking the listener down for.
+        }
+      });
+    } catch {
+      // Degraded, not broken: viewers attached to this process still stream
+      // from the local bus. Only cross-instance fan-out is lost.
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.unlisten) await this.unlisten().catch(() => undefined);
+  }
+
+  /** Tell every instance that this run has new lines, or has ended. */
+  private announce(runId: string, ended = false): void {
+    this.bus.emit(runId, ended);
+    void this.handle
+      .notify(RUN_LOG_CHANNEL, JSON.stringify({ r: runId, e: ended }))
+      .catch(() => undefined);
   }
 
   /**
@@ -91,7 +140,8 @@ export class RunsService {
       const line: RunLogLine = { at: new Date().toISOString(), level, message: safe };
       seq += 1;
       await this.db.insert(runLogs).values({ runId, seq, level, message: safe });
-      this.bus.emit(runId, line);
+      void line;
+      this.announce(runId);
     };
 
     const meter = async (model: ModelId, usage: TokenUsage, billable = true) =>
@@ -237,7 +287,7 @@ export class RunsService {
       .from(runLogs)
       .where(eq(runLogs.runId, runId));
     await this.db.insert(runLogs).values({ runId, seq: next, level, message: safe });
-    this.bus.emit(runId, { at: new Date().toISOString(), level, message: safe });
+    this.announce(runId);
   }
 
   async finish(
@@ -256,7 +306,7 @@ export class RunsService {
       })
       .where(eq(agentRuns.id, runId));
 
-    this.bus.emit(`${runId}:end`, outcome.status);
+    this.announce(runId, true);
   }
 
   async list(projectId: string, limit = 30) {
@@ -301,13 +351,77 @@ export class RunsService {
     onLine: (line: RunLogLine) => void,
     onEnd: (status: string) => void,
   ): () => void {
-    const lineHandler = (line: RunLogLine) => onLine(line);
-    const endHandler = (status: string) => onEnd(status);
-    this.bus.on(runId, lineHandler);
-    this.bus.on(`${runId}:end`, endHandler);
+    // Each subscription tracks how far it has read and pulls forward from
+    // there. Replay and follow are the same mechanism, which closes the gap
+    // where a line written between "fetch the history" and "start listening"
+    // reached nobody — and makes a duplicate poke harmless, since there is
+    // nothing after the last sequence to deliver twice.
+    let lastSeq = 0;
+    let pumping = false;
+    /** A poke arrived mid-read; go round once more when this one finishes. */
+    let again = false;
+    /** …and one of those pokes said the run had ended. */
+    let endPending = false;
+    let closed = false;
+
+    const pump = async (ended: boolean): Promise<void> => {
+      if (closed) return;
+      if (pumping) {
+        // Always re-run. Conflating "there is more to read" with "the run
+        // ended" dropped every poke that arrived mid-read for a run still in
+        // progress — which is most of them, and exactly the lines a viewer is
+        // watching for.
+        again = true;
+        endPending = endPending || ended;
+        return;
+      }
+      pumping = true;
+      try {
+        let wantEnd = ended;
+        do {
+          again = false;
+          wantEnd = wantEnd || endPending;
+          endPending = false;
+
+          const rows = await this.db
+            .select()
+            .from(runLogs)
+            .where(and(eq(runLogs.runId, runId), gt(runLogs.seq, lastSeq)))
+            .orderBy(runLogs.seq);
+
+          for (const row of rows) {
+            if (closed) return;
+            lastSeq = row.seq;
+            onLine({
+              at: row.at.toISOString(),
+              level: row.level as RunLogLine['level'],
+              message: row.message,
+            });
+          }
+
+          if (wantEnd && !closed) {
+            const [run] = await this.db
+              .select({ status: agentRuns.status })
+              .from(agentRuns)
+              .where(eq(agentRuns.id, runId))
+              .limit(1);
+            if (run) onEnd(run.status);
+          }
+        } while (again);
+      } finally {
+        pumping = false;
+      }
+    };
+
+    const handler = (ended: boolean) => void pump(ended);
+    this.bus.on(runId, handler);
+    // Catch up immediately: everything written before this subscription, plus
+    // the terminal state if the run already finished.
+    void pump(true);
+
     return () => {
-      this.bus.off(runId, lineHandler);
-      this.bus.off(`${runId}:end`, endHandler);
+      closed = true;
+      this.bus.off(runId, handler);
     };
   }
 }

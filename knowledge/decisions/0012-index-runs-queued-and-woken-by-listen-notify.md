@@ -104,8 +104,34 @@ either way; this just stops paying for it repeatedly.
   runner claim an index run the moment index runs carried a payload — and then
   fail it, since `report()` has no finisher for the kind. Latent before this
   change; load-bearing now.
-- Multi-instance API deployments work for claiming, but the run-log SSE bus is
-  still a per-process `EventEmitter` (`apps/api/src/runs/runs.service.ts`), so
-  a viewer connected to instance A sees nothing from a run executing on
-  instance B. Not introduced here and not fixed here, but the same
-  `LISTEN`/`NOTIFY` mechanism is the obvious fix when it matters.
+- ~~Multi-instance API deployments work for claiming, but the run-log SSE bus
+  is still a per-process `EventEmitter`.~~ Fixed 2026-08-10 with this same
+  mechanism; see the update below.
+
+
+## Update — 2026-08-10: the run-log bus
+
+Run-log streaming used the per-process `EventEmitter` this decision flagged, so
+a viewer attached to one API instance saw nothing from a run executing on
+another — silently, and only once somebody ran more than one instance, which is
+the worst moment to find out.
+
+It now announces on a `specd_run_log` channel, with the same contract the index
+queue uses: **the payload is the run id and whether it ended, never the line
+itself.** A viewer re-reads `run_logs` from its own last sequence, so the table
+stays the truth, a `NOTIFY` payload can never be too large for a long log line,
+and a notification only decides when to look.
+
+Three things fell out of reading by sequence rather than pushing lines:
+
+- **Replay and follow became one mechanism.** The controller used to fetch the
+  history, then subscribe. A line written between those two steps reached
+  nobody. Now a subscription simply pulls forward from sequence zero.
+- **Duplicate delivery became impossible.** The local emitter is kept as a fast
+  path so a single instance still streams if `LISTEN` cannot start, and both
+  paths poke the same read — which has nothing left to deliver twice.
+- **A concurrency bug surfaced in test.** A poke arriving while a read was in
+  flight was dropped unless it also said the run had ended, which is to say
+  most pokes for a run still in progress: exactly the lines a viewer is
+  watching for. The two-instance test found it before anyone deployed two
+  instances.

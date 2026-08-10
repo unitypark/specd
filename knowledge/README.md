@@ -35,6 +35,7 @@ everything else is a consequence of it.
 - [0009 — build dispatch uses the runner's own git](decisions/0009-build-dispatch-runner-git-credentials.md)
 - [0010 — Jira via API token](decisions/0010-jira-via-api-token-and-a-mirror-that-cannot-fail.md)
 - [0011 — specd develops specd](decisions/0011-specd-develops-specd.md)
+- [0012 — index runs are queued rows woken by LISTEN/NOTIFY](decisions/0012-index-runs-queued-and-woken-by-listen-notify.md)
 
 New decisions join this list in the PR that adds them — the map rides the
 change like everything else.

@@ -154,13 +154,13 @@ describe.skipIf(!reachable)('gitlab webhooks (integration)', () => {
     } as unknown as RepositoriesService;
 
     const pipeline = {
-      reindex: async (input: {
+      enqueueReindex: async (input: {
         projectId: string;
         repositoryIds?: string[];
         triggeredByName?: string;
       }) => {
         reindexCalls.push(input);
-        return { indexed: 0, skipped: 0, removed: 0, health: 100, runId: 'stub' };
+        return { runId: 'stub', status: 'queued' as const };
       },
     } as unknown as PipelineService;
 
@@ -335,7 +335,7 @@ describe.skipIf(!reachable)('gitlab webhooks (integration)', () => {
       } as unknown as RepositoriesService,
       specs,
       {
-        reindex: async () => {
+        enqueueReindex: async () => {
           throw new Error('database on fire');
         },
       } as unknown as PipelineService,

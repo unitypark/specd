@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { get, post } from '@/lib/api';
+import { get, post, streamRun } from '@/lib/api';
 
 interface Doc {
   id: string;
@@ -35,6 +35,7 @@ export function KnowledgeView({ slug }: { slug: string }) {
   const [grounding, setGrounding] = useState<{ avgCitations: number; avgUnverified: number; sample: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await get<{ docs: Doc[]; health: Health; grounding: typeof grounding }>(
@@ -52,13 +53,24 @@ export function KnowledgeView({ slug }: { slug: string }) {
   async function reindex() {
     setBusy(true);
     setError(null);
+    setProgress(null);
     try {
-      await post(`/projects/${slug}/reindex`, {});
+      // The re-index is queued, not done, when this returns (0012) — so follow
+      // the run's log to the end instead of reporting success before the work
+      // has started.
+      const { runId } = await post<{ runId: string }>(`/projects/${slug}/reindex`, {});
+      await streamRun(slug, runId, (line) => {
+        if (line.message) setProgress(line.message);
+        if (line.type === 'end' && line.status && line.status !== 'succeeded') {
+          setError(`Re-index ${line.status}`);
+        }
+      });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Re-index failed');
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -75,6 +87,8 @@ export function KnowledgeView({ slug }: { slug: string }) {
             {busy ? <span className="spinner" /> : '↻ Re-index'}
           </button>
         </div>
+
+        {progress && <div className="progress">{progress}</div>}
 
         {docs.length === 0 && (
           <div className="empty">
@@ -200,6 +214,16 @@ export function KnowledgeView({ slug }: { slug: string }) {
           font: 600 1.8rem/1 var(--serif);
           display: block;
           margin-bottom: 0.5rem;
+        }
+        .progress {
+          padding: 0.5rem 0.9rem;
+          border-bottom: 1px solid var(--line);
+          font-family: var(--mono);
+          font-size: 0.872rem;
+          color: var(--ink-3);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .note {
           display: flex;

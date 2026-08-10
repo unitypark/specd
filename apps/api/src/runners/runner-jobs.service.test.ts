@@ -245,6 +245,32 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
     expect(row?.runnerId).toBe(runner.id);
   });
 
+  it('never claims a run of a kind it cannot finish', async () => {
+    // Index runs carry a job payload since 0012, but they execute in the API
+    // and `report()` has no finisher for the kind — a runner claiming one
+    // would strand it as running forever. The claim filters on kind, not just
+    // on the presence of a payload.
+    const [row] = await handle!.db
+      .insert(agentRuns)
+      .values({
+        projectId,
+        kind: 'index',
+        status: 'queued',
+        runner: 'hosted',
+        jobPayload: { repositoryIds: [] },
+      })
+      .returning({ id: agentRuns.id });
+    const runner = await pairedRunner('kind-guard-runner');
+
+    expect(await jobs.claim(runner)).toBeNull();
+
+    const [after] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, row!.id));
+    expect(after?.status).toBe('queued');
+    expect(after?.runnerId).toBeNull();
+
+    await handle!.db.delete(agentRuns).where(eq(agentRuns.id, row!.id));
+  });
+
   it('does not let a second runner claim an already-claimed job', async () => {
     const runId = await queueRun(payload());
     const first = await pairedRunner('first-claimer');

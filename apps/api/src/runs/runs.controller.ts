@@ -147,7 +147,7 @@ export class RunsController {
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user, ['owner', 'maintainer']);
-    return this.pipeline.reindex({
+    return this.pipeline.enqueueReindex({
       projectId: project.id,
       repositoryIds: dto.repositoryIds,
       actor: { userId: user.sub, name: user.name },

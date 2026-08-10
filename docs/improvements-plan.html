@@ -1,0 +1,777 @@
+<!doctype html>
+<!-- The code-graph-rag benchmark and the improvements plan it produced, kept
+     as written before the work as the record of why each change was made.
+     Delivered in full across PRs #35–#60 (2026-08-10 → 2026-08-11); the
+     matching source analyses live in knowledge/research/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>specd improvements plan</title>
+<style>
+  :root {
+    --paper: #f4f4f4;
+    --panel: #ffffff;
+    --panel-2: #eeeeee;
+    --field: #fafafa;
+    --ink: #0f0f0f;
+    --ink-2: #525252;
+    --ink-3: #636363;
+    --line: rgba(0, 0, 0, 0.10);
+    --line-2: rgba(0, 0, 0, 0.18);
+    --signal: #ff5cd6;
+    --signal-text: #8f1478;
+    --signal-soft: rgba(255, 92, 214, 0.10);
+    --danger: #b83232;
+    --danger-soft: rgba(184, 50, 50, 0.08);
+    --warn: #7a5f00;
+    --warn-soft: rgba(122, 95, 0, 0.09);
+    --ok: #1f6b43;
+    --ok-soft: rgba(31, 107, 67, 0.08);
+    --display: "Josefin Sans", "Futura", "Avenir Next", "Avenir", "Century Gothic", sans-serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --radius: 8px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #131314;
+      --panel: #1b1b1d;
+      --panel-2: #232326;
+      --field: #18181a;
+      --ink: #ededed;
+      --ink-2: #b6b6b6;
+      --ink-3: #909090;
+      --line: rgba(255, 255, 255, 0.12);
+      --line-2: rgba(255, 255, 255, 0.22);
+      --signal: #ff5cd6;
+      --signal-text: #ff8ae0;
+      --signal-soft: rgba(255, 92, 214, 0.13);
+      --danger: #e07a7a;
+      --danger-soft: rgba(224, 122, 122, 0.10);
+      --warn: #d9b64e;
+      --warn-soft: rgba(217, 182, 78, 0.10);
+      --ok: #7fc79a;
+      --ok-soft: rgba(127, 199, 154, 0.10);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #131314;
+    --panel: #1b1b1d;
+    --panel-2: #232326;
+    --field: #18181a;
+    --ink: #ededed;
+    --ink-2: #b6b6b6;
+    --ink-3: #909090;
+    --line: rgba(255, 255, 255, 0.12);
+    --line-2: rgba(255, 255, 255, 0.22);
+    --signal: #ff5cd6;
+    --signal-text: #ff8ae0;
+    --signal-soft: rgba(255, 92, 214, 0.13);
+    --danger: #e07a7a;
+    --danger-soft: rgba(224, 122, 122, 0.10);
+    --warn: #d9b64e;
+    --warn-soft: rgba(217, 182, 78, 0.10);
+    --ok: #7fc79a;
+    --ok-soft: rgba(127, 199, 154, 0.10);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15.5px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 20px 90px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  .prose { max-width: 72ch; }
+
+  a { color: var(--signal-text); text-decoration: none; border-bottom: 1px solid var(--line-2); }
+  a:hover { border-bottom-color: var(--signal); }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; border-radius: 2px; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.08em 0.35em;
+    white-space: nowrap;
+  }
+  .refs { color: var(--ink-3); font-size: 12.5px; font-family: var(--mono); line-height: 1.6; }
+  .refs code { background: transparent; border: none; padding: 0; white-space: normal; }
+
+  header.masthead { padding: 56px 0 8px; }
+  .eyebrow {
+    font-family: var(--display);
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 14px;
+  }
+  .eyebrow b { color: var(--signal-text); font-weight: 600; }
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(30px, 5vw, 44px);
+    font-weight: 600;
+    letter-spacing: 0.005em;
+    line-height: 1.12;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  .standfirst { color: var(--ink-2); font-size: 17px; max-width: 66ch; margin: 0 0 22px; text-wrap: pretty; }
+  .provenance {
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    font-family: var(--mono); font-size: 12px; color: var(--ink-3);
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    padding: 12px 2px; margin: 0 0 30px;
+  }
+  .provenance span b { color: var(--ink-2); font-weight: 600; }
+
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 46px; }
+  nav.toc a {
+    font-family: var(--display); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-2); border: 1px solid var(--line-2); border-radius: 999px;
+    padding: 6px 14px 5px; background: var(--panel);
+  }
+  nav.toc a:hover { border-color: var(--signal); color: var(--signal-text); }
+
+  section { margin: 0 0 58px; }
+  h2 {
+    font-family: var(--display);
+    font-size: 24px; font-weight: 600; letter-spacing: 0.01em;
+    margin: 0 0 6px; text-wrap: balance;
+  }
+  .kicker {
+    font-family: var(--display); font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--signal-text); margin: 0 0 10px;
+  }
+  h3 { font-family: var(--display); font-size: 17px; font-weight: 600; margin: 30px 0 8px; }
+  .lede { color: var(--ink-2); margin: 0 0 20px; max-width: 70ch; text-wrap: pretty; }
+  p { margin: 0 0 14px; }
+
+  .tldr {
+    background: var(--panel);
+    border: 1px solid var(--line-2);
+    border-radius: var(--radius);
+    padding: 22px 26px 10px;
+    margin: 0 0 46px;
+    position: relative;
+  }
+  .tldr::before {
+    content: "";
+    position: absolute; inset: -1px auto -1px -1px; width: 4px;
+    background: var(--signal); border-radius: 4px 0 0 4px;
+  }
+  .tldr h2 { font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 12px; }
+  .tldr p { max-width: none; }
+  .tldr b { font-weight: 600; }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 18px 0; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .stat .num { font-family: var(--display); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .lbl { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; line-height: 1.45; }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); margin: 18px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th {
+    font-family: var(--display); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-3); text-align: left; font-weight: 600;
+    padding: 12px 14px 8px; border-bottom: 1px solid var(--line-2); white-space: nowrap;
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+  td .why { color: var(--ink-2); }
+
+  .chip {
+    display: inline-block; font-family: var(--mono); font-size: 11px; line-height: 1;
+    border: 1px solid var(--line-2); border-radius: 999px; padding: 4px 9px 3px;
+    color: var(--ink-2); background: var(--panel-2); white-space: nowrap;
+  }
+  .chip.sev { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+  .chip.warnc { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+  .chip.okc { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+  .chip.new { background: var(--signal-soft); border-color: var(--signal); color: var(--signal-text); }
+  .chip.shipped { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .phase > header .done { color: var(--ok); font-weight: 600; font-size: 12.5px; font-family: var(--mono); }
+
+  .phase {
+    border: 1px solid var(--line-2); border-radius: var(--radius);
+    background: var(--panel); margin: 26px 0; overflow: hidden;
+  }
+  .phase > header {
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    padding: 18px 22px 14px; border-bottom: 1px solid var(--line);
+    background: var(--field);
+  }
+  .phase > header .pnum {
+    font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--signal-text);
+  }
+  .phase > header h3 { margin: 0; font-size: 19px; }
+  .phase > header .ptag { margin-left: auto; color: var(--ink-3); font-size: 12.5px; font-family: var(--mono); }
+  .item { padding: 18px 22px 6px; border-bottom: 1px solid var(--line); }
+  .item:last-child { border-bottom: none; }
+  .item > .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .item h4 { font-family: var(--display); font-size: 15.5px; font-weight: 600; margin: 0; }
+  .item .chips { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  .item p { max-width: 78ch; }
+  .item .do {
+    background: var(--field); border: 1px solid var(--line); border-left: 3px solid var(--signal);
+    border-radius: 6px; padding: 10px 14px; margin: 10px 0 14px;
+    font-size: 14px; max-width: none;
+  }
+  .item .do b { font-family: var(--display); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--signal-text); display: block; margin-bottom: 4px; }
+
+  figure.diagram { margin: 26px 0; background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius); padding: 18px 18px 8px; }
+  figure.diagram .svgwrap { overflow-x: auto; }
+  figure.diagram svg { max-width: 100%; height: auto; min-width: 760px; display: block; margin: 0 auto; }
+  figcaption { color: var(--ink-3); font-size: 12.5px; padding: 10px 4px 8px; line-height: 1.5; }
+  figcaption .lg-new { color: var(--signal-text); font-weight: 600; }
+
+  .dont li { margin-bottom: 10px; max-width: 78ch; }
+  .dont b { font-weight: 600; }
+  ul { padding-left: 22px; margin: 0 0 16px; }
+
+  footer.method {
+    border-top: 1px solid var(--line-2); margin-top: 70px; padding-top: 18px;
+    color: var(--ink-3); font-size: 12.5px; max-width: 78ch; line-height: 1.6;
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">specd · engine research <b>№ 2</b> · improvements plan</p>
+  <h1>What specd should take from code-graph-rag — and what it should fix first</h1>
+  <p class="standfirst">
+    A benchmarking read of <a href="https://github.com/vitali87/code-graph-rag">vitali87/code-graph-rag</a> against a
+    file-level audit of specd's knowledge engine as built. The verdict: code-graph-rag validates every architectural bet
+    specd has made, contributes four ideas worth adopting outright, and hands us the blueprint — and the cost ceiling —
+    for the one strategic feature specd is missing: a code-aware knowledge graph.
+  </p>
+  <div class="provenance">
+    <span><b>benchmark</b> code-graph-rag v0.0.591 · 234816e · 2026-08-10</span>
+    <span><b>audit</b> specd main · 8e5c08a (post S-101/S-102)</span>
+    <span><b>method</b> two independent read-only deep-dives, findings verified in source</span>
+  </div>
+  <nav class="toc" aria-label="Contents">
+    <a href="#stand">1 · Where specd stands</a>
+    <a href="#cgr">2 · The benchmark</a>
+    <a href="#target">3 · Target architecture</a>
+    <a href="#plan">4 · The plan</a>
+    <a href="#dont">5 · Do not adopt</a>
+  </nav>
+</header>
+
+<div class="tldr">
+  <h2>Shipped — updated 2026-08-11</h2>
+  <p><b>All three phases are complete and merged</b> — the plan proper across #35–#50, follow-ons
+  through #57 (hosted history, cross-instance streaming, retrieval quality, runbooks, Go/Python eval
+  oracles, CI). Three ADRs came out of it: <b>0012</b> queued indexing, <b>0013</b> doc↔code
+  coupling, <b>0014</b> code nodes. The API test suite went from 247 to <b>362</b>, CI now enforces
+  the verify gate on every push, and every finding from the as-built audit is closed except A3's
+  underlying ceiling (the default embedder is lexical by constraint — a product decision, not a
+  code change).</p>
+  <p><b>The last promise shipped in #58:</b> retrieval now serves the code the seed docs reference —
+  two bounded snippets per retrieval, read from the repository at retrieval time, citable as
+  <code>path#Class.method</code> through the validator's exact-match branch. Asking this repository's
+  own knowledge base "how does a runner claim a queued job" now puts
+  <code>RunnerJobsService.report</code>'s source in front of the SpecAgent, via ADR 0004's own
+  citation. <b>Every item in this plan is now delivered.</b></p>
+  <p><b>Since then, the repo squared itself away around the finished engine.</b> #59 was the
+  open-source prep — README rebuilt around the actual loop, SECURITY.md, CONTRIBUTING.md carrying
+  the house disciplines, MIT license fields — and #60 closed the oldest open loop: the stale
+  specd-built PR #12 (S-103, webhook delivery retention) was closed unmerged and its approved spec
+  re-run through specd's own pipeline against the post-plan codebase — four tasks, four commits,
+  as-built spec filed with its deviations. The engine this plan produced is now the workflow the
+  repo itself runs on. This document is archived in-repo at <code>docs/improvements-plan.html</code>.</p>
+  <p>What follows is the plan as it was written before the work, kept intact as the record of why
+  each change was made. Item headings carry the PR that delivered them.</p>
+  <hr style="border:none;border-top:1px solid var(--line);margin:18px 0;">
+  <h2 style="margin-top:0;">The short version <span style="text-transform:none;letter-spacing:0;color:var(--ink-3);font-family:var(--sans);font-size:13px;">(as written)</span></h2>
+  <p><b>specd's core bets are right, and code-graph-rag proves it at scale.</b> Deterministic indexing with the LLM only
+  at the query boundary, Postgres as the only store, deterministic fusion instead of model-driven retrieval — cgr
+  validates the first at 14-language scale and involuntarily proves the second two by counterexample (its graph DB timed
+  out at 101k edges and its own analyses now bypass it).</p>
+  <p><b>But the audit found real correctness debt to clear first.</b> No transaction wraps any index write, the shrink
+  guard checks volume rather than provenance, the truncation notice cries wolf on nearly every draft, and the graph
+  S-102 built is starved — the onboarding template generates zero extractable links and code paths are excluded by regex.</p>
+  <p><b>The plan is three phases:</b> repair the foundations (1–2 weeks of PRs), sharpen the citation discipline that is
+  specd's moat (cgr has nothing like it), then build code-awareness as a <b>symbol index, not a call graph</b> — cgr's
+  own evidence says the symbol layer is ~1,600 lines and scores perfectly against independent oracles, while the call
+  graph is where 14,000 lines and the maintenance nightmare live.</p>
+</div>
+
+<section id="stand">
+  <p class="kicker">Part 1 · The audit</p>
+  <h2>Where specd stands after S-102</h2>
+  <p class="lede">
+    The engine (~1,400 lines in <code>apps/api/src/knowledge/</code>) is disciplined where it matters most: extraction is
+    deterministic with no model calls, edge replacement is tier-scoped per doc, citation validation covers graph-expanded
+    chunks, and hub gating plus a strict expansion budget keep retrieval bounded. That's the right skeleton. The audit
+    found six defects worth naming — three are broken promises from S-102, three are quiet design flaws.
+  </p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>#</th><th>Finding</th><th>Why it matters</th><th>Severity</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="mono">A1</td>
+        <td><b>No transactions; shrink guard checks the wrong thing.</b><br>
+        <span class="refs">knowledge.service.ts:871-886 · chunks deleted at :241 before insert at :250</span></td>
+        <td class="why">Every index write autocommits. A crash mid-run leaves a doc silently unretrievable while its row
+        says "indexed". The guard is a count/ratio heuristic (≥4 removals <em>and</em> &gt;50%), not the
+        provenance check S-102 specified; edges have no guard at all. Neither deviation is recorded.</td>
+        <td><span class="chip sev">correctness</span></td>
+      </tr>
+      <tr>
+        <td class="mono">A2</td>
+        <td><b>The truncation notice is a false-positive storm.</b><br>
+        <span class="refs">knowledge.service.ts:431-438, :458 · spec.agent.ts:425-431</span></td>
+        <td class="why">The dense arm has no similarity threshold, so <code>matchedCount</code> ≈ the pool size on every
+        query. Any project with ≥56 chunks reports ~42 "truncated" chunks on <em>every draft</em> — training the agent to
+        ignore exactly the signal S-102 built to keep it honest.</td>
+        <td><span class="chip sev">trust</span></td>
+      </tr>
+      <tr>
+        <td class="mono">A3</td>
+        <td><b>Both retrieval arms measure the same thing.</b><br>
+        <span class="refs">embeddings.ts:23-57, :108-112, :86</span></td>
+        <td class="why">The default embedder is hashed tokens + trigrams — lexical, like tsvector. RRF fuses two
+        correlated signals. The Voyage escape hatch silently falls back to hash on a missing key, embeds queries as
+        <code>document</code>, and nothing stamps provider/dims on rows — mixed vector spaces are undetectable.</td>
+        <td><span class="chip warnc">quality</span></td>
+      </tr>
+      <tr>
+        <td class="mono">A4</td>
+        <td><b>The graph is structurally starved.</b><br>
+        <span class="refs">packages/templates/src/knowledge.ts · link-extract.ts:36 · knowledge.service.ts:302-308</span></td>
+        <td class="why">The onboarding template contains zero extractable links — every new customer starts with an
+        all-orphan graph. Code-path mentions (the most common cross-reference in real docs) are excluded because the
+        regex requires <code>.md</code>. Unresolved non-<code>knowledge/</code> targets are silently dropped, so health
+        can't even count what's missing. Expansion budget 4 on a starved graph ≈ no expansion.</td>
+        <td><span class="chip sev">value</span></td>
+      </tr>
+      <tr>
+        <td class="mono">A5</td>
+        <td><b>Indexing runs inside the webhook request, with N+1 storms.</b><br>
+        <span class="refs">github-webhook.service.ts:395-403 · knowledge.service.ts:285-288, :313-322, :385-389</span></td>
+        <td class="why">One INSERT per chunk, one project doc-list load per doc, one SELECT per anchored link, one HTTP
+        GET per file — all synchronous inside the webhook delivery. Index jobs are never dispatched to the runner
+        fleet S-101 built.</td>
+        <td><span class="chip warnc">scale</span></td>
+      </tr>
+      <tr>
+        <td class="mono">A6</td>
+        <td><b>Two slugifiers; loose anchors; dead ends.</b><br>
+        <span class="refs">chunker.ts:102-108 vs link-resolve.ts:31-39 · spec.agent.ts:292 · local-git.adapter.ts:196-211</span></td>
+        <td class="why">Chunk-citation anchors and link anchors use divergent recipes (they disagree on unicode). Citation
+        validation accepts any anchor on a retrieved path, so hallucinated <code>#sections</code> survive as "checked".
+        The drift signal (<code>commitsSince</code>) was written and never wired; the links/backlinks API has zero UI consumers.</td>
+        <td><span class="chip warnc">discipline</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="cgr">
+  <p class="kicker">Part 2 · The benchmark</p>
+  <h2>What code-graph-rag is, and what it settles</h2>
+  <p class="lede">
+    A solo-maintained, MIT-licensed CLI + MCP server that tree-sitter-parses a polyglot monorepo into a Memgraph property
+    graph, then lets an LLM write Cypher against it — with optional code editing. Pre-1.0 with a patch release per merge,
+    unusually serious about testing, unusually raw at the architectural seams.
+  </p>
+
+  <div class="grid2">
+    <div class="stat"><div class="num">77.7k / 254k</div><div class="lbl">production vs test LOC — a 3.3 : 1 test ratio, the repo's most credible quality signal</div></div>
+    <div class="stat"><div class="num">14 + YAML tier</div><div class="lbl">languages with full tree-sitter specs, plus a one-YAML-file tier for cheap new-language support</div></div>
+    <div class="stat"><div class="num">0 LLM calls</div><div class="lbl">at index time — the whole semantic pipeline is deterministic, same bet as specd, at 14× the language surface</div></div>
+    <div class="stat"><div class="num">F1 0.957</div><div class="lbl">retrieval vs an independent oracle on django (~2,900 files) — the most honest number; the headline "1.0" is self-scored</div></div>
+  </div>
+
+  <h3>Three things it settles for specd</h3>
+  <p><b>The Postgres-only constraint is an advantage, not a limitation.</b> cgr's two most valuable analyses (dead code,
+  flow reachability) both <em>bypass Memgraph</em> — they fetch the edge list into Python and BFS there, because the
+  per-root Cypher hit the database's 600-second timeout on django (31k roots, 101k CALLS edges). The graph DB is used as
+  an indexed edge store, which is exactly what a <code>code_edge</code> table with a recursive CTE does — inside a
+  transaction, which cgr's store doesn't have at all (<span class="refs">dead_code.py:1-7 · graph_service.py:225</span>).</p>
+  <p><b>Deterministic-index / LLM-at-query-boundary scales.</b> Nothing LLM-shaped is reachable from cgr's indexer across
+  14 languages of genuinely semantic extraction — call resolution, type inference, taint. The index stays reproducible,
+  diffable, oracle-testable, and free. specd's identical bet for docs extends cleanly to code.</p>
+  <p><b>Deterministic fusion beats model-driven retrieval.</b> cgr's NL→Cypher has regex-only validation and no repair
+  loop — a wrong-but-valid query is indistinguishable from "no results". Its vector arm isn't fused with the graph arm at
+  all; an LLM is told in prose to combine them. specd's fixed RRF + bounded expansion pipeline is the stronger design;
+  the reliability budget belongs there, not in query generation.</p>
+  <p><b>And one thing specd has that cgr lacks entirely:</b> per-claim citation validation. cgr's provenance discipline
+  stops at "cite your sources" in a prompt (<span class="refs">prompts.py:194</span>). Nothing checks a citation against
+  what was retrieved. That validator is specd's moat — Phase 2 doubles down on it.</p>
+</section>
+
+<section id="target">
+  <p class="kicker">Part 3 · Target architecture</p>
+  <h2>One pipeline, three additions</h2>
+  <figure class="diagram">
+    <div class="svgwrap">
+    <svg viewBox="0 0 960 400" role="img" aria-label="specd pipeline: target repo flows through merge webhook to an async indexer, which writes docs, links and new code symbols to Postgres in one guarded transaction; retrieval runs RRF fusion then one-hop doc expansion and new code expansion; the SpecAgent drafts specs with three-verdict citations. New elements are marked in magenta.">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0 0, 10 4, 0 8" fill="currentColor"></polygon>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.3">
+        <rect x="20" y="46" width="200" height="118" rx="8"></rect>
+        <rect x="330" y="46" width="240" height="118" rx="8"></rect>
+        <rect x="680" y="46" width="260" height="118" rx="8"></rect>
+        <rect x="330" y="252" width="240" height="118" rx="8"></rect>
+        <rect x="680" y="252" width="260" height="118" rx="8"></rect>
+      </g>
+      <g font-size="12.5" fill="currentColor" font-family="ui-monospace, SF Mono, Menlo, monospace">
+        <text x="34" y="72" font-weight="bold" font-size="13">target repo (git)</text>
+        <text x="34" y="96">knowledge/**/*.md</text>
+        <text x="34" y="118" fill="var(--signal-text)">+ src/** symbols (git diff)</text>
+        <text x="34" y="140" fill="var(--signal-text)">+ co-change history mining</text>
+
+        <text x="344" y="72" font-weight="bold" font-size="13">indexer (async job)</text>
+        <text x="344" y="96">chunk · embed · link-extract</text>
+        <text x="344" y="118" fill="var(--signal-text)">+ tree-sitter symbol pass</text>
+        <text x="344" y="140" fill="var(--signal-text)">+ extractor fingerprint</text>
+
+        <text x="694" y="72" font-weight="bold" font-size="13">Postgres (only store)</text>
+        <text x="694" y="96">docs · chunks · links</text>
+        <text x="694" y="118" fill="var(--signal-text)">+ code_node (blob/commit SHA)</text>
+        <text x="694" y="140" fill="var(--signal-text)">+ doc→code link kinds</text>
+
+        <text x="344" y="278" font-weight="bold" font-size="13">retrieval</text>
+        <text x="344" y="302">RRF: pgvector + tsvector</text>
+        <text x="344" y="324">1-hop doc expansion (S-102)</text>
+        <text x="344" y="346" fill="var(--signal-text)">+ code-neighbour expansion</text>
+
+        <text x="694" y="278" font-weight="bold" font-size="13">SpecAgent</text>
+        <text x="694" y="302">drafts spec, cites chunks</text>
+        <text x="694" y="324" fill="var(--signal-text)">+ verdicts: SUPPORTED /</text>
+        <text x="694" y="346" fill="var(--signal-text)">  UNSUPPORTED / UNKNOWN·STALE</text>
+      </g>
+      <g stroke="currentColor" stroke-width="1.3" fill="none">
+        <line x1="220" y1="105" x2="322" y2="105" marker-end="url(#arr)"></line>
+        <line x1="570" y1="105" x2="672" y2="105" marker-end="url(#arr)"></line>
+        <path d="M 750 164 L 750 205 L 450 205 L 450 250" marker-end="url(#arr)"></path>
+        <path d="M 570 311 L 672 311" marker-end="url(#arr)"></path>
+      </g>
+      <g font-size="11.5" fill="currentColor" font-family="-apple-system, Segoe UI, sans-serif">
+        <text x="234" y="93">merge webhook</text>
+        <text x="234" y="124" fill="var(--signal-text)">queued job</text>
+        <text x="588" y="93">writes: one tx,</text>
+        <text x="588" y="124" fill="var(--signal-text)">shrink-guarded</text>
+        <text x="470" y="226">SELECT — bounded joins, recursive CTE</text>
+        <text x="576" y="296">chunks + edge-id</text>
+        <text x="596" y="332">provenance</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>
+      The pipeline after all three phases. <span class="lg-new">Magenta = new</span>; everything monochrome exists today.
+      The shape doesn't change — code symbols enter as a second deterministic extraction pass writing to two new tables,
+      and retrieval gains one more bounded expansion arm. No new stores, no new services.
+    </figcaption>
+  </figure>
+</section>
+
+<section id="plan">
+  <p class="kicker">Part 4 · The plan</p>
+  <h2>Three phases, ordered by leverage</h2>
+  <p class="lede">
+    Phase 1 clears debt that undermines everything downstream. Phase 2 compounds S-102 and widens specd's real
+    differentiator. Phase 3 is the strategic feature. Each item names its origin:
+    <span class="chip">audit</span> = found in specd's code, <span class="chip">cgr</span> = adopted from code-graph-rag,
+    <span class="chip">S-102 debt</span> = promised by the spec, not delivered.
+  </p>
+
+  <div class="phase">
+    <header>
+      <span class="pnum">Phase 1</span>
+      <h3>Repair the foundations</h3>
+      <span class="ptag done">✓ complete — #35 · #36/#37 · #38</span>
+    </header>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #35</span> 1.1 — One transaction per repo index run, and the real shrink guard</h4>
+        <div class="chips"><span class="chip">S-102 debt</span><span class="chip okc">impact: high</span><span class="chip">effort: M</span></div></div>
+      <p>Wrap <code>indexRepository</code>'s writes in a single transaction and implement the guard S-102 actually
+      specified: abort when the run would remove docs <em>or edges</em> whose sources were neither re-indexed nor deleted
+      in this run — a provenance check, not today's count-and-ratio heuristic. cgr is the cautionary tale here: its
+      autocommit delete-then-reinsert incremental path can be left permanently half-deleted by one crash. Postgres gives
+      specd the rollback for free; it's currently unused.</p>
+      <div class="do"><b>Concretely</b> One <code>db.transaction</code> around upserts/deletes per repo; guard compares the
+      removal set against this run's discovered-paths set; append the four unrecorded deviations to S-102's Deviations
+      section in the same PR (repo rule 4).</div>
+      <p class="refs">knowledge.service.ts:173, :241-250, :871-886 · cgr: graph_service.py:225</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #36 · #37</span> 1.2 — An extractor fingerprint as the second cache key</h4>
+        <div class="chips"><span class="chip">cgr</span><span class="chip okc">impact: high</span><span class="chip">effort: S</span></div></div>
+      <p>The per-doc SHA skip has a blind spot cgr names precisely: <em>"a graph is a function of (source files, parser
+      code, parser config)"</em> — specd hashes only the first. Change the chunker, embedder, or link extractor and every
+      unchanged doc keeps old-generation rows. The hand-bumped <code>LINKS_VERSION = 2</code> is a special case of the
+      general mechanism; generalize it: fingerprint chunker + embedder (provider, model, dims) + extractor versions, stamp
+      it per index generation, force a full re-index on mismatch. This also closes A3's mixed-vector-space hole.</p>
+      <p class="refs">knowledge.service.ts:41, :106-133 · cgr: parser_fingerprint.py:15-42</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #36 · #37</span> 1.3 — Make the truncation notice honest</h4>
+        <div class="chips"><span class="chip">audit</span><span class="chip okc">impact: high</span><span class="chip">effort: S</span></div></div>
+      <p>cgr gets one thing exactly right that specd currently gets wrong in practice: truncation must announce itself
+      <em>truthfully</em>, because "the agent sees a truncated list and assumes it is complete." specd's notice fires on
+      essentially every draft with a meaningless count (A2). Compute <code>matchedCount</code> from real corpus-bounded
+      counts — the lexical arm's match count plus a similarity-thresholded dense count — so the notice appears only when
+      relevant material was actually cut, and its number means something.</p>
+      <p class="refs">knowledge.service.ts:431-465, :491 · cgr: structural_search.py:17-21, token_utils.py:23-53</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #36 · #37</span> 1.4 — Embedding provider hardening</h4>
+        <div class="chips"><span class="chip">audit</span><span class="chip">impact: med</span><span class="chip">effort: S</span></div></div>
+      <p>Three one-line bugs with outsized quiet cost: configured-Voyage-without-key silently degrades to the hash
+      embedder; queries embed as <code>input_type: 'document'</code> (Voyage's asymmetric query type is never used); and
+      no provider/dim stamp exists on chunk rows. Fail loudly on misconfiguration, use <code>'query'</code> at query
+      time, stamp provider per chunk, and refuse to search across mixed spaces (the 1.2 fingerprint enforces the rebuild).</p>
+      <p class="refs">embeddings.ts:86, :108-112 · knowledge.service.ts:414</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #38</span> 1.5 — Take indexing off the webhook's back, batch the writes</h4>
+        <div class="chips"><span class="chip">audit</span><span class="chip">impact: med-high</span><span class="chip">effort: M</span></div></div>
+      <p>Indexing currently runs synchronously inside the webhook HTTP request — chunk-by-chunk INSERTs, a project
+      doc-list load per doc, a SELECT per anchored link, an HTTP GET per file. Queue it as an <code>agent_runs</code> job
+      instead (S-101's lease/reclaim machinery already exists and index jobs are idempotent — the cheapest possible
+      client for it), then batch: multi-row inserts, one doc-map load per run, preloaded link contents.</p>
+      <p class="refs">github-webhook.service.ts:395-403 · knowledge.service.ts:248-257, :285-288, :313-322 · runner-jobs.service.ts:161-248</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <header>
+      <span class="pnum">Phase 2</span>
+      <h3>Sharpen the moat: citation discipline &amp; graph value</h3>
+      <span class="ptag done">✓ complete — #39 · #40 · #41 · #42 · #43 · #44</span>
+    </header>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #40</span> 2.1 — Three-verdict citation validation with coverage gaps</h4>
+        <div class="chips"><span class="chip">cgr</span><span class="chip okc">impact: highest</span><span class="chip">effort: M</span></div></div>
+      <p>The single best idea in code-graph-rag, from its flow analysis: <em>"an absent path must never read as a
+      PASS"</em> — an empty result is only meaningful if you know the analysis covered the space. Ported to specd's
+      validator: a claim's citation today resolves to valid-or-UNVERIFIED, a binary. Make it three-valued —
+      <b>SUPPORTED</b> (exact chunk match, anchor-strict — closing the loose-anchor hole from A6),
+      <b>UNSUPPORTED</b> (cites material that was retrievable but wasn't retrieved or doesn't exist), and
+      <b>UNKNOWN</b> (the corpus couldn't answer: the doc failed to index, was truncated out, or sits orphaned off the
+      graph). specd already computes the coverage ingredients — orphan docs, broken links, index failures; they just
+      never reach the verdict. "No evidence found, and these 3 docs failed to index" is a categorically more useful
+      answer than a silent UNVERIFIED.</p>
+      <div class="do"><b>Concretely</b> Per-doc <code>coverage</code> flag set during indexing (cgr's
+      <code>flow_covered</code>); validator consults it plus honest truncation (1.3); anchors validated against the
+      retrieved chunk's real heading; verdict + reason persisted per claim, surfaced in the run log and spec review UI.</div>
+      <p class="refs">spec.agent.ts:276-328, :292 · cgr: flow_verdict.py:1-6, :50-94</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #39 (a)</span> 2.2 — Feed the starved graph</h4>
+        <div class="chips"><span class="chip">audit</span><span class="chip okc">impact: high</span><span class="chip">effort: S</span></div></div>
+      <p>Three cheap fixes that multiply S-102's ROI. (a) Fix <code>packages/templates/src/knowledge.ts</code> — the
+      generated scaffold contains zero extractable links, so every onboarded repo starts as an all-orphan graph; this
+      repo's own map was hand-fixed in PR #32 but the template still ships the bug to every customer. (b) Extract
+      code-path mentions (<code>apps/api/src/…</code>) as link edges instead of requiring <code>.md</code> — they're the
+      most common cross-reference in real engineering docs, and they become resolvable the moment Phase 3 lands.
+      (c) Keep unresolved out-of-tree targets as <code>unresolved</code> rows instead of dropping them — dangling links
+      are a health signal, not noise.</p>
+      <p class="refs">packages/templates/src/knowledge.ts · link-extract.ts:36 · knowledge.service.ts:302-308</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #42</span> 2.3 — Machine-joinable expansion provenance, scored</h4>
+        <div class="chips"><span class="chip">S-102 debt</span><span class="chip">impact: med</span><span class="chip">effort: S</span></div></div>
+      <p>Graph-expanded chunks carry a prose label instead of the edge id S-102 required, and <code>score: 0</code> —
+      unjoinable and unrankable downstream. Store the actual <code>knowledge_doc_links.id</code>, and give expanded
+      chunks a discounted score (seed score × edge weight × discount) so ordering is principled and 2.1's verdicts can
+      cite the exact edge that justified a pulled-in chunk.</p>
+      <p class="refs">knowledge.service.ts:566, :611-613</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #41</span> 2.4 — Structured health, real drift, and the UI that already has an API</h4>
+        <div class="chips"><span class="chip">audit</span><span class="chip">impact: med</span><span class="chip">effort: M</span></div></div>
+      <p>Broken links, dangling anchors, and orphans exist only as prose note strings — the UI can't badge, sort, or
+      trend them, and they don't touch the health score. Promote them to structured fields and fold them into the score.
+      Populate <code>doc_updated_at</code> for hosted repos from webhook payloads so freshness measures the doc, not the
+      index (today it's null and staleness detection is effectively dead — 2.5 then upgrades drift from a 90-day proxy
+      to a real signal). And render links and backlinks in KnowledgeView — the per-doc API is built, tested, and has
+      zero consumers.</p>
+      <p class="refs">knowledge.service.ts:135-138, :725-799 · projects.controller.ts:363-377</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #44</span> 2.5 — Git history as a signal source: co-change edges and real drift</h4>
+        <div class="chips"><span class="chip new">new signal</span><span class="chip okc">impact: high</span><span class="chip">effort: S-M</span></div></div>
+      <p>Git is the one source specd trusts absolutely — "git is truth; the index is derived" — yet the engine only ever
+      reads HEAD. Mine a <em>bounded</em> window of history (12–24 months, filtering the classic poison: lockfiles,
+      generated paths, and bulk commits touching 100+ files) into two deterministic signals. First, per-doc commit
+      metadata. Second — the killer app — <b>doc↔code co-change coupling</b>: which code paths historically change in
+      the same commits as each doc. That turns drift detection from the current 90-day proxy into the honest claim the
+      knowledge README already makes and can't back: <em>"this doc's coupled code has changed 14 times since the doc was
+      last touched."</em> Neither benchmark can do this — code-graph-rag walks the filesystem and explicitly abandoned
+      rename handling; graphify has no git integration at all.</p>
+      <div class="do"><b>Concretely</b> Co-change lands as a new edge kind in the existing table —
+      <code>kind: 'cochange'</code>, <code>origin_tier: 'history'</code>, finally using the tier seam S-102 shipped and
+      never filled — weighted below authored links (statistical, not intentional). It runs on the <b>runner</b> over a
+      real clone (one <code>git log --numstat</code>; the REST adapters can't crawl history within rate limits),
+      bootstrapped at onboarding and kept fresh from webhook push payloads at O(new commits). The digest (hotspots,
+      cadence, branch conventions) also feeds the onboarding agent's prompt so generated docs describe the living parts
+      of the repo. Aggregate author data before anything customer-visible. This is also the prerequisite for 3.2's
+      "changed in the same PR as the doc" edge weighting.</div>
+      <p class="refs">knowledge.service.ts:762-766 · local-git.adapter.ts:196-211 · onboarding.agent.ts:84-108 · schema.ts:411 (origin_tier)</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #43</span> 2.6 — One schema table → prompt, audit, and docs</h4>
+        <div class="chips"><span class="chip">cgr</span><span class="chip">impact: med</span><span class="chip">effort: S</span></div></div>
+      <p>cgr defines its node/edge schema once as typed tuples and generates three consumers from it: the LLM's prompt
+      block, a structural graph audit, and the docs — so none can drift (and the one table it maintains by hand is
+      exactly where its docs <em>did</em> drift). specd's link kinds, edge weights, and provenance fields should live in
+      one constant table generating the SpecAgent's retrieval-schema prompt, an index-integrity check, and the
+      knowledge-docs section. Also the cheapest place to unify the two slugifiers (A6) into the shared module S-102
+      mandated.</p>
+      <p class="refs">chunker.ts:102-108 vs link-resolve.ts:31-39 · cgr: types_defs.py:766+, schema_builder.py:35-41, graph_audit.py:21-47</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <header>
+      <span class="pnum">Phase 3</span>
+      <h3>Code-aware specd — a symbol index, not a call graph</h3>
+      <span class="ptag done">✓ complete — #46 · #47 · #48 · #49 · #50 · #54 · #58</span>
+    </header>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #46 · #47</span> 3.1 — Tier-1 symbol index over the target repo</h4>
+        <div class="chips"><span class="chip new">new capability</span><span class="chip okc">impact: high</span><span class="chip">effort: L</span></div></div>
+      <p>specd indexes zero source code today — the onboarding scan reads manifests only and discards even those. The
+      strategic gap: a SpecAgent drafting a spec about <code>RunnerJobsService</code> cannot see that it exists, where it
+      lives, or that an ADR's reference to it went stale two renames ago. cgr's cost accounting scopes the fix precisely:
+      its symbol/containment layer (language specs, qualified-name registry, parser loader) is ~1,600 lines for 14
+      languages and scores F1 ≈ 1.0 against independent oracles — while call resolution is 14,000+ lines, a 15-pass
+      hand-ordered pipeline, and the entire maintenance nightmare. <b>Spec grounding needs the former, not the latter.</b></p>
+      <div class="do"><b>Concretely</b> Tree-sitter symbol extraction for 3–5 launch languages (TS/JS, Python, Go match
+      specd's own stack), a declarative per-language spec after cgr's <code>LanguageSpec</code>/<code>FQNSpec</code> shape.
+      Two tables: <code>code_node(repo, kind, qualified_name, path, span, blob_sha, commit_sha)</code> with a unique index
+      per <code>(repo, kind, qualified_name)</code> — plus a <code>reverse(qualified_name)</code> index from day one
+      (suffix lookup was cgr's #1 hot path, 48% of CPU until indexed) — and <code>code_edge</code> for containment +
+      imports only. Dotted qualified names with per-language file→module rules, adopted verbatim; cgr's collision-variant
+      scheme (<code>name@line</code>) for legitimate duplicates.</div>
+      <p class="refs">onboarding.agent.ts:84-108 · vcs.types.ts:77-95 · cgr: language_spec.py:342-659, function_registry.py:69-90, BENCHMARK_REPORT.md:15-30</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #46 · #48 · #50 · #58</span> 3.2 — Doc↔code links, and STALE as a first-class verdict</h4>
+        <div class="chips"><span class="chip new">new capability</span><span class="chip okc">impact: high</span><span class="chip">effort: M</span></div></div>
+      <p>This is where specd overtakes the benchmark, because cgr has no docs layer at all. The existing
+      <code>knowledge_links</code> table already carries kinds and resolution states — add code-target kinds
+      (<code>pathref</code> resolving to a real file at HEAD, <code>symbolref</code> resolving
+      <code>`RunnerJobsService.claim`</code> to a <code>code_node</code>). Retrieval expansion works unchanged: a chunk
+      citing a symbol pulls the symbol's snippet with <code>via:'graph'</code> provenance. Edge weights become the
+      tuning surface: a link to a symbol touched in the same PR as the doc (2.5's history signal) outweighs one to a
+      symbol they last shared years ago. And because every code node
+      carries its blob and commit SHA, a citation to a symbol whose blob changed since indexing becomes
+      <b>STALE</b> — feeding directly into 2.1's verdicts. "This ADR references three symbols; two exist, one was deleted
+      in commit X" becomes a health note. cgr can't say that — it re-reads disk at answer time and can silently disagree
+      with its own index.</p>
+      <p class="refs">schema.ts:389-418 · knowledge.service.ts:503-615 · cgr: code_retrieval.py:76-104</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #48 (by content identity)</span> 3.3 — Incremental by git diff, with store-rehydrated resolution</h4>
+        <div class="chips"><span class="chip">cgr</span><span class="chip okc">impact: high</span><span class="chip">effort: M</span></div></div>
+      <p>cgr walks the filesystem with an MD5 cache and a mtime fast path (which archive restores and rsync silently
+      defeat), and it explicitly gave up on rename detection. specd is derived-from-git: <code>git diff -M
+      --name-status base..head</code> yields the changed set <em>with renames</em> for free, no cache, no mtime trust.
+      Copy the two ideas cgr got right: rehydrate the symbol table for unchanged files from Postgres before resolving
+      links in changed ones (one indexed SELECT — otherwise a doc referencing an untouched symbol loses its edge on
+      every merge), and its failure policy verbatim: a rehydration read failure <em>aborts</em> the incremental run,
+      never silently degrades it. All inside the Phase-1 transaction, which makes cgr's fragile capture-and-restore
+      dance unnecessary — inbound rows are never deleted in the first place.</p>
+      <p class="refs">cgr: graph_updater.py:1064-1150, :1077-1085, :1744-1748 · evals/README.md:210-218</p>
+    </div>
+
+    <div class="item">
+      <div class="head"><h4><span class="chip shipped">shipped #49 · #54</span> 3.4 — An eval harness with independent oracles</h4>
+        <div class="chips"><span class="chip">cgr</span><span class="chip">impact: med</span><span class="chip">effort: M</span></div></div>
+      <p>The strongest thing in cgr's repo is its eval discipline: per-language <em>independent</em> oracles (Python
+      <code>ast</code>, the TS compiler API, <code>go/parser</code>…), a fair-file-set rule, an incremental-correctness
+      eval whose oracle is a clean full re-index, and published corrections against itself. Its one flaw: the default
+      target is its own codebase, where it reports a perfect 1.0. Adopt the methodology, invert the default: grade
+      specd's link extraction and symbol resolution against independent parsers on <em>external</em> corpora, keep
+      self-indexing as the smoke test. The incremental-vs-clean-rebuild eval is the one that catches the bugs that
+      matter (cgr: only 10 of 25 edits reproduced a clean index exactly, before its eval-driven fix).</p>
+      <p class="refs">cgr: evals/README.md:153-218, :925-1043, :1101-1102 · evals/cli.py:22-24</p>
+    </div>
+  </div>
+</section>
+
+<section id="dont">
+  <p class="kicker">Part 5 · Negative space</p>
+  <h2>Do not adopt</h2>
+  <p class="lede">Documented so the next benchmarking exercise doesn't relitigate them.</p>
+  <ul class="dont">
+    <li><b>Memgraph — or any graph database.</b> cgr's own scale evidence is the argument: two analyses retreated to
+    client-side BFS after 600s timeouts at 101k edges, the store runs without transactions, unbounded in memory, three
+    Docker containers deep. Postgres tables + recursive CTEs reproduce the model transactionally.
+    <span class="refs">dead_code.py:1-7 · flow_verdict.py:4-6 · docker-compose.yaml</span></li>
+    <li><b>NL→Cypher query generation.</b> Regex-validated, no repair loop, and a wrong-but-valid query reads as "no
+    results". specd has no query language to generate; keep retrieval a fixed, testable pipeline.
+    <span class="refs">llm.py:60-154</span></li>
+    <li><b>Write tools and shell access in the retrieval loop.</b> cgr's approval machinery is genuinely well-built — and
+    entirely unnecessary for a consumer that drafts specs. The SpecAgent should never hold a pen that edits repos.
+    <span class="refs">shell_command.py:69-267 · file_editor.py:302</span></li>
+    <li><b>Repo-supplied instructions in the system prompt.</b> cgr concatenates the analysed repo's <code>.cgr.md</code>
+    into its system prompt — a direct prompt-injection channel from a hostile repo, unacknowledged in its security docs.
+    specd indexes third-party repos' docs; keep them in user-turn context behind untrusted-content delimiters, always.
+    <span class="refs">config.py:492-501 · prompts.py:200-207</span></li>
+    <li><b>Watch-mode style O(whole-graph) refresh.</b> One saved file triggering a full CALLS wipe-and-recompute across
+    every project in the store. specd's merge-driven, per-doc incremental model is already correct; extend it, never
+    replace it. <span class="refs">realtime_updater.py:322-323</span></li>
+    <li><b>mtime-trusting fast paths.</b> Archive restores, rsync, and container copies rot the index silently. Git diff
+    makes the entire mechanism unnecessary. <span class="refs">graph_updater.py:1744-1748</span></li>
+    <li><b>Self-scored headline numbers.</b> If specd publishes benchmarks, the external corpus is the headline and the
+    self-test is the smoke test — cgr's committed 1.0-across-the-board on its own source is what not to do; its django
+    0.957 is what to publish. <span class="refs">evals/results/scores.csv · evals/README.md:139-140</span></li>
+  </ul>
+</section>
+
+<footer class="method">
+  <p><b>Method &amp; provenance.</b> Two independent read-only analyses, run 2026-08-10: a deep-dive of code-graph-rag
+  v0.0.591 (commit 234816e, cloned from github.com/vitali87/code-graph-rag) and a file-level audit of specd@8e5c08a
+  (post S-101/S-102). All file:line references were verified in source at those revisions; cgr paths are relative to its
+  repo root, specd paths to this repo. Companion to the graphify engine analysis in
+  <code>knowledge/research/graphify-engine-analysis.md</code> — graphify informed S-102's doc graph; this plan targets
+  what comes after it. License note: cgr is MIT (no CLA/DCO), safe to learn from; its <code>optimize/</code> directory
+  contains a copyrighted commercial PDF and third-party source dumps — do not vendor anything from that path.</p>
+</footer>
+
+</div>
+</body>
+</html>

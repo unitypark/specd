@@ -18,7 +18,10 @@ landed the doc graph. Companion to the
 itself. Together with a same-day as-built audit of this repo's engine, it
 produced the phased improvements plan of 2026-08-10 — foundation repairs,
 citation discipline, then a tier-1 **symbol index** (explicitly not a call
-graph; §10 below carries the cost evidence for that scoping).
+graph; §10 below carries the cost evidence for that scoping). The plan
+document itself — kept as written, with each item carrying the PR that
+delivered it — is archived at
+[`docs/improvements-plan.html`](../../docs/improvements-plan.html).
 
 **Citation caveat:** `$CGR/` below denotes the code-graph-rag repository root
 at the version above. Every `file:line` reference points into that source

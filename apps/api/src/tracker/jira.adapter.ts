@@ -74,10 +74,12 @@ export class JiraAdapter {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new JiraError(
-        `Jira ${init.method ?? 'GET'} ${path} → ${res.status}: ${describeJiraError(body) || res.statusText}`,
-        res.status,
-      );
+      // Jira answers several failures with an empty body, so the status code
+      // is all there is to go on. Saying "404" to someone who mistyped their
+      // site URL is not an answer; saying which of the three things they
+      // typed is wrong usually is.
+      const explanation = describeJiraError(body) || hintForStatus(res.status) || res.statusText;
+      throw new JiraError(`Jira ${init.method ?? 'GET'} ${path} → ${res.status}: ${explanation}`, res.status);
     }
 
     // 204 on transitions and some comment operations.
@@ -241,6 +243,22 @@ export function plainText(node: AdfNode | string | null | undefined): string {
   };
 
   return walk(node).trim();
+}
+
+/** What a bare status code most likely means when Jira sends no body with it. */
+function hintForStatus(status: number): string | null {
+  switch (status) {
+    case 401:
+      return 'the email or API token was rejected — check both, and that the token has not been revoked';
+    case 403:
+      return 'that account is not allowed to do this on this site';
+    case 404:
+      return 'no such site, project or issue — check the site URL is your real Atlassian domain';
+    case 429:
+      return 'rate-limited by Atlassian; try again shortly';
+    default:
+      return status >= 500 ? 'Jira is having trouble on its side' : null;
+  }
 }
 
 /** Jira reports failures in three different shapes depending on the endpoint. */

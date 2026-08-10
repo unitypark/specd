@@ -204,6 +204,20 @@ describe('errors', () => {
     stub([{ status: 502, body: '<html>Bad Gateway</html>' }]);
     await expect(jira().verify()).rejects.toThrow(/Bad Gateway/);
   });
+
+  it('explains a bare status code, since Jira often sends no body at all', async () => {
+    // A mistyped site URL 404s with an empty body. "→ 404:" tells the person
+    // who typed it nothing; naming which of the three fields is likely wrong
+    // does.
+    stub([{ status: 404, body: '' }]);
+    await expect(jira().verify()).rejects.toThrow(/check the site URL/i);
+
+    stub([{ status: 401, body: '' }]);
+    await expect(jira().verify()).rejects.toThrow(/email or API token was rejected/i);
+
+    stub([{ status: 500, body: '' }]);
+    await expect(jira().verify()).rejects.toThrow(/trouble on its side/i);
+  });
 });
 
 describe('adf / plainText', () => {

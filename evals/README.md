@@ -76,18 +76,55 @@ The one persistent miss is honest about the corpus rather than the engine:
 runbook is still a generated stub, and the README genuinely answers the
 question better. A fair benchmark occasionally tells you the corpus is wrong.
 
+### Go vs `go/ast`, Python vs `ast`
+
+`native-oracles.eval.ts`, with the oracles themselves in `oracles/` — a Go
+program using `go/parser`, and a Python script using the `ast` module. Each is
+a subprocess reading paths on stdin and writing JSON, which is the cheapest
+interface there is and keeps the oracle honest: it cannot accidentally import
+the thing it grades.
+
+Graded against each language's own standard library, which is the number worth
+quoting because it is a large corpus nobody tuned the extractor against:
+
+| corpus | files | declarations | precision | recall | F1 |
+| --- | --- | --- | --- | --- | --- |
+| Go stdlib | 7,654 | 316,078 | 99.2% | 99.7% | **99.5%** |
+| Python stdlib | 3,830 | 93,999 | 99.2% | 99.7% | **99.4%** |
+
+Reproduce them:
+
+```
+pnpm eval --target "$(go env GOROOT)/src"
+pnpm eval --target "$(python3 -c 'import sysconfig;print(sysconfig.get_paths()["stdlib"])')"
+```
+
+This repository's own Go is six files, and the extractor scores 100% on it —
+which is exactly the number *not* to quote. Six files of one house style, and
+the fix below was written against them; the stdlib figures are the honest ones.
+
+The Go oracle earned its place on its first run by finding a whole idiom the
+extractor could not see. Go declares related constants as
+`const (\n  a = 1\n  b = 2\n)`, and every member is a top-level declaration
+with no keyword of its own — so a per-line keyword rule matched none of them.
+Seventeen missing in this repository's CLI alone, and recall on Go went 87.6%
+→ 100% once grouped declarations were handled.
+
 ## What is not graded, and why that is stated rather than hidden
 
-- **Go and Python have no oracle.** They are extracted and ungraded. That is
-  the honest state; reporting the TypeScript score as though it covered them
-  would be the dishonest one.
-- **The default corpus is this repository.** The benchmarked engine's own eval
-  suite defaults to its own source and reports a perfect 1.0 there
+- **This repository contains no Python.** The Python grader reports "no .py
+  files in this corpus" rather than a score, because precision and recall over
+  zero files are 100% and mean nothing. The stdlib figures above are how that
+  oracle is actually exercised.
+- **A missing toolchain is a skip, not a pass.** No `go` or no `python3` on
+  PATH reports the language as skipped and says which. An eval that cannot run
+  must never look like one that ran and succeeded.
+- **The default corpus is still this repository.** The benchmarked engine's own
+  eval suite defaults to its own source and reports a perfect 1.0 there
   (`knowledge/research/code-graph-rag-engine-analysis.md#7`), which is the one
-  place its methodology is weak. The oracle here is genuinely independent of
-  the thing it grades, so the corpus matters less — but a single codebase is
-  still one house style, and `--target` exists so that is one flag away rather
-  than a rewrite.
+  place its methodology is weak. Every oracle here is independent of the thing
+  it grades, and `--target` now works on any directory rather than only a
+  checkout — which is how the stdlib numbers above were produced.
 
 ## The eval that is a test
 

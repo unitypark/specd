@@ -49,6 +49,13 @@ interface LanguageSpec {
   rules: Rule[];
   /** Members indented under an open scope, e.g. TypeScript class methods. */
   memberRule?: Rule;
+  /**
+   * Opens a parenthesised declaration group whose members are bare indented
+   * names — Go's `const (\n  a = 1\n  b = 2\n)`. Each member is a top-level
+   * declaration with no keyword of its own, so a per-line keyword rule cannot
+   * see any of them. Found by the Go oracle, which counted seventeen.
+   */
+  groupRule?: { kind: SymbolKind; re: RegExp };
   lineComment: string;
 }
 
@@ -84,6 +91,7 @@ const GO: LanguageSpec = {
     { kind: 'type', re: /^type\s+([A-Za-z_][\w]*)\s+(?:struct|interface)\b/ },
     { kind: 'const', re: /^(?:const|var)\s+([A-Za-z_][\w]*)/ },
   ],
+  groupRule: { kind: 'const', re: /^(?:const|var|type)\s*\($/ },
   lineComment: '//',
 };
 
@@ -125,6 +133,7 @@ export function extractSymbols(path: string, content: string): ExtractedSymbol[]
   const out: ExtractedSymbol[] = [];
   let scope: string | null = null;
   let inBlockComment = false;
+  let inGroup = false;
 
   const lines = content.split('\n');
   for (const [i, raw] of lines.entries()) {
@@ -142,6 +151,40 @@ export function extractSymbols(path: string, content: string): ExtractedSymbol[]
       continue;
     }
     if (line.trimStart().startsWith(spec.lineComment) || line.trimStart().startsWith('*')) continue;
+
+    // Inside `const (` … `)`: every indented line declares something, and the
+    // names come before the `=` or the type. Comma-separated forms
+    // (`a, b = 1, 2`) declare both.
+    if (inGroup) {
+      if (/^\)/.test(line)) {
+        inGroup = false;
+        continue;
+      }
+      // The rest of the line decides. A continuation of the previous member's
+      // value — `bannerStyle = x.Border(…).Padding(…)` wrapped across lines —
+      // puts `Border(` at the start of a line otherwise shaped exactly like a
+      // declaration, so anything followed by `(` or `.` is not one. Checked
+      // here rather than as a lookahead, which backtracks into the identifier
+      // and silently truncates it.
+      const decl = /^\s+([A-Za-z_][\w]*(?:\s*,\s*[A-Za-z_][\w]*)*)(.*)$/.exec(line);
+      if (decl?.[1] && !/^\s*[(.]/.test(decl[2] ?? '')) {
+        for (const name of decl[1].split(',').map((n) => n.trim())) {
+          if (!name || name === '_') continue;
+          out.push({
+            kind: spec.groupRule!.kind,
+            name,
+            qualifiedName: name,
+            line: i + 1,
+            exported: /^[A-Z]/.test(name),
+          });
+        }
+      }
+      continue;
+    }
+    if (spec.groupRule?.re.test(line)) {
+      inGroup = true;
+      continue;
+    }
 
     let matched = false;
     for (const rule of spec.rules) {

@@ -16,6 +16,7 @@ interface Doc {
 interface DocLinks {
   outbound: { kind: string; rawTarget: string; site: string | null; state: string; targetPath: string | null }[];
   backlinks: { kind: string; site: string | null; sourcePath: string; sourceDocId: string }[];
+  coupledTo: { codePath: string; commitsTogether: number; commitsSince: number }[];
 }
 
 interface Health {
@@ -57,7 +58,10 @@ export function KnowledgeView({ slug }: { slug: string }) {
     if (links[id]) return;
     try {
       const res = await get<DocLinks>(`/projects/${slug}/knowledge/${id}`);
-      setLinks((prev) => ({ ...prev, [id]: { outbound: res.outbound, backlinks: res.backlinks } }));
+      setLinks((prev) => ({
+        ...prev,
+        [id]: { outbound: res.outbound, backlinks: res.backlinks, coupledTo: res.coupledTo ?? [] },
+      }));
     } catch {
       // A doc whose links will not load still lists; the row just does not expand.
     }
@@ -161,6 +165,14 @@ export function KnowledgeView({ slug }: { slug: string }) {
                   <p key={`b${i}`} className="muted">
                     ← <b>{l.kind}</b> from {l.sourcePath.replace(/^knowledge\//, '')}
                     {l.site && `#${l.site}`}
+                  </p>
+                ))}
+                {/* What history says this doc moves with — the code to read
+                    beside it when it looks stale (0013). */}
+                {links[doc.id]?.coupledTo.map((c, i) => (
+                  <p key={`c${i}`} className={c.commitsSince >= 10 ? 'bad' : 'muted'}>
+                    ⇄ <b>{c.codePath}</b> — changed together {c.commitsTogether}×
+                    {c.commitsSince > 0 && `, ${c.commitsSince} commits since`}
                   </p>
                 ))}
               </div>

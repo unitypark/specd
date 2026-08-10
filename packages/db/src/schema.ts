@@ -451,6 +451,33 @@ export const deviceCodes = pgTable(
 );
 
 /** Freshness/health snapshot, recomputed on every index run. */
+/**
+ * Doc↔code coupling mined from git history (0013). Separate from
+ * `knowledgeDocLinks` because the target is a code path, not a doc.
+ */
+export const knowledgeDocCoupling = pgTable(
+  'knowledge_doc_coupling',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    docId: uuid('doc_id')
+      .notNull()
+      .references(() => knowledgeDocs.id, { onDelete: 'cascade' }),
+    codePath: text('code_path').notNull(),
+    commitsTogether: integer('commits_together').notNull().default(0),
+    lastTogetherAt: timestamp('last_together_at', { withTimezone: true }),
+    /** Commits touching this path since the doc last changed — the drift. */
+    commitsSince: integer('commits_since').notNull().default(0),
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('knowledge_doc_coupling_doc_path_key').on(t.docId, t.codePath),
+    index('knowledge_doc_coupling_project_idx').on(t.projectId),
+  ],
+);
+
 export const knowledgeHealth = pgTable('knowledge_health', {
   projectId: uuid('project_id')
     .primaryKey()

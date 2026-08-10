@@ -373,6 +373,9 @@ export class ProjectsController {
     // Links and backlinks ride the doc view (S-102): where this doc points,
     // what points here, and which of its links are broken.
     const links = await this.knowledge.docLinks(project.id, docId);
-    return { ...doc, ...links };
+    // What history says this doc moves with (0013) — the code to compare it
+    // against when it looks stale.
+    const coupledTo = await this.knowledge.docCoupling(project.id, docId);
+    return { ...doc, ...links, coupledTo };
   }
 }

@@ -73,9 +73,18 @@ attached to one instance sees a run executing on another.
 requests without executing index runs — a way to keep indexing off the
 instances taking user traffic.
 
-**UNVERIFIED — never tested with more than one instance.** Everything above is
-true of the code and none of it has been run that way. Do not treat a second
-replica as a supported configuration until somebody has.
+**Tested, 2026-08-10.** Two API processes against one Postgres, six index runs
+queued at once: every run succeeded, each executed exactly once, no duplicate
+rows. Running it found three bugs that reading the code had not, all now
+fixed — a listing that asked git for an empty pathspec, two concurrent runs on
+one repository colliding on the unique index, and a query inside the index
+transaction that reached for a second pool connection and deadlocked when
+there were none spare. An index run now takes a transaction-scoped advisory
+lock on its repository, so concurrent runs serialise instead of racing.
+
+Still unproven at a level a production deployment would want: this was one
+machine, two processes, no load, no restarts mid-run, no network partition
+between an instance and Postgres.
 
 ## Backups
 
@@ -102,13 +111,19 @@ has never been performed.
 Each of these is a real gap, not an oversight in the writing:
 
 - **UNVERIFIED — no host.** No platform chosen, no container image, no process
-  supervision, no reverse proxy or TLS termination.
-- **UNVERIFIED — no CI/CD.** `pnpm typecheck && pnpm test` is run by hand.
-  Nothing gates a merge and nothing publishes an artefact.
+  supervision, no reverse proxy or TLS termination. This is the decision every
+  other unknown here is waiting on, and it is not a technical one.
+- **CI exists; CD does not.** `.github/workflows/ci.yml` runs
+  `pnpm typecheck && pnpm test` on every push and pull request, against a real
+  pgvector service — and then fails the run if the tests that need Postgres
+  were skipped rather than passed, because vitest exits zero either way.
+  Nothing publishes an artefact, and nothing deploys.
 - **UNVERIFIED — no observability.** The API logs to stdout and exposes
-  `GET /api/health` (reports database reachability, whether an AI key is
-  configured, and which embedder is active). There is no metrics endpoint, no
-  log aggregation and no alerting.
+  `GET /api/health`, which reports database reachability, whether an AI key is
+  configured, and which embedder is active — verified against two running
+  instances. There is no metrics endpoint, no log aggregation and no alerting,
+  and `/api/health` is a liveness check that says nothing about whether index
+  runs are being picked up.
 - **UNVERIFIED — no migration rollback story.** Migrations only roll forward.
   A bad one is recovered by writing the next one, or from backup.
 - **UNVERIFIED — no zero-downtime story.** Migration-then-restart against a

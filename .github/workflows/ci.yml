@@ -1,0 +1,90 @@
+# The gate that was being run by hand.
+#
+# `pnpm typecheck && pnpm test` is what knowledge/conventions.md commits to,
+# so that is exactly what this runs — no more, so CI cannot start disagreeing
+# with the documented command, and no less.
+#
+# Postgres is a service rather than an omission. Every test that needs it
+# skips itself when none is reachable, which keeps a laptop with no infra
+# green but would make a CI run that skipped them look identical to one that
+# passed them. The verify step below fails if the integration tests were
+# skipped, so that can never happen quietly.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # A branch that is pushed twice in a minute only needs its newest commit
+  # checked; the older run is answering a question nobody is asking any more.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        # Must match docker-compose.yml: the schema needs pgvector, and a
+        # plain postgres image fails at the first migration.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: specd
+          POSTGRES_PASSWORD: specd
+          POSTGRES_DB: specd
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U specd -d specd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Same values as .env.example. Real secrets are never needed: no test
+      # reaches a model or a VCS provider, and the vault key only has to be
+      # 32 bytes for the service to construct.
+      DATABASE_URL: postgres://specd:specd@localhost:5433/specd
+      JWT_SECRET: ci-only-not-a-secret
+      VAULT_MASTER_KEY: ZGV2LW9ubHktdmF1bHQta2V5LWNoYW5nZS1tZS0zMmI=
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - run: pnpm install --frozen-lockfile
+
+      # Migrations first: the integration tests read a schema, they do not
+      # create one.
+      - run: pnpm db:migrate
+
+      - run: pnpm typecheck
+
+      # The documented gate, verbatim, so CI cannot drift from the command
+      # knowledge/conventions.md tells people to run.
+      - run: pnpm test
+
+      # Then the API suite once more, for its machine-readable report. Two
+      # seconds of duplicate work to keep the step above literal: `pnpm test`
+      # exits zero whether its Postgres suites passed or skipped themselves,
+      # and those are the tests worth having a database for.
+      - name: Prove the tests that need Postgres actually ran
+        run: |
+          pnpm --filter @specd/api exec vitest run \
+            --reporter=json --outputFile=vitest-report.json
+          node scripts/check-no-skips.mjs apps/api/vitest-report.json

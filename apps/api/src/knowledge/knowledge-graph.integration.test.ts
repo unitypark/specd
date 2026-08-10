@@ -800,6 +800,31 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     await service.indexRepository(repo);
   });
 
+  it('survives two index runs racing on the same repository', async () => {
+    // Two API instances can legitimately index one repo at once: coalescing
+    // folds a request into a *queued* run, not a running one, so a merge
+    // arriving mid-run queues another. Both then decide, during their own
+    // prepare phase and before either has written anything, that every doc is
+    // new — and the loser used to fail on the unique index.
+    //
+    // Found by running two real instances, not by reading the code: the fake
+    // adapter every other test uses cannot race with itself.
+    const [a, b] = await Promise.all([
+      service.indexRepository(repo).catch((err: unknown) => err as Error),
+      service.indexRepository(repo).catch((err: unknown) => err as Error),
+    ]);
+
+    for (const outcome of [a, b]) {
+      expect(outcome, outcome instanceof Error ? outcome.message : '').not.toBeInstanceOf(Error);
+    }
+
+    const dupes = await handle!.sql<{ path: string }[]>`
+      SELECT path FROM knowledge_docs WHERE project_id = ${projectId}
+      GROUP BY path HAVING count(*) > 1
+    `;
+    expect(dupes).toEqual([]);
+  });
+
   it('rolls the whole run back when a step fails partway through', async () => {
     // The failure this exists to prevent: a doc's chunks are deleted before
     // its new ones are written, so a run that dies in between leaves the doc

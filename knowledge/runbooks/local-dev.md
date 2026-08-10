@@ -35,7 +35,9 @@ pnpm typecheck && pnpm test
 ```
 
 That is the whole gate, and it is what `knowledge/conventions.md` commits to.
-There is no lint step; the compiler and the tests are it.
+There is no lint step; the compiler and the tests are it. CI runs the same two
+commands on every push and pull request, so a green local run should mean a
+green CI run — with one deliberate difference, below.
 
 ### The trap: green does not always mean run
 
@@ -49,6 +51,10 @@ touching the index, the graph, retrieval, runs or webhooks. And when a whole
 integration file reports as *skipped* rather than failing, suspect the
 suite's own setup rather than the database: a `beforeAll` that throws — a
 fake missing a method a real adapter grew, say — surfaces the same way.
+
+CI refuses to accept either. It runs the suite a second time with a JSON
+reporter and fails if anything was skipped, which is the one place it is
+deliberately stricter than a local run.
 
 ## Evals
 

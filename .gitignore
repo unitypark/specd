@@ -21,3 +21,4 @@ pnpm-debug.log*
 
 # isolated build worktrees
 .specd-build/
+apps/api/vitest-report.json

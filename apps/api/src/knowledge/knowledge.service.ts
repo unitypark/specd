@@ -366,6 +366,21 @@ export class KnowledgeService {
 
     // --- Commit (one transaction, guarded) -------------------------------
     await this.handle.transaction(async (tx) => {
+      // One index run per repository at a time, across every instance.
+      //
+      // Coalescing folds a second request into a *queued* run, but not into a
+      // running one — so a merge arriving mid-run legitimately queues another,
+      // and with two API instances the two execute at once. Both then insert
+      // the same doc paths and one loses on the unique index: safe, because
+      // the transaction rolls back, but it fails a run for no reason a user
+      // could act on. Found by running two instances for real.
+      //
+      // The lock is transaction-scoped, so it releases on commit or rollback
+      // with no cleanup path to get wrong, and it waits rather than skipping:
+      // the second run re-reads git and its per-doc sha check makes the
+      // repeat cheap, where skipping could drop whatever landed between them.
+      await tx.sql`SELECT pg_advisory_xact_lock(hashtextextended(${repo.id}, 0))`;
+
       assertNoUnexplainedShrink(stored.length, removals.length, paths.length, repo.name);
 
       const edgesBefore = await edgeCountsBySource(tx, repo.projectId);
@@ -1119,8 +1134,9 @@ export class KnowledgeService {
   /** The most-drifted coupled area per doc — one row each, for the doc list. */
   private async topCoupling(
     projectId: string,
+    ctx: DbContext = this.handle,
   ): Promise<Map<string, { codePath: string; commitsSince: number }>> {
-    const rows = await this.handle.sql<
+    const rows = await ctx.sql<
       { doc_id: string; code_path: string; commits_since: number }[]
     >`
       SELECT DISTINCT ON (doc_id) doc_id, code_path, commits_since
@@ -1238,7 +1254,10 @@ export class KnowledgeService {
     const docCount = docs.length;
     const asBuiltCount = docs.filter((d) => d.kind === 'spec').length;
     const stubs = docs.filter((d) => d.isStub);
-    const coupling = await this.topCoupling(projectId);
+    // ctx, not the pool: called inside the index transaction, this must both
+    // see that transaction's own writes and not ask the pool for a second
+    // connection — which deadlocks when two runs hold the only two.
+    const coupling = await this.topCoupling(projectId, ctx);
     const freshnessFor = (d: (typeof docs)[number]) =>
       freshnessOf(d.docUpdatedAt, d.isStub, d.codeCommitsSince, coupling.get(d.id));
     const stale = docs.filter((d) => freshnessFor(d).stale && !d.isStub);
@@ -1496,9 +1515,16 @@ async function upsertDoc(
     return doc.existingId;
   }
 
+  // Upsert, not insert. Whether a doc already exists is decided during the
+  // prepare phase, outside the transaction, so two concurrent runs on one
+  // repository can both read "not there yet" and both take this branch — the
+  // second then loses on the unique index and fails a run for a reason no
+  // user could act on. The advisory lock above serialises them; this makes
+  // the loser correct rather than merely second.
   const [row] = await tx.db
     .insert(knowledgeDocs)
     .values(values)
+    .onConflictDoUpdate({ target: [knowledgeDocs.repositoryId, knowledgeDocs.path], set: values })
     .returning({ id: knowledgeDocs.id });
   if (!row) throw new Error('failed to insert knowledge doc');
   return row.id;

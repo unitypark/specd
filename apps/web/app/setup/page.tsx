@@ -58,6 +58,11 @@ interface GithubStatus {
   installUrl?: string;
   appSlug?: string;
 }
+interface JiraProject {
+  id: string;
+  key: string;
+  name: string;
+}
 interface OnboardResult {
   repoName: string;
   branch?: string;
@@ -113,6 +118,17 @@ export default function SetupWizard() {
 
   // step 4
   const [tracker, setTracker] = useState<'board' | 'jira' | null>(null);
+
+  // step 4 · Jira
+  const [jiraSiteUrl, setJiraSiteUrl] = useState('');
+  const [jiraEmail, setJiraEmail] = useState('');
+  const [jiraToken, setJiraToken] = useState('');
+  const [jiraProjectKey, setJiraProjectKey] = useState('');
+  const [jiraProjects, setJiraProjects] = useState<JiraProject[]>([]);
+  const [jiraConnectedAs, setJiraConnectedAs] = useState<string | null>(null);
+  const [jiraError, setJiraError] = useState<string | null>(null);
+  const [jiraImport, setJiraImport] = useState(true);
+  const [jiraImported, setJiraImported] = useState<{ imported: number; updated: number } | null>(null);
 
   // step 5
   const [onboardResults, setOnboardResults] = useState<OnboardResult[] | null>(null);
@@ -340,12 +356,68 @@ export default function SetupWizard() {
     }
   }
 
+  /**
+   * Connect Jira, then immediately list its projects with the same credential.
+   *
+   * Same shape as `connectGitlab`, and for the same reason: the server
+   * validates the token against `/myself` before storing it, and listing
+   * projects right afterwards proves the credential can actually see
+   * something. A bad token surfaces here, on the form, rather than leaving
+   * the wizard claiming a connection that fails later (§6 guardrail — the
+   * wizard must not lie).
+   */
+  async function connectJira() {
+    if (!project || !jiraSiteUrl || !jiraEmail || !jiraToken) return;
+    setBusy(true);
+    setJiraError(null);
+    try {
+      const res = await post<{ ok: boolean; connectedAs?: string }>(
+        `/projects/${project.slug}/connections/tracker`,
+        {
+          provider: 'jira',
+          siteUrl: jiraSiteUrl.trim(),
+          email: jiraEmail.trim(),
+          apiToken: jiraToken,
+        },
+      );
+      const listed = await get<{ projects: JiraProject[] }>(
+        `/projects/${project.slug}/tracker/jira/projects`,
+      );
+      setJiraProjects(listed.projects);
+      setJiraConnectedAs(res.connectedAs ?? jiraEmail.trim());
+    } catch (err) {
+      setJiraError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function connectTracker() {
     if (!project || !tracker) return;
     setBusy(true);
     setError(null);
     try {
-      await post(`/projects/${project.slug}/connections/tracker`, { provider: tracker });
+      if (tracker === 'jira') {
+        // Persist the chosen project key alongside the credential already
+        // validated by connectJira().
+        await post(`/projects/${project.slug}/connections/tracker`, {
+          provider: 'jira',
+          siteUrl: jiraSiteUrl.trim(),
+          email: jiraEmail.trim(),
+          apiToken: jiraToken,
+          projectKey: jiraProjectKey,
+        });
+
+        if (jiraImport) {
+          const result = await post<{ imported: number; updated: number }>(
+            `/projects/${project.slug}/tracker/jira/import`,
+            {},
+          );
+          setJiraImported(result);
+        }
+      } else {
+        await post(`/projects/${project.slug}/connections/tracker`, { provider: tracker });
+      }
       setStep(5);
     } catch (err) {
       fail(err);
@@ -908,12 +980,118 @@ export default function SetupWizard() {
                   <h5>📋 Built-in board</h5>
                   <p>Created instantly: Backlog → Spec draft → In review → Approved → Building → Done.</p>
                 </button>
-                <button type="button" className={`${styles.choice} ${styles.soon}`} disabled>
+                <button
+                  type="button"
+                  className={`${styles.choice} ${tracker === 'jira' ? styles.picked : ''}`}
+                  onClick={() => setTracker('jira')}
+                >
                   <h5>🔷 Jira Cloud</h5>
-                  <p>Atlassian OAuth. Status ↔ lifecycle mapped; specd comments backlinks.</p>
-                  <span className={styles.badge}>P3</span>
+                  <p>
+                    Your issues stay in Jira. specd imports them, comments a backlink when a spec
+                    moves, and mirrors status onto your own workflow.
+                  </p>
                 </button>
               </div>
+
+              {tracker === 'jira' && !jiraConnectedAs && (
+                <>
+                  <div className="field">
+                    <label htmlFor="jirasite">Site URL</label>
+                    <input
+                      id="jirasite"
+                      value={jiraSiteUrl}
+                      onChange={(e) => setJiraSiteUrl(e.target.value)}
+                      placeholder="https://your-team.atlassian.net"
+                      spellCheck={false}
+                    />
+                    <span className="hint">
+                      Jira <strong>Cloud</strong> only. Server and Data Center use different auth
+                      and are not supported.
+                    </span>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="jiraemail">Atlassian account email</label>
+                    <input
+                      id="jiraemail"
+                      value={jiraEmail}
+                      onChange={(e) => setJiraEmail(e.target.value)}
+                      placeholder="you@your-team.com"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="jiratoken">API token</label>
+                    <input
+                      id="jiratoken"
+                      type="password"
+                      value={jiraToken}
+                      onChange={(e) => setJiraToken(e.target.value)}
+                      placeholder="ATATT…"
+                      spellCheck={false}
+                    />
+                    <span className="hint">
+                      Create one at{' '}
+                      <a
+                        href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        id.atlassian.com
+                      </a>{' '}
+                      → Security → API tokens. Not an OAuth app — a token works immediately, with
+                      nothing to register.
+                    </span>
+                  </div>
+                  {jiraError && <div className="err">{jiraError}</div>}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={connectJira}
+                    disabled={busy || !jiraSiteUrl || !jiraEmail || !jiraToken}
+                  >
+                    {busy ? <span className="spinner" /> : 'Connect'}
+                  </button>
+                </>
+              )}
+
+              {tracker === 'jira' && jiraConnectedAs && (
+                <>
+                  <div className={styles.good}>✓ Connected as {jiraConnectedAs}.</div>
+                  <div className="field">
+                    <label htmlFor="jiraproject">Which Jira project?</label>
+                    <select
+                      id="jiraproject"
+                      value={jiraProjectKey}
+                      onChange={(e) => setJiraProjectKey(e.target.value)}
+                    >
+                      <option value="">Select a project…</option>
+                      {jiraProjects.map((p) => (
+                        <option key={p.id} value={p.key}>
+                          {p.key} — {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    {jiraProjects.length === 0 && (
+                      <span className="hint">
+                        This credential can see no projects. Check the account has access to at
+                        least one.
+                      </span>
+                    )}
+                  </div>
+                  <label className={styles.check}>
+                    <input
+                      type="checkbox"
+                      checked={jiraImport}
+                      onChange={(e) => setJiraImport(e.target.checked)}
+                    />
+                    <span>
+                      Import open issues onto the board now. Closed issues are skipped, and each
+                      one keeps its Jira key.
+                    </span>
+                  </label>
+                </>
+              )}
+
               <div className={styles.nav}>
                 <button type="button" className="btn" onClick={() => setStep(3)}>
                   ← Back
@@ -921,7 +1099,9 @@ export default function SetupWizard() {
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={busy || !tracker}
+                  disabled={
+                    busy || !tracker || (tracker === 'jira' && (!jiraConnectedAs || !jiraProjectKey))
+                  }
                   onClick={connectTracker}
                 >
                   Continue →

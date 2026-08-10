@@ -493,7 +493,14 @@ nobody can reason about gets ignored.
 Stated plainly, because the plan phases these and the UI should not imply
 otherwise:
 
-- **Jira sync** (P3) — interface-ready, adapter absent.
+- **Jira: inbound sync.** Connecting, importing issues, backlink comments and
+  status mirroring all work from the setup wizard — but the sync is one-way.
+  Moving an issue in Jira does not move the spec. Registering a Jira webhook
+  needs site admin, so that also needs a polling fallback; neither is built,
+  and nor is a UI for the lifecycle → status map (it is set over the API).
+  The adapter is tested against the documented REST contract with a stubbed
+  transport and **has not been run against a live Atlassian site**.
+  See [`docs/jira.md`](docs/jira.md).
 - **gitlab.com OAuth** — the wizard connects a GitLab project with a pasted
   personal/project access token (validated live) rather than an OAuth button;
   self-managed instances need a token regardless, since an OAuth app would

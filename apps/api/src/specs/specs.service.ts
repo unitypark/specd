@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { and, desc, eq, max } from 'drizzle-orm';
 import { specComments, specs, tickets, type Db } from '@specd/db';
@@ -20,11 +21,21 @@ import {
   type SpecView,
 } from '@specd/shared';
 import { DB } from '../db/db.module.js';
+import { TrackerService } from '../tracker/tracker.service.js';
 import { SpecNotApproved } from '../common/errors.js';
 
 @Injectable()
 export class SpecsService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  /**
+   * The tracker mirror is optional on purpose. Most projects use the built-in
+   * board and have none, and the spec lifecycle must behave identically with
+   * or without it — so it is injected, not required, and the tests that only
+   * care about the state machine construct this service with a database alone.
+   */
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Optional() private readonly tracker?: TrackerService,
+  ) {}
 
   /**
    * Creates the next version of a ticket's spec. Versions are append-only:
@@ -140,6 +151,19 @@ export class SpecsService {
     if (!row) throw new NotFoundException('Spec not found');
 
     await this.syncTicketColumn(row.ticketId, input.to);
+
+    // Tell Jira, if this ticket came from Jira. Deliberately not awaited: the
+    // spec's own state is already committed, and an Atlassian outage must
+    // never be able to fail an approval (decision 0010).
+    void this.tracker
+      ?.mirrorSpecTransition({
+        projectId: input.projectId,
+        ticketId: row.ticketId,
+        specId: row.id,
+        to: input.to,
+      })
+      .catch(() => undefined);
+
     return this.toView(row);
   }
 

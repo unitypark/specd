@@ -1,9 +1,7 @@
 {
   "questions": 15,
-  "recall": 0.9333333333333333,
-  "recallAt3": 0.8,
-  "mrr": 0.7944444444444444,
-  "misses": [
-    "how do I run the platform locally for the first time  →  wanted runbooks/local-dev.md, got README.md"
-  ]
+  "recall": 1,
+  "recallAt3": 0.8666666666666667,
+  "mrr": 0.861111111111111,
+  "misses": []
 }

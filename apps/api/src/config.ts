@@ -41,6 +41,17 @@ export class Config {
    */
   readonly localRepoRoot = process.env.SPECD_LOCAL_REPO_ROOT || null;
 
+  // ─── Runner job leases (S-101) ─────────────────────────────────────────────
+  // A dispatched job whose runner stops heartbeating becomes claimable again
+  // after the lease. Build gets its own, longer lease: a build is N model
+  // calls against a real checkout, and reclaiming one that is merely slow
+  // wastes far more than reclaiming a one-call spec draft. The daemon
+  // heartbeats every ~30s while executing, so these are multiples of that.
+  readonly runnerLeaseSeconds = num('SPECD_RUNNER_LEASE_SECONDS', 180);
+  readonly runnerLeaseBuildSeconds = num('SPECD_RUNNER_LEASE_BUILD_SECONDS', 900);
+  /** Reclaims allowed before the run is failed as repeatedly abandoned. */
+  readonly runnerMaxReclaims = num('SPECD_RUNNER_MAX_RECLAIMS', 3);
+
   // ─── GitHub App (§11) ──────────────────────────────────────────────────────
   // Absent by default: the whole product works in local mode without an App,
   // and every code path that needs one says so by name rather than failing

@@ -40,6 +40,15 @@ const DISPATCHABLE_KINDS = new Set(['spec', 'onboard', 'build']);
 const API = (process.env.SPECD_API ?? 'http://localhost:4000/api').replace(/\/$/, '');
 const TOKEN = process.env.SPECD_RUNNER_TOKEN;
 const POLL_INTERVAL_MS = Number(process.env.SPECD_RUNNER_POLL_MS ?? 5_000);
+/**
+ * Heartbeat cadence WHILE executing a job (S-101). Idle liveness is free —
+ * every poll bumps last_seen_at server-side — but a model call is minutes of
+ * silence, and silence is exactly what the server reads as "this runner is
+ * dead, reclaim its job". Must be comfortably inside the server's lease
+ * (default 180s): at 30s, a healthy runner misses a lease only if six
+ * consecutive heartbeats fail.
+ */
+const HEARTBEAT_INTERVAL_MS = Number(process.env.SPECD_RUNNER_HEARTBEAT_MS ?? 30_000);
 
 async function main() {
   if (!TOKEN) {
@@ -86,6 +95,16 @@ async function pollOnce() {
     return;
   }
 
+  // Keep proving we're alive for as long as the job runs. A failed heartbeat
+  // never fails the job — the work is real even when the network flapped; if
+  // the flap outlasts the lease, the server reclaims and our eventual report
+  // is refused as stale, which is the designed outcome, not an error here.
+  const heartbeatTimer = setInterval(() => {
+    heartbeat().catch((err) =>
+      console.error(`specd-runner: heartbeat failed: ${err instanceof Error ? err.message : err}`),
+    );
+  }, HEARTBEAT_INTERVAL_MS);
+
   try {
     if (job.kind === 'build') {
       const outcome = await runBuildJob(job.payload as BuildJob, narrator(job.id));
@@ -116,8 +135,18 @@ async function pollOnce() {
     console.log(`specd-runner: reported ${job.id} succeeded`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await report(job.id, { status: 'failed', error: message });
+    // A stale reporter is refused with a 403 once the job was reclaimed; do
+    // not overwrite that refusal by reporting failure on top of it.
+    await report(job.id, { status: 'failed', error: message }).catch((reportErr) =>
+      console.error(
+        `specd-runner: could not report failure for ${job.id}: ${
+          reportErr instanceof Error ? reportErr.message : reportErr
+        }`,
+      ),
+    );
     console.error(`specd-runner: job ${job.id} failed: ${message}`);
+  } finally {
+    clearInterval(heartbeatTimer);
   }
 }
 

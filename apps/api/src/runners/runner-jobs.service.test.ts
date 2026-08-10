@@ -113,7 +113,15 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
         };
       },
     } as unknown as BuildAgent;
-    jobs = new RunnerJobsService(handle, runs, specAgent, onboardingAgent, buildAgent, specs);
+    // Short leases so tests age rows by seconds, not minutes. Build gets a
+    // longer lease than spec on purpose — one test proves the distinction.
+    const leaseConfig = {
+      ...config,
+      runnerLeaseSeconds: 5,
+      runnerLeaseBuildSeconds: 60,
+      runnerMaxReclaims: 2,
+    } as Config;
+    jobs = new RunnerJobsService(handle, runs, specAgent, onboardingAgent, buildAgent, specs, leaseConfig);
 
     const [project] = await handle.db
       .insert(projects)
@@ -412,6 +420,198 @@ describe.skipIf(!reachable)('RunnerJobsService (integration)', () => {
     await expect(jobs.progress(stranger, runId, [{ message: 'not mine' }])).rejects.toThrow(
       /not claimed by you/,
     );
+  });
+
+  /** Age a claimed job and (optionally) silence its owner, in one place. */
+  async function expireLease(runId: string, ownerRunnerId: string | null, seconds: number) {
+    await handle!.sql`
+      UPDATE agent_runs SET claimed_at = now() - make_interval(secs => (${seconds})::float8)
+      WHERE id = ${runId}
+    `;
+    if (ownerRunnerId) {
+      await handle!.sql`
+        UPDATE runners SET last_seen_at = now() - make_interval(secs => (${seconds})::float8)
+        WHERE id = ${ownerRunnerId}
+      `;
+    }
+  }
+
+  it('reclaims a job whose runner went silent past the lease, with a log line', async () => {
+    const runId = await queueRun(payload());
+    const dead = await pairedRunner('lease-dead-runner');
+    await jobs.claim(dead);
+    await expireLease(runId, dead.id, 10);
+
+    const rescuer = await pairedRunner('lease-rescuer');
+    const claimed = await jobs.claim(rescuer);
+
+    expect(claimed?.id).toBe(runId);
+    const [row] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(row?.runnerId).toBe(rescuer.id);
+    expect(row?.status).toBe('running');
+    expect(row?.reclaimCount).toBe(1);
+
+    const logs = await handle!.db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    const reclaimLine = logs.find((l) => /reclaimed from unresponsive runner "lease-dead-runner"/.test(l.message));
+    expect(reclaimLine).toBeTruthy();
+    expect(reclaimLine?.level).toBe('warn');
+  });
+
+  it('does not reclaim while the owner is still heartbeating, however old the claim', async () => {
+    const runId = await queueRun(payload());
+    const owner = await pairedRunner('lease-alive-runner');
+    await jobs.claim(owner);
+    // Job is old, but the owner's last_seen_at stays fresh (authenticate
+    // bumped it moments ago when the runner paired).
+    await expireLease(runId, null, 10);
+
+    const rival = await pairedRunner('lease-rival');
+    expect(await jobs.claim(rival)).toBeNull();
+  });
+
+  it('does not reclaim a freshly claimed job even when the owner looks silent', async () => {
+    const runId = await queueRun(payload());
+    const owner = await pairedRunner('lease-fresh-claim');
+    await jobs.claim(owner);
+    // Owner silent, but the claim itself is inside its lease — both signals
+    // must be stale, or a job claimed a moment before a heartbeat gap would
+    // bounce between runners.
+    await handle!.sql`
+      UPDATE runners SET last_seen_at = now() - make_interval(secs => (${600})::float8) WHERE id = ${owner.id}
+    `;
+
+    const rival = await pairedRunner('lease-eager-rival');
+    expect(await jobs.claim(rival)).toBeNull();
+    const [row] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(row?.runnerId).toBe(owner.id);
+  });
+
+  it('gives build jobs their longer lease', async () => {
+    const runId = await queueBuildRun(buildPayload());
+    const owner = await pairedRunner('lease-build-owner');
+    await jobs.claim(owner);
+    // Past the spec lease (5s) but inside the build lease (60s).
+    await expireLease(runId, owner.id, 20);
+
+    const rival = await pairedRunner('lease-build-rival');
+    expect(await jobs.claim(rival)).toBeNull();
+
+    // Past the build lease too — now it moves.
+    await expireLease(runId, owner.id, 120);
+    const claimed = await jobs.claim(rival);
+    expect(claimed?.id).toBe(runId);
+    expect(claimed?.kind).toBe('build');
+  });
+
+  it('lets a restarted owner reclaim its own job without waiting out the heartbeat', async () => {
+    const runId = await queueRun(payload());
+    const owner = await pairedRunner('lease-restarted-owner');
+    await jobs.claim(owner);
+    // The owner's own polling keeps last_seen_at fresh — age only the claim.
+    await expireLease(runId, null, 10);
+
+    const claimed = await jobs.claim(owner);
+    expect(claimed?.id).toBe(runId);
+    const [row] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(row?.reclaimCount).toBe(1);
+    expect(row?.runnerId).toBe(owner.id);
+  });
+
+  it('grants an expired job to exactly one of two concurrent claimers', async () => {
+    const runId = await queueRun(payload());
+    const dead = await pairedRunner('lease-race-dead');
+    await jobs.claim(dead);
+    await expireLease(runId, dead.id, 10);
+
+    const a = await pairedRunner('lease-race-a');
+    const b = await pairedRunner('lease-race-b');
+    const [ra, rb] = await Promise.all([jobs.claim(a), jobs.claim(b)]);
+
+    const winners = [ra, rb].filter((r) => r?.id === runId);
+    expect(winners).toHaveLength(1);
+  });
+
+  it('refuses the zombie owner after a reclaim, without mutating the run', async () => {
+    const runId = await queueRun(payload());
+    const zombie = await pairedRunner('lease-zombie');
+    await jobs.claim(zombie);
+    await expireLease(runId, zombie.id, 10);
+    const rescuer = await pairedRunner('lease-zombie-rescuer');
+    await jobs.claim(rescuer);
+
+    await expect(
+      jobs.report(zombie, runId, {
+        status: 'succeeded',
+        parsed: validParsed,
+        model: 'claude-opus-5',
+        usage: { inputTokens: 1, outputTokens: 1 },
+      }),
+    ).rejects.toThrow(/reclaimed after its lease expired/);
+    await expect(jobs.progress(zombie, runId, [{ message: 'zombie says hi' }])).rejects.toThrow(
+      /not claimed by you/,
+    );
+
+    const [row] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(row?.status).toBe('running');
+    expect(row?.runnerId).toBe(rescuer.id);
+
+    // And the rescuer's own report still lands normally afterwards.
+    await jobs.report(rescuer, runId, {
+      status: 'succeeded',
+      parsed: validParsed,
+      model: 'claude-opus-5',
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const [finished] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(finished?.status).toBe('succeeded');
+  });
+
+  it('fails a job abandoned more times than the cap, retryably', async () => {
+    const runId = await queueRun(payload());
+    let current = await pairedRunner('lease-cap-0');
+    await jobs.claim(current);
+    // Max reclaims is 2 in this suite: two takeovers, then exhaustion.
+    for (let i = 1; i <= 2; i += 1) {
+      await expireLease(runId, current.id, 10);
+      const next = await pairedRunner(`lease-cap-${i}`);
+      const claimed = await jobs.claim(next);
+      expect(claimed?.id).toBe(runId);
+      current = next;
+    }
+    await expireLease(runId, current.id, 10);
+
+    // The next poll does not get the job — it buries it.
+    const late = await pairedRunner('lease-cap-late');
+    expect(await jobs.claim(late)).toBeNull();
+
+    const [row] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(row?.status).toBe('failed');
+    expect(row?.error).toMatch(/repeatedly abandoned/);
+
+    const logs = await handle!.db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.some((l) => /giving up rather than looping/.test(l.message))).toBe(true);
+  });
+
+  it('never touches in-process runs, which have no payload and no runner', async () => {
+    const [row] = await handle!.db
+      .insert(agentRuns)
+      .values({
+        projectId,
+        kind: 'build',
+        runner: 'hosted',
+        status: 'running',
+        claimedAt: new Date(Date.now() - 3600_000),
+      })
+      .returning({ id: agentRuns.id });
+    const inProcessId = row!.id;
+
+    const scavenger = await pairedRunner('lease-scavenger');
+    const claimed = await jobs.claim(scavenger);
+    expect(claimed?.id).not.toBe(inProcessId);
+
+    const [after] = await handle!.db.select().from(agentRuns).where(eq(agentRuns.id, inProcessId));
+    expect(after?.status).toBe('running');
+    expect(after?.runnerId).toBeNull();
   });
 
   it('refuses progress for a job that already finished', async () => {

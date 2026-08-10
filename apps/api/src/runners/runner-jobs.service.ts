@@ -13,6 +13,7 @@ import {
   type PreparedBuildTask,
 } from '../agents/build.agent.js';
 import { SpecsService } from '../specs/specs.service.js';
+import { Config } from '../config.js';
 
 /** What a runner receives when it claims a `spec` job — everything `SpecAgent.prepare()` produced. */
 export interface SpecJobPayload {
@@ -126,6 +127,7 @@ export class RunnerJobsService {
     private readonly onboarding: OnboardingAgent,
     private readonly build: BuildAgent,
     private readonly specs: SpecsService,
+    private readonly config: Config,
   ) {}
 
   /**
@@ -140,7 +142,12 @@ export class RunnerJobsService {
     const [run] = await this.handle.db.select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1);
     if (!run) throw new NotFoundException('Run not found');
     if (run.runnerId !== runner.id) {
-      throw new ForbiddenException('This run was not claimed by you');
+      // Also the zombie path (S-101): a runner that lost its lease reports
+      // back after the job was reclaimed. Refusing here — without mutating
+      // anything — is what makes reclaim safe.
+      throw new ForbiddenException(
+        'This run was not claimed by you (it may have been reclaimed after its lease expired)',
+      );
     }
     if (run.status !== 'running') {
       throw new BadRequestException('This run is not running');
@@ -152,26 +159,131 @@ export class RunnerJobsService {
   }
 
   async claim(runner: Runner): Promise<ClaimedJob | null> {
+    // Give up on jobs that have been reclaimed too many times before handing
+    // out work — a job three runners have abandoned is telling us something,
+    // and re-dispatching it forever is a crash loop with a queue in front.
+    await this.failExhausted(runner);
+
+    const lease = this.config.runnerLeaseSeconds;
+    const buildLease = this.config.runnerLeaseBuildSeconds;
+
+    // One atomic claim, now with two ways to match (S-101):
+    //   queued   — the normal case, exactly as before.
+    //   running  — a reclaim. Only when the job itself has been out longer
+    //              than its kind's lease AND its owner has stopped
+    //              heartbeating for that long too. Both signals must be
+    //              stale: the daemon heartbeats every ~30s while executing,
+    //              so a silent owner is a dead one — but claimed_at alone
+    //              must never suffice, because a job claimed a moment ago
+    //              by a runner that then went quiet deserves its full lease.
+    //              A runner may also reclaim its OWN running job without the
+    //              heartbeat check — the daemon runs one job at a time, so
+    //              the owner polling for new work means it lost the old one
+    //              (crash + restart); its own polling keeps last_seen_at
+    //              fresh, which would otherwise block that recovery forever.
+    // In-process runs are excluded by construction: they never have a
+    // job_payload, and their runner_id is NULL.
+    // FOR UPDATE SKIP LOCKED is unchanged — two concurrent pollers still
+    // cannot claim the same row; the loser's subquery skips the locked row.
     const rows = await this.handle.sql<
-      { id: string; kind: string; job_payload: JobPayload | null }[]
+      {
+        id: string;
+        kind: string;
+        job_payload: JobPayload | null;
+        reclaim_count: number;
+        prev_status: string;
+        prev_runner_name: string | null;
+      }[]
     >`
-      UPDATE agent_runs
-      SET runner_id = ${runner.id}, claimed_at = now(), status = 'running'
-      WHERE id = (
-        SELECT id FROM agent_runs
-        WHERE project_id = ${runner.projectId}
-          AND status = 'queued'
-          AND runner_id IS NULL
-        ORDER BY created_at
+      WITH candidate AS (
+        SELECT ar.id, ar.status AS prev_status, r.name AS prev_runner_name
+        FROM agent_runs ar
+        LEFT JOIN runners r ON r.id = ar.runner_id
+        WHERE ar.project_id = ${runner.projectId}
+          AND ar.job_payload IS NOT NULL
+          AND (
+            (ar.status = 'queued' AND ar.runner_id IS NULL)
+            OR (
+              ar.status = 'running'
+              AND ar.runner_id IS NOT NULL
+              AND ar.reclaim_count < ${this.config.runnerMaxReclaims}
+              AND ar.claimed_at < now() - make_interval(secs => (CASE WHEN ar.kind = 'build' THEN ${buildLease} ELSE ${lease} END)::float8)
+              AND (
+                ar.runner_id = ${runner.id}
+                OR r.last_seen_at < now() - make_interval(secs => (CASE WHEN ar.kind = 'build' THEN ${buildLease} ELSE ${lease} END)::float8)
+              )
+            )
+          )
+        ORDER BY CASE WHEN ar.status = 'queued' THEN 0 ELSE 1 END, ar.created_at
         LIMIT 1
-        FOR UPDATE SKIP LOCKED
+        FOR UPDATE OF ar SKIP LOCKED
       )
-      RETURNING id, kind, job_payload
+      UPDATE agent_runs
+      SET runner_id = ${runner.id},
+          claimed_at = now(),
+          status = 'running',
+          reclaim_count = reclaim_count + CASE WHEN candidate.prev_status = 'running' THEN 1 ELSE 0 END
+      FROM candidate
+      WHERE agent_runs.id = candidate.id
+      RETURNING agent_runs.id, agent_runs.kind, agent_runs.job_payload,
+                agent_runs.reclaim_count, candidate.prev_status, candidate.prev_runner_name
     `;
 
     const row = rows[0];
     if (!row || !row.job_payload) return null;
+
+    if (row.prev_status === 'running') {
+      // The takeover is news the person watching the run needs — surfaced in
+      // the same run-log/SSE stream everything else uses.
+      await this.runs.logRun(
+        row.id,
+        `reclaimed from unresponsive runner "${row.prev_runner_name ?? 'unknown'}" ` +
+          `(reclaim ${row.reclaim_count} of ${this.config.runnerMaxReclaims}) — ` +
+          `re-running from scratch on "${runner.name}"`,
+        'warn',
+      );
+    }
+
     return { id: row.id, kind: row.kind, payload: row.job_payload };
+  }
+
+  /**
+   * Fail runs whose lease expired after the last allowed reclaim. Failing —
+   * not silently dropping — keeps the requirement that the user can retry
+   * from the UI: a failed build leaves its spec in `building`, which is still
+   * buildable, and a failed spec draft leaves the ticket ready to generate
+   * again.
+   */
+  private async failExhausted(runner: Runner): Promise<void> {
+    const lease = this.config.runnerLeaseSeconds;
+    const buildLease = this.config.runnerLeaseBuildSeconds;
+
+    const exhausted = await this.handle.sql<{ id: string; reclaim_count: number }[]>`
+      SELECT ar.id, ar.reclaim_count
+      FROM agent_runs ar
+      LEFT JOIN runners r ON r.id = ar.runner_id
+      WHERE ar.project_id = ${runner.projectId}
+        AND ar.status = 'running'
+        AND ar.runner_id IS NOT NULL
+        AND ar.job_payload IS NOT NULL
+        AND ar.reclaim_count >= ${this.config.runnerMaxReclaims}
+        AND ar.claimed_at < now() - make_interval(secs => (CASE WHEN ar.kind = 'build' THEN ${buildLease} ELSE ${lease} END)::float8)
+        AND (r.last_seen_at IS NULL OR r.last_seen_at < now() - make_interval(secs => (CASE WHEN ar.kind = 'build' THEN ${buildLease} ELSE ${lease} END)::float8))
+      FOR UPDATE OF ar SKIP LOCKED
+    `;
+
+    for (const run of exhausted) {
+      await this.runs.logRun(
+        run.id,
+        `abandoned by ${run.reclaim_count + 1} runner(s) in a row — giving up rather than looping. ` +
+          'Retry from the UI once a runner is healthy.',
+        'error',
+      );
+      await this.runs.finish(run.id, {
+        status: 'failed',
+        error: `Job was repeatedly abandoned (${run.reclaim_count} reclaim(s) exhausted). A runner kept dying mid-job.`,
+      });
+    }
   }
 
   /**
@@ -184,7 +296,13 @@ export class RunnerJobsService {
     const [run] = await this.handle.db.select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1);
     if (!run) throw new NotFoundException('Run not found');
     if (run.runnerId !== runner.id) {
-      throw new ForbiddenException('This run was not claimed by you');
+      // The zombie path (S-101): a runner that lost its lease wakes up and
+      // reports a job that was reclaimed meanwhile. Refused without mutating
+      // the run — the new owner's report is the only one that counts, which
+      // is what makes replaying a reclaimed job safe.
+      throw new ForbiddenException(
+        'This run was not claimed by you (it may have been reclaimed after its lease expired)',
+      );
     }
     if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled') {
       throw new BadRequestException('This run has already finished');

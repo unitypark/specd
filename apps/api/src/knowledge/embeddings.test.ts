@@ -1,7 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { EmbeddingService, HashEmbeddingProvider } from './embeddings.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Config } from '../config.js';
+import {
+  EmbeddingService,
+  HashEmbeddingProvider,
+  VoyageEmbeddingProvider,
+} from './embeddings.js';
 
 const provider = new HashEmbeddingProvider();
+
+/** Only the two fields the service reads. */
+const configWith = (embeddingProvider: 'hash' | 'voyage', voyageApiKey: string): Config =>
+  ({ embeddingProvider, voyageApiKey }) as unknown as Config;
 
 function cosine(a: number[], b: number[]): number {
   let dot = 0;
@@ -53,5 +62,58 @@ describe('hash embedding provider', () => {
 
   it('never emits NaN into a pgvector literal', () => {
     expect(EmbeddingService.toSqlVector([Number.NaN, Infinity])).toBe('[0,0]');
+  });
+});
+
+describe('embedding service selection', () => {
+  it('uses the hash embedder by default', () => {
+    const service = new EmbeddingService(configWith('hash', ''));
+    expect(service.name).toBe('hash');
+    expect(service.fingerprint).toBe('hash/hash-ngram-v1/1024');
+  });
+
+  it('refuses to start when voyage is configured without a key', () => {
+    // Quietly falling back would leave retrieval working, nothing logged, and
+    // every vector in the index the wrong kind.
+    expect(() => new EmbeddingService(configWith('voyage', ''))).toThrow(/requires VOYAGE_API_KEY/);
+  });
+
+  it('fingerprints the provider, model and width it produces', () => {
+    const service = new EmbeddingService(configWith('voyage', 'vk-test'));
+    expect(service.fingerprint).toBe('voyage/voyage-3.5/1024');
+  });
+});
+
+describe('voyage provider', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** Captures request bodies and answers with one vector per input. */
+  const stubFetch = () => {
+    const bodies: { input: string[]; input_type: string }[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      bodies.push(body);
+      return {
+        ok: true,
+        json: async () => ({
+          data: body.input.map((_: string, index: number) => ({ embedding: [1, 0, 0], index })),
+        }),
+      };
+    });
+    return bodies;
+  };
+
+  it('embeds corpus material as documents', async () => {
+    const bodies = stubFetch();
+    await new VoyageEmbeddingProvider('vk-test').embed(['a passage'], 'document');
+    expect(bodies[0]?.input_type).toBe('document');
+  });
+
+  it('embeds a search query as a query', async () => {
+    // Voyage is asymmetric; embedding the question as a passage throws away
+    // the distinction the model was trained to make.
+    const bodies = stubFetch();
+    await new EmbeddingService(configWith('voyage', 'vk-test')).embedQuery('how does auth work');
+    expect(bodies[0]?.input_type).toBe('query');
   });
 });

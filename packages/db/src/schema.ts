@@ -347,6 +347,12 @@ export const knowledgeDocs = pgTable(
     isStub: boolean('is_stub').notNull().default(false),
     /** Link-extractor version that last processed this doc (S-102). 0 = never. */
     linksVersion: integer('links_version').notNull().default(0),
+    /**
+     * Chunker + embedder identity behind this doc's current chunks. The sha
+     * answers "did the source change"; this answers "would we produce the same
+     * rows from it today". Empty string = indexed before the stamp existed.
+     */
+    indexFingerprint: text('index_fingerprint').notNull().default(''),
   },
   (t) => [
     uniqueIndex('knowledge_docs_repo_path_key').on(t.repositoryId, t.path),

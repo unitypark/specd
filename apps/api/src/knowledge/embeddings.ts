@@ -3,10 +3,19 @@ import { Injectable } from '@nestjs/common';
 import { EMBEDDING_DIM } from '@specd/db';
 import { Config } from '../config.js';
 
+/**
+ * Whether the text being embedded is corpus material or someone's question.
+ * Asymmetric models encode the two differently and score better for it; a
+ * symmetric one ignores the distinction.
+ */
+export type EmbeddingInput = 'document' | 'query';
+
 export interface EmbeddingProvider {
   readonly name: string;
+  /** Model identifier, or the provider name where there is no model to pick. */
+  readonly model: string;
   readonly dimensions: number;
-  embed(texts: string[]): Promise<number[][]>;
+  embed(texts: string[], input: EmbeddingInput): Promise<number[][]>;
 }
 
 /**
@@ -22,8 +31,10 @@ export interface EmbeddingProvider {
  */
 export class HashEmbeddingProvider implements EmbeddingProvider {
   readonly name = 'hash';
+  readonly model = 'hash-ngram-v1';
   readonly dimensions = EMBEDDING_DIM;
 
+  /** Symmetric by construction: a query and a doc hash the same way. */
   async embed(texts: string[]): Promise<number[][]> {
     return texts.map((text) => this.embedOne(text));
   }
@@ -66,10 +77,10 @@ export class VoyageEmbeddingProvider implements EmbeddingProvider {
 
   constructor(
     private readonly apiKey: string,
-    private readonly model = 'voyage-3.5',
+    readonly model = 'voyage-3.5',
   ) {}
 
-  async embed(texts: string[]): Promise<number[][]> {
+  async embed(texts: string[], input: EmbeddingInput = 'document'): Promise<number[][]> {
     const out: number[][] = [];
     // Voyage caps batch size; 96 keeps every request comfortably inside it.
     for (let i = 0; i < texts.length; i += 96) {
@@ -83,7 +94,10 @@ export class VoyageEmbeddingProvider implements EmbeddingProvider {
         body: JSON.stringify({
           model: this.model,
           input: batch,
-          input_type: 'document',
+          // Voyage is asymmetric: a question and the passage answering it are
+          // encoded differently, and embedding a query as a document throws
+          // that away. The default is 'document' because that is the bulk.
+          input_type: input,
           output_dimension: this.dimensions,
         }),
       });
@@ -105,7 +119,17 @@ export class EmbeddingService {
   private readonly provider: EmbeddingProvider;
 
   constructor(config: Config) {
-    if (config.embeddingProvider === 'voyage' && config.voyageApiKey) {
+    if (config.embeddingProvider === 'voyage') {
+      // Falling back to the hash embedder here would be the worst kind of
+      // quiet: retrieval keeps working, nothing logs, and every vector in the
+      // index is silently the wrong kind. An operator who asked for Voyage
+      // gets Voyage or an error.
+      if (!config.voyageApiKey) {
+        throw new Error(
+          'SPECD_EMBEDDING_PROVIDER=voyage requires VOYAGE_API_KEY. Set the key, ' +
+            'or unset SPECD_EMBEDDING_PROVIDER to use the built-in hash embedder.',
+        );
+      }
       this.provider = new VoyageEmbeddingProvider(config.voyageApiKey);
     } else {
       this.provider = new HashEmbeddingProvider();
@@ -120,12 +144,23 @@ export class EmbeddingService {
     return this.provider.dimensions;
   }
 
-  embed(texts: string[]): Promise<number[][]> {
-    return this.provider.embed(texts);
+  /**
+   * Identity of the vectors this service produces. Two indexes built with
+   * different fingerprints hold vectors from different spaces, and cosine
+   * distance between them is noise — so this is what the indexer stamps on a
+   * chunk's doc and compares on the next run.
+   */
+  get fingerprint(): string {
+    return `${this.provider.name}/${this.provider.model}/${this.provider.dimensions}`;
   }
 
-  async embedOne(text: string): Promise<number[]> {
-    const [vec] = await this.provider.embed([text]);
+  embed(texts: string[]): Promise<number[][]> {
+    return this.provider.embed(texts, 'document');
+  }
+
+  /** Embed a search query — see {@link EmbeddingInput}. */
+  async embedQuery(text: string): Promise<number[]> {
+    const [vec] = await this.provider.embed([text], 'query');
     if (!vec) throw new Error('embedding provider returned nothing');
     return vec;
   }

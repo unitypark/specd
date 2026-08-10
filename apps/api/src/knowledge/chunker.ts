@@ -17,6 +17,14 @@ const MIN_CHARS = 120;
  * citation (`knowledge/architecture.md#auth`), which is what makes a spec's
  * design claims checkable by a human.
  */
+/**
+ * Identity of the chunking rules. Bump on any change that would give the same
+ * markdown different chunks — the bounds above, the fence handling, the
+ * scrap-folding rule. It rides the index fingerprint, so a bump re-chunks and
+ * re-embeds every doc rather than leaving old rows behind.
+ */
+export const CHUNKER_VERSION = `v1/${MAX_CHARS}/${MIN_CHARS}`;
+
 export function chunkMarkdown(content: string): Chunk[] {
   const lines = content.split('\n');
   const sections: { heading: string | null; body: string[] }[] = [];

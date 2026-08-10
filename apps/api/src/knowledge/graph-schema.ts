@@ -66,7 +66,7 @@ export const LINK_KINDS = [
     kind: 'pathref',
     weight: 0.4,
     syntax: '`decisions/0008-remove-unused-queue.md`, or the same path bare in prose',
-    description: 'A mention of a doc by path. Real, and the weakest of the four.',
+    description: 'A mention of a doc by path. Real, and the weakest edge kind.',
   },
 ] as const satisfies readonly LinkKindSpec[];
 

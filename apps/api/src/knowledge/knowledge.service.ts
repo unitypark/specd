@@ -33,6 +33,11 @@ import {
 
 const KNOWLEDGE_PREFIX = 'knowledge/';
 const STALE_AFTER_DAYS = 90;
+/**
+ * Code commits since a doc last changed before it counts as drifted. Some
+ * churn beneath a doc is normal; this many says the ground moved.
+ */
+const DRIFT_COMMITS = 10;
 
 /**
  * Bump when link-extraction rules change (S-102). A doc whose content sha is
@@ -284,6 +289,16 @@ export class KnowledgeService {
 
       await this.recomputeHealth(repo.projectId, tx);
     });
+
+    // Drift, for providers that can answer it. `commitsSince` was written as
+    // the drift signal when the index was built and then never called, so the
+    // "flags docs that have drifted from the code" claim in knowledge/README.md
+    // has until now been backed by a 90-day timer — the calendar, not the
+    // codebase. This is the real thing, and it stays null where the provider
+    // gives us no commit dates rather than pretending to a measurement.
+    if (repo.provider === 'local') {
+      await this.refreshDrift(repo, target);
+    }
 
     // Logged after the commit: until it lands, none of this happened.
     for (const doc of relink) await log(`  links refreshed for ${doc.path}`);
@@ -582,6 +597,31 @@ export class KnowledgeService {
   }
 
   /**
+   * Recount code commits since each doc last changed. Outside the index
+   * transaction on purpose: it is a derived hint, and a git call per doc must
+   * not hold write locks or fail a run that has already succeeded.
+   */
+  private async refreshDrift(repo: Repository, target: ReturnType<VcsService['toTarget']>): Promise<void> {
+    const docs = await this.db
+      .select({ id: knowledgeDocs.id, docUpdatedAt: knowledgeDocs.docUpdatedAt })
+      .from(knowledgeDocs)
+      .where(eq(knowledgeDocs.repositoryId, repo.id));
+
+    for (const doc of docs) {
+      if (!doc.docUpdatedAt) continue;
+      try {
+        const commits = await this.vcs.localAdapter.commitsSince(target, doc.docUpdatedAt);
+        await this.db
+          .update(knowledgeDocs)
+          .set({ codeCommitsSince: commits })
+          .where(eq(knowledgeDocs.id, doc.id));
+      } catch {
+        // A hint that cannot be computed is left null, never guessed at.
+      }
+    }
+  }
+
+  /**
    * What the corpus could have answered, alongside what it did (S-102 T-verdict).
    *
    * Citation checking that only knows the retrieved set can say "not
@@ -631,6 +671,7 @@ export class KnowledgeService {
         indexedAt: knowledgeDocs.indexedAt,
         hasUnverified: knowledgeDocs.hasUnverified,
         isStub: knowledgeDocs.isStub,
+        codeCommitsSince: knowledgeDocs.codeCommitsSince,
         repositoryId: knowledgeDocs.repositoryId,
       })
       .from(knowledgeDocs)
@@ -639,7 +680,7 @@ export class KnowledgeService {
 
     return rows.map((row) => ({
       ...row,
-      freshness: freshnessOf(row.docUpdatedAt ?? row.indexedAt, row.isStub),
+      freshness: freshnessOf(row.docUpdatedAt, row.isStub, row.codeCommitsSince),
     }));
   }
 
@@ -708,6 +749,7 @@ export class KnowledgeService {
         indexedAt: knowledgeDocs.indexedAt,
         isStub: knowledgeDocs.isStub,
         hasUnverified: knowledgeDocs.hasUnverified,
+        codeCommitsSince: knowledgeDocs.codeCommitsSince,
         kind: knowledgeDocs.kind,
         path: knowledgeDocs.path,
       })
@@ -718,22 +760,28 @@ export class KnowledgeService {
     const asBuiltCount = docs.filter((d) => d.kind === 'spec').length;
     const stubs = docs.filter((d) => d.isStub);
     const stale = docs.filter(
-      (d) => freshnessOf(d.docUpdatedAt ?? d.indexedAt, d.isStub).stale && !d.isStub,
+      (d) => freshnessOf(d.docUpdatedAt, d.isStub, d.codeCommitsSince).stale && !d.isStub,
     );
     const unverified = docs.filter((d) => d.hasUnverified);
 
     // Graph health (S-102): links that point nowhere, anchors that no longer
     // exist, and docs nothing links to. Cheap SQL over the links table.
     const [graph] = await ctx.sql<
-      { broken: number; dangling: number; orphans: number }[]
+      { broken: number; dangling: number; orphans: number; total_links: number }[]
     >`
       SELECT
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId} AND resolution_state = 'unresolved')::int AS broken,
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId} AND resolution_state = 'dangling_anchor')::int AS dangling,
+        (SELECT count(*) FROM knowledge_doc_links
+          WHERE project_id = ${projectId})::int AS total_links,
         (SELECT count(*) FROM knowledge_docs kd
           WHERE kd.project_id = ${projectId}
+            -- The map itself is nobody's target. An index page having no
+            -- inbound links is how index pages work, and dinging every project
+            -- for it forever would make the number unreachable and ignorable.
+            AND kd.path <> ${`${KNOWLEDGE_PREFIX}README.md`}
             AND NOT EXISTS (
               SELECT 1 FROM knowledge_doc_links l
               WHERE l.project_id = ${projectId}
@@ -744,6 +792,10 @@ export class KnowledgeService {
     const brokenLinks = Number(graph?.broken ?? 0);
     const danglingAnchors = Number(graph?.dangling ?? 0);
     const orphanDocs = Number(graph?.orphans ?? 0);
+    const totalLinks = Number(graph?.total_links ?? 0);
+    const unknownFreshness = docs.filter(
+      (d) => freshnessOf(d.docUpdatedAt, d.isStub, d.codeCommitsSince).unknown && !d.isStub,
+    ).length;
 
     let score = 100;
     if (docCount === 0) {
@@ -752,18 +804,27 @@ export class KnowledgeService {
       score -= (stale.length / docCount) * 40;
       score -= (stubs.length / docCount) * 25;
       score -= (unverified.length / docCount) * 20;
+      // Graph rot counts against the score it was already being measured
+      // beside. Broken edges are scored as a *rate* over the edges that exist,
+      // so a well-linked base with one dead link is not judged like a
+      // two-link base with one dead link.
+      if (totalLinks > 0) score -= ((brokenLinks + danglingAnchors) / totalLinks) * 15;
+      score -= (orphanDocs / docCount) * 10;
       // Never fully penalise a young knowledge base for having no history yet.
       score = Math.max(0, Math.min(100, score));
     }
 
     const notes: { icon: string; text: string }[] = [];
     for (const doc of stale.slice(0, 3)) {
-      const days = Math.floor(
-        (Date.now() - (doc.docUpdatedAt ?? doc.indexedAt).getTime()) / 86_400_000,
-      );
+      const reason = freshnessOf(doc.docUpdatedAt, doc.isStub, doc.codeCommitsSince).reason;
+      notes.push({ icon: '⚠', text: `${doc.path} — ${reason ?? 'stale'}.` });
+    }
+    if (unknownFreshness > 0) {
       notes.push({
-        icon: '⚠',
-        text: `${doc.path} untouched for ${days} days — likely drifted from the code.`,
+        icon: '🕗',
+        text:
+          `${unknownFreshness} doc${unknownFreshness === 1 ? '' : 's'} have no commit date, so ` +
+          `drift cannot be measured for them — not the same as being fresh.`,
       });
     }
     if (asBuiltCount > 0) {
@@ -801,8 +862,11 @@ export class KnowledgeService {
     }
 
     await ctx.sql`
-      INSERT INTO knowledge_health (project_id, score, doc_count, stale_count, stub_count, as_built_count, notes, computed_at)
+      INSERT INTO knowledge_health (
+        project_id, score, doc_count, stale_count, stub_count, as_built_count,
+        broken_links, dangling_anchors, orphan_docs, unknown_freshness_count, notes, computed_at)
       VALUES (${projectId}, ${score}, ${docCount}, ${stale.length}, ${stubs.length}, ${asBuiltCount},
+              ${brokenLinks}, ${danglingAnchors}, ${orphanDocs}, ${unknownFreshness},
               ${JSON.stringify(notes)}::jsonb, now())
       ON CONFLICT (project_id) DO UPDATE SET
         score = EXCLUDED.score,
@@ -810,6 +874,10 @@ export class KnowledgeService {
         stale_count = EXCLUDED.stale_count,
         stub_count = EXCLUDED.stub_count,
         as_built_count = EXCLUDED.as_built_count,
+        broken_links = EXCLUDED.broken_links,
+        dangling_anchors = EXCLUDED.dangling_anchors,
+        orphan_docs = EXCLUDED.orphan_docs,
+        unknown_freshness_count = EXCLUDED.unknown_freshness_count,
         notes = EXCLUDED.notes,
         computed_at = now()
     `;
@@ -1121,13 +1189,45 @@ function firstHeading(content: string): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-function freshnessOf(updatedAt: Date, isStub: boolean) {
-  const ageDays = Math.floor((Date.now() - updatedAt.getTime()) / 86_400_000);
-  const stale = ageDays > STALE_AFTER_DAYS;
+/**
+ * How fresh a doc is, or an admission that we cannot tell.
+ *
+ * `docUpdatedAt` is null wherever the provider gives us no commit date, which
+ * today is every doc of a GitHub- or GitLab-backed repo. Falling back to
+ * `indexedAt` there — which is always "just now" for a doc we just indexed —
+ * reported every such doc as permanently fresh. That is a false negative
+ * hiding exactly the rot the number exists to expose, so unmeasurable is now
+ * its own answer rather than a good one.
+ */
+function freshnessOf(docUpdatedAt: Date | null, isStub: boolean, codeCommitsSince?: number | null) {
+  if (!docUpdatedAt) {
+    return {
+      score: null,
+      ageDays: null,
+      stale: false,
+      unknown: true,
+      reason: isStub
+        ? 'generated stub, never filled in'
+        : 'no commit date from this provider — freshness unmeasured',
+    };
+  }
+
+  const ageDays = Math.floor((Date.now() - docUpdatedAt.getTime()) / 86_400_000);
+  // Measured drift beats the calendar: a doc untouched for a year beside code
+  // untouched for a year has not drifted from anything.
+  const drifted = (codeCommitsSince ?? 0) >= DRIFT_COMMITS;
+  const stale = drifted || ageDays > STALE_AFTER_DAYS;
   return {
     score: Math.max(0, 100 - (ageDays / STALE_AFTER_DAYS) * 100),
     ageDays,
     stale,
-    reason: isStub ? 'generated stub, never filled in' : stale ? `${ageDays}d since last change` : undefined,
+    unknown: false,
+    reason: isStub
+      ? 'generated stub, never filled in'
+      : drifted
+        ? `${codeCommitsSince} commits touched code since this doc last changed`
+        : stale
+          ? `${ageDays}d since last change`
+          : undefined,
   };
 }

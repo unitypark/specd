@@ -172,9 +172,10 @@ down rather than rediscovered:
 - The re-resolution pass is an application loop over pending edges, not the
   SQL pass the requirement names. The behaviour matches; the query count does
   not.
-- The `(project_id, resolution_state)` partial index named in the Design was
-  never created. Both the re-resolution select and the broken-link count scan
-  without it.
+- ~~The `(project_id, resolution_state)` partial index named in the Design was
+  never created.~~ Created 2026-08-10 as
+  `knowledge_doc_links_pending_idx`, partial on `resolution_state <> 'resolved'`
+  — the rows every one of those queries is looking for are the minority.
 - Expansion provenance carries a readable `viaEdge` label, not the edge id the
   requirement asks for, so a chunk cannot be joined back to the row that
   pulled it in.

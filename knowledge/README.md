@@ -63,6 +63,9 @@ never rewritten as the analyzed system evolves.
 
 - Docs ride the change: update them in the **same PR** as the code (AGENTS.md rule 3).
 - Delivered specs are appended to `specs/` automatically as the last task of every spec.
-- specd re-indexes on merge and flags docs that have drifted from the code.
+- specd re-indexes on merge and flags docs that have drifted from the code —
+  measured as commits touching code since the doc last changed, not as time
+  elapsed. Where the provider gives no commit date, freshness is reported as
+  unmeasured rather than as good.
 
 Stack: JavaScript · pnpm · Vitest

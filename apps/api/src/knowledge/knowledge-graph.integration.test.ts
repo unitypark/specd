@@ -37,6 +37,10 @@ const reachable = await (async () => {
 /** Mutable fake tree; the adapter reads whatever is here right now. */
 const files = new Map<string, string>();
 
+/** Mutable so a test can give the repo a commit history to drift against. */
+let fakeCommitDate: Date | null = null;
+let fakeCodeCommits = 0;
+
 const fakeVcs = {
   adapterFor: async () => ({
     listFiles: async () => [...files.keys()],
@@ -44,7 +48,10 @@ const fakeVcs = {
       paths.filter((p) => files.has(p)).map((p) => ({ path: p, content: files.get(p)! })),
   }),
   toTarget: () => ({}),
-  localAdapter: { lastCommitDate: async () => null },
+  localAdapter: {
+    lastCommitDate: async () => fakeCommitDate,
+    commitsSince: async () => fakeCodeCommits,
+  },
 } as unknown as VcsService;
 
 let handle: DbHandle | null = null;
@@ -362,6 +369,68 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.projectId, projectId));
     expect(storedAfter.length).toBe(storedBefore.length);
+  });
+
+  it('reports graph rot as numbers, not only as sentences', async () => {
+    // The counts existed only inside note strings, so nothing could badge,
+    // sort or trend them and they contributed nothing to the score describing
+    // them. Numbers and prose now have to agree.
+    const health = await service.health(projectId);
+    const text = (health.notes as { text: string }[]).map((n) => n.text).join(' | ');
+
+    expect(health.brokenLinks).toBeGreaterThan(0);
+    expect(health.danglingAnchors).toBeGreaterThan(0);
+    expect(text).toContain(`${health.brokenLinks} link`);
+    expect(text).toContain(`${health.danglingAnchors} citation anchor`);
+    expect(health.score).toBeLessThan(100);
+  });
+
+  it('does not count the map itself as an orphan', async () => {
+    // An index page has no inbound links by construction. Dinging every
+    // project for it forever would make the score unreachable, and a score
+    // nobody can clear is a score nobody reads.
+    const before = (await service.health(projectId)).orphanDocs;
+
+    files.set('knowledge/README.md', '# knowledge/\n\nStart here. Nothing links to me.\n');
+    await service.indexRepository(repo);
+    expect((await service.health(projectId)).orphanDocs).toBe(before);
+
+    // …while an ordinary unlinked doc still counts.
+    files.set('knowledge/nobody-links-here.md', '# Nobody\n\nUnreferenced.\n');
+    await service.indexRepository(repo);
+    expect((await service.health(projectId)).orphanDocs).toBe(before + 1);
+
+    files.delete('knowledge/nobody-links-here.md');
+    await service.indexRepository(repo);
+  });
+
+  it('says freshness is unknown rather than good when there is no commit date', async () => {
+    // Falling back to indexedAt reported every doc of a hosted repo as
+    // permanently fresh — a false negative hiding the rot the number exists
+    // to expose.
+    const docs = await service.listDocs(projectId);
+    const doc = docs.find((d) => d.path === 'knowledge/orphan.md');
+    expect(doc?.freshness.unknown).toBe(true);
+    expect(doc?.freshness.stale).toBe(false);
+    expect(doc?.freshness.ageDays).toBeNull();
+    expect((await service.health(projectId)).unknownFreshnessCount).toBeGreaterThan(0);
+  });
+
+  it('calls a doc drifted when code moved under it, not merely when time passed', async () => {
+    fakeCommitDate = new Date(Date.now() - 5 * 86_400_000); // touched 5 days ago
+    fakeCodeCommits = 25;
+    files.set('knowledge/orphan.md', '# Orphan\n\nNothing links here. Edited.\n');
+    await service.indexRepository(repo);
+
+    const doc = (await service.listDocs(projectId)).find((d) => d.path === 'knowledge/orphan.md');
+    // Five days old: the 90-day timer would call this fresh. The codebase says
+    // otherwise, and that is the claim knowledge/README.md has always made.
+    expect(doc?.freshness.unknown).toBe(false);
+    expect(doc?.freshness.stale).toBe(true);
+    expect(doc?.freshness.reason).toContain('25 commits touched code');
+
+    fakeCommitDate = null;
+    fakeCodeCommits = 0;
   });
 
   it('rolls the whole run back when a step fails partway through', async () => {

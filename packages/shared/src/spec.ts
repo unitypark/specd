@@ -34,6 +34,14 @@ export interface SpecRequirement {
 export type CitationVerdict =
   /** The cited chunk was in the retrieved set. */
   | 'supported'
+  /**
+   * The evidence was retrieved and says this — and the part of the doc it came
+   * from describes code that has changed since anyone last touched the doc.
+   * A different axis from the three below: not "could we check the citation"
+   * but "should you trust what it points at". A claim can be perfectly
+   * supported by a paragraph that is no longer true.
+   */
+  | 'stale'
   /** Checked and wrong: no such doc, or no such section in it. */
   | 'unsupported'
   /** Not checkable from what was retrieved — the doc is real, we just did not see that part of it. */
@@ -201,7 +209,9 @@ export function renderSpecMarkdown(input: {
     // would hide the exact caveat the verdict exists to surface.
     const suffix = claim.unverified
       ? claim.citation
-        ? ` _(cites ${claim.citation} — **UNCONFIRMED**: ${claim.unverified})_`
+        ? ` _(cites ${claim.citation} — **${
+            claim.verdict === 'stale' ? 'OUT OF DATE' : 'UNCONFIRMED'
+          }**: ${claim.unverified})_`
         : ` _(**UNVERIFIED** — ${claim.unverified})_`
       : claim.citation
         ? ` _(per ${claim.citation})_`

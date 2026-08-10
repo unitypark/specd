@@ -92,6 +92,16 @@ export interface CitationCoverage {
   unretrievablePaths: string[];
   /** Matching chunks left out for budget. */
   truncatedCount: number;
+  /**
+   * Sections whose prose describes code that has since moved, per doc path.
+   * Keyed by heading anchor, plus `wholeDoc` for a reference that sits above
+   * the first heading and so taints everything under it.
+   *
+   * Section granularity on purpose: one stale reference in a doc's deployment
+   * section says nothing about its data-model section, and tainting a whole
+   * doc for it is how a caveat stops being read.
+   */
+  staleSections?: Record<string, { sections: string[]; wholeDoc: boolean; detail: string }>;
 }
 
 export interface SpecDraftResult {

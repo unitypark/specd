@@ -271,6 +271,7 @@ export class SpecAgent {
     });
 
     const unknowns = content.design.filter((c) => c.verdict === 'unknown');
+    const stale = content.design.filter((c) => c.verdict === 'stale');
     await run.log(
       `drafted ${content.requirements.length} requirement(s) · ` +
         `${countCitations(content)} citation(s) · ${countUnverified(content)} UNVERIFIED · ` +
@@ -280,6 +281,10 @@ export class SpecAgent {
       // Not a failure — a gap in what retrieval could show, named where the
       // person watching can close it.
       await run.log(`  unchecked: ${claim.unverified}`, 'warn');
+    }
+    for (const claim of stale) {
+      // Grounded, and grounded in something the code has moved past.
+      await run.log(`  out of date: ${claim.unverified}`, 'warn');
     }
 
     return { content, model: result.model, usedChunks: prepared.chunks };
@@ -315,9 +320,10 @@ function judgeCitation(
   const [rawPath = '', anchor] = citation.split('#');
   const path = rawPath.trim();
 
-  // Exactly what was put in front of the model: the strongest answer there is.
+  // Exactly what was put in front of the model: the strongest answer there is,
+  // unless the passage itself describes code that has since moved.
   if (chunks.some((chunk) => citationRef(chunk) === citation)) {
-    return { citation, verdict: 'supported' };
+    return stalenessOf(path, anchor, coverage) ?? { citation, verdict: 'supported' };
   }
 
   const retrievedPaths = new Set(chunks.map((c) => c.path));
@@ -380,7 +386,39 @@ function judgeCitation(
 
   // A bare path whose doc was retrieved: the claim points at the doc as a
   // whole, and the doc is in front of the model.
-  return { citation, verdict: 'supported' };
+  return stalenessOf(path, anchor, coverage) ?? { citation, verdict: 'supported' };
+}
+
+/**
+ * Whether a citation lands on prose that describes code which has moved.
+ *
+ * A different question from the three verdicts around it. Those ask how well
+ * the citation could be checked; this asks whether what it points at is still
+ * true. A claim can be perfectly supported by a paragraph nobody has revisited
+ * since the code under it was rewritten, and saying "supported" there is
+ * accurate about the evidence and misleading about the world.
+ *
+ * Section-scoped: a stale reference in a doc's deployment section says nothing
+ * about its data-model section. Tainting the whole doc is how a caveat stops
+ * being read.
+ */
+function stalenessOf(
+  path: string,
+  anchor: string | undefined,
+  coverage: CitationCoverage | undefined,
+): { citation: string; unverified: string; verdict: CitationVerdict } | null {
+  const stale = coverage?.staleSections?.[path];
+  if (!stale) return null;
+  if (!stale.wholeDoc && !(anchor && stale.sections.includes(anchor))) return null;
+
+  const where = anchor ? `"${path}#${anchor}"` : `"${path}"`;
+  return {
+    citation: anchor ? `${path}#${anchor}` : path,
+    unverified:
+      `${where} describes code that has changed since the doc was last touched ` +
+      `(\`${stale.detail}\`) — the passage may be accurate and out of date`,
+    verdict: 'stale',
+  };
 }
 
 export function normalizeSpecContent(

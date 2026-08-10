@@ -430,13 +430,19 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                                       verdict exists to prevent. */}
                                   {claim.citation && (
                                     <span className={styles.cite}>
-                                      {claim.citation} {claim.unverified ? '?' : '✓'}
+                                      {claim.citation}{' '}
+                                      {claim.verdict === 'stale' ? '⧗' : claim.unverified ? '?' : '✓'}
                                     </span>
                                   )}
                                   {claim.unverified && (
                                     <span className={styles.unv}>
-                                      ⚠ {claim.citation ? 'UNCONFIRMED' : 'UNVERIFIED'} —{' '}
-                                      {claim.unverified}
+                                      ⚠{' '}
+                                      {claim.verdict === 'stale'
+                                        ? 'OUT OF DATE'
+                                        : claim.citation
+                                          ? 'UNCONFIRMED'
+                                          : 'UNVERIFIED'}{' '}
+                                      — {claim.unverified}
                                     </span>
                                   )}
                                 </p>

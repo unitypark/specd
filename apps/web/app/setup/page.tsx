@@ -910,8 +910,12 @@ export default function SetupWizard() {
                 </button>
                 <button type="button" className={`${styles.choice} ${styles.soon}`} disabled>
                   <h5>🔷 Jira Cloud</h5>
-                  <p>Atlassian OAuth. Status ↔ lifecycle mapped; specd comments backlinks.</p>
-                  <span className={styles.badge}>P3</span>
+                  <p>
+                    Built and working — import issues, backlink comments, status mirrored onto your
+                    workflow. Connected with an Atlassian API token over the API for now, not from
+                    this wizard yet: <code>docs/jira.md</code>.
+                  </p>
+                  <span className={styles.badge}>via API</span>
                 </button>
               </div>
               <div className={styles.nav}>

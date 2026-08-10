@@ -102,6 +102,55 @@ export class BoardService {
     return row;
   }
 
+  /**
+   * Bring Jira issues onto the board as tickets, without duplicating them.
+   *
+   * An imported ticket keeps its **Jira key** as its own key, so `specd spec
+   * pull AUR-142` reads the same whether the work came from Jira or was
+   * written here. Re-importing updates title and body rather than inserting a
+   * second copy — the Jira issue is the record, this is a projection of it,
+   * and the local `columnKey` is left exactly where the team dragged it.
+   */
+  async importExternal(input: {
+    projectId: string;
+    source: 'jira';
+    issues: { key: string; summary: string; description: string; url: string }[];
+  }): Promise<{ imported: number; updated: number }> {
+    let imported = 0;
+    let updated = 0;
+
+    for (const issue of input.issues) {
+      const [existing] = await this.db
+        .select({ id: tickets.id })
+        .from(tickets)
+        .where(and(eq(tickets.projectId, input.projectId), eq(tickets.key, issue.key)))
+        .limit(1);
+
+      if (existing) {
+        await this.db
+          .update(tickets)
+          .set({ title: issue.summary, body: issue.description, updatedAt: new Date() })
+          .where(eq(tickets.id, existing.id));
+        updated += 1;
+        continue;
+      }
+
+      await this.db.insert(tickets).values({
+        projectId: input.projectId,
+        key: issue.key,
+        title: issue.summary,
+        body: issue.description,
+        source: input.source,
+        externalKey: issue.key,
+        externalUrl: issue.url,
+        columnKey: 'backlog',
+      });
+      imported += 1;
+    }
+
+    return { imported, updated };
+  }
+
   async get(projectId: string, ticketId: string) {
     const [row] = await this.db
       .select()

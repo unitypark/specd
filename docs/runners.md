@@ -135,14 +135,55 @@ While a build runs, the daemon posts each line of its narration to
 same thing the runner's console does. Losing that connection never fails the
 build — the commentary is best-effort, the work is not.
 
+## Leases and reclaim (S-101)
+
+A claimed job carries a lease. If the owning runner goes silent past it, the
+job becomes claimable again — by another runner, or by the same one after a
+restart — instead of hanging `running` forever.
+
+How liveness works: every authenticated call a runner makes bumps its
+`last_seen_at`, and while executing a job the daemon also heartbeats on an
+interval (`SPECD_RUNNER_HEARTBEAT_MS`, default 30s), because a model call is
+minutes of legitimate silence. Reclaim requires **both** signals stale — the
+job out longer than its kind's lease *and* the owner unheard-of for that
+long — so neither a long model call nor a just-claimed job can be taken from
+a healthy runner. The one exception: a runner may reclaim **its own**
+running job without the heartbeat check, since a single-job daemon polling
+for new work while it still owns one means it crashed and restarted — and
+its own polling keeps its heartbeat fresh, which would otherwise block that
+recovery forever.
+
+Builds get a longer lease than spec/onboard drafts
+(`SPECD_RUNNER_LEASE_BUILD_SECONDS`, default 900, vs
+`SPECD_RUNNER_LEASE_SECONDS`, default 180): reclaiming a build that was
+merely slow wastes N model calls and a checkout, not one call.
+
+What a reclaim does: the claim switches ownership atomically (the same
+`FOR UPDATE SKIP LOCKED` guarantee — two pollers can never both win),
+increments the job's reclaim count, and writes a `warn` line to the run log
+so the takeover is visible in the app: *"reclaimed from unresponsive runner
+X — re-running from scratch."* Spec and onboard jobs replay their stored
+payload identically. A reclaimed **build** starts from a fresh checkout on
+the new runner and force-pushes its branch on completion — the branch
+belongs to the spec, not to an attempt at it.
+
+The zombie case: a runner that lost its lease and later wakes up gets a 403
+on `report` and `progress` — the run is not mutated, and only the new
+owner's report counts. One race is documented rather than prevented: a
+zombie *build* still holds its own git credentials and could force-push the
+branch after the winner did. specd holds no credential to stop that
+(decision 0009); the PR review still gates what merges.
+
+After `SPECD_RUNNER_MAX_RECLAIMS` takeovers (default 3), a still-expiring
+job is **failed** with "repeatedly abandoned" rather than dispatched again —
+a job three runners died holding is a crash loop, not bad luck. The run's
+spec stays in a retryable state: press Build (or Generate) again once a
+runner is healthy.
+
 ## What is not built yet
 
 - **Concurrency.** The daemon claims and runs one job at a time. A runner
   with capacity to spare has no way to say so.
-- **Retry/backoff on daemon crash.** A job claimed by a runner that then
-  dies stays `running` forever — there is no lease timeout that would let
-  another runner (or the same one, restarted) reclaim it. This matters more
-  for builds than for spec drafts, simply because they run for longer.
 
 ## Reference
 

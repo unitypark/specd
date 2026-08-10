@@ -278,6 +278,8 @@ export const agentRuns = pgTable(
      */
     runnerId: uuid('runner_id').references(() => runners.id, { onDelete: 'set null' }),
     claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    /** How many times this job was taken from an unresponsive runner (S-101). */
+    reclaimCount: integer('reclaim_count').notNull().default(0),
     /**
      * Everything a runner needs to execute a queued job, and everything the
      * server needs to finish it once the runner reports back — assembled

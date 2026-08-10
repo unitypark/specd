@@ -130,6 +130,23 @@ export class LocalGitAdapter implements VcsAdapter {
     return raw.split('\n').filter(Boolean);
   }
 
+  async listFilesWithSha(
+    repo: RepoTarget,
+    prefix: string,
+  ): Promise<{ path: string; sha: string }[]> {
+    const { git } = this.git(repo);
+    // `-s` prints "<mode> <sha> <stage>\t<path>".
+    const raw = await git.raw(['ls-files', '-s', '--', prefix]);
+    return raw
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [meta = '', path = ''] = line.split('\t');
+        return { path, sha: meta.split(' ')[1] ?? '' };
+      })
+      .filter((f) => f.path);
+  }
+
   /**
    * Writes the change to a branch and leaves it there. No push, no PR, no
    * merge — a human reviews the diff and merges it themselves. Local mode is

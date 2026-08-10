@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import {
@@ -45,6 +46,13 @@ let fakeHistory: { sha: string; at: Date; files: string[] }[] = [];
 const fakeVcs = {
   adapterFor: async () => ({
     listFiles: async () => [...files.keys()],
+    // Content-addressed like git: the sha is the content, so a file whose
+    // body is unchanged reports the same sha and is not re-parsed.
+    listFilesWithSha: async () =>
+      [...files.entries()].map(([path, content]) => ({
+        path,
+        sha: createHash('sha1').update(content).digest('hex'),
+      })),
     readFiles: async (_t: unknown, paths: string[]) =>
       paths.filter((p) => files.has(p)).map((p) => ({ path: p, content: files.get(p)! })),
   }),
@@ -627,6 +635,32 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     const health = await service.health(projectId);
     const text = (health.notes as { text: string }[]).map((n) => n.text).join(' | ');
     expect(text).toMatch(/code that is no longer there/);
+
+    // A re-index that changes nothing must not break a reference. The file
+    // node's id is what the link points at, so replacing the inventory
+    // wholesale would null every link from a doc that did not change — and
+    // the doc did not change, so nothing would ever put it back.
+    await service.indexRepository(repo);
+    const stable = await service.docLinks(projectId, doc!.id);
+    expect(
+      stable.outbound.find((l) => l.rawTarget === 'apps/api/src/live.ts')?.state,
+    ).toBe('resolved');
+
+    // The file changes; the doc does not. Not broken — the reference still
+    // points at a real file — but nobody has re-read the doc against it, and
+    // that is a different repair from a dead link.
+    files.set('apps/api/src/live.ts', 'export const live = 2; // reworked\n');
+    await service.indexRepository(repo);
+
+    const drifted = await service.docLinks(projectId, doc!.id);
+    const ref = drifted.outbound.find((l) => l.rawTarget === 'apps/api/src/live.ts');
+    expect(ref?.state).toBe('resolved');
+    expect(ref?.stale).toBe(true);
+    expect(
+      ((await service.health(projectId)).notes as { text: string }[])
+        .map((n) => n.text)
+        .join(' | '),
+    ).toMatch(/changed since the doc was last touched/);
 
     // Deleting the file it pointed at is what makes a live reference break.
     files.delete('apps/api/src/live.ts');

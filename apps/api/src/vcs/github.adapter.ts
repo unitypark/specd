@@ -119,6 +119,25 @@ export class GitHubAdapter implements VcsAdapter {
     return snap.files.filter((f) => f.startsWith(prefix));
   }
 
+  async listFilesWithSha(
+    repo: RepoTarget,
+    prefix: string,
+  ): Promise<{ path: string; sha: string }[]> {
+    const slug = this.slug(repo);
+    const meta = await this.api<{ default_branch: string }>(`/repos/${slug}`);
+    const branch = meta.default_branch || repo.defaultBranch;
+    const ref = await this.api<{ object: { sha: string } }>(
+      `/repos/${slug}/git/ref/heads/${branch}`,
+    );
+    const tree = await this.api<{ tree: { path: string; type: string; sha: string }[] }>(
+      `/repos/${slug}/git/trees/${ref.object.sha}?recursive=1`,
+    );
+    return tree.tree
+      .filter((n) => n.type === 'blob' && n.path.startsWith(prefix))
+      .filter((n) => !n.path.split('/').some((seg) => IGNORED_DIRS.has(seg)))
+      .map((n) => ({ path: n.path, sha: n.sha }));
+  }
+
   async propose(repo: RepoTarget, change: ProposedChange): Promise<ChangeResult> {
     const slug = this.slug(repo);
     const meta = await this.api<{ default_branch: string }>(`/repos/${slug}`);

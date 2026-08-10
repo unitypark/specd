@@ -418,6 +418,12 @@ export const knowledgeDocLinks = pgTable(
     resolvedAnchor: text('resolved_anchor'),
     /** resolved | unresolved | dangling_anchor */
     resolutionState: text('resolution_state').notNull().default('unresolved'),
+    /**
+     * The target file's blob sha when this doc was last indexed. Frozen until
+     * the doc changes, so a mismatch with the file's current sha means the
+     * code moved and nobody came back to the doc.
+     */
+    targetBlobSha: text('target_blob_sha'),
     /** Set instead of `resolvedDocId` when the target is code, not a doc. */
     resolvedCodeId: uuid('resolved_code_id').references(() => codeNodes.id, {
       onDelete: 'set null',

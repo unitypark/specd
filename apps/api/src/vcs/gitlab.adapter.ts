@@ -111,8 +111,8 @@ export class GitLabAdapter implements VcsAdapter {
   private async tree(
     id: string,
     ref: string,
-  ): Promise<{ path: string; type: string }[]> {
-    const out: { path: string; type: string }[] = [];
+  ): Promise<{ path: string; type: string; id: string }[]> {
+    const out: { path: string; type: string; id: string }[] = [];
     let page = '1';
 
     for (let i = 0; i < 50 && page; i++) {
@@ -124,7 +124,7 @@ export class GitLabAdapter implements VcsAdapter {
       if (!res.ok) {
         throw new VcsError(`GitLab GET repository/tree → ${res.status}: ${(await res.text()).slice(0, 300)}`);
       }
-      out.push(...((await res.json()) as { path: string; type: string }[]));
+      out.push(...((await res.json()) as { path: string; type: string; id: string }[]));
       page = res.headers.get('x-next-page') ?? '';
     }
 
@@ -156,6 +156,18 @@ export class GitLabAdapter implements VcsAdapter {
   async listFiles(repo: RepoTarget, prefix: string): Promise<string[]> {
     const snap = await this.snapshot(repo);
     return snap.files.filter((f) => f.startsWith(prefix));
+  }
+
+  async listFilesWithSha(
+    repo: RepoTarget,
+    prefix: string,
+  ): Promise<{ path: string; sha: string }[]> {
+    const id = this.id(repo);
+    const branch = repo.defaultBranch;
+    // A GitLab tree entry's `id` is the blob sha.
+    return (await this.tree(id, branch))
+      .filter((n) => n.type === 'blob' && n.path.startsWith(prefix))
+      .map((n) => ({ path: n.path, sha: n.id }));
   }
 
   private async fileExistsAt(id: string, path: string, ref: string): Promise<boolean> {

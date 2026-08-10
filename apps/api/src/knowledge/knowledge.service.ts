@@ -172,11 +172,13 @@ export class KnowledgeService {
 
     // One listing for both halves of the index. For a hosted repo this is a
     // recursive tree call, so asking twice would double the cost of every run.
-    const allFiles = await adapter.listFiles(target, '');
-    const paths = allFiles.filter(
-      (p) => p.startsWith(KNOWLEDGE_PREFIX) && p.endsWith('.md'),
-    );
-    const codePaths = allFiles.filter((p) => !p.startsWith(KNOWLEDGE_PREFIX));
+    const listing = await adapter.listFilesWithSha(target, '');
+    const paths = listing
+      .map((f) => f.path)
+      .filter((p) => p.startsWith(KNOWLEDGE_PREFIX) && p.endsWith('.md'));
+    const codeFiles = listing.filter((f) => !f.path.startsWith(KNOWLEDGE_PREFIX));
+    const codePaths = codeFiles.map((f) => f.path);
+    const shaByPath = new Map(codeFiles.map((f) => [f.path, f.sha]));
     await log(
       `scanning ${repo.name}: ${paths.length} knowledge doc(s), ${codePaths.length} code file(s)`,
     );
@@ -296,13 +298,32 @@ export class KnowledgeService {
       ...parseable,
       ...codePaths.filter((p) => !priority.has(p) && specForPath(p) !== null),
     ];
-    const toParse = [...new Set(candidates)].slice(0, SYMBOL_FILE_CAP);
+    // What we parsed last time, and what it looked like. A file whose blob is
+    // unchanged has the same declarations it had before, so re-reading it is
+    // one HTTP GET spent to learn nothing — the whole reason the sha is here.
+    const parsedBefore = new Map(
+      (
+        await this.handle.sql<{ path: string; blob_sha: string | null }[]>`
+          SELECT DISTINCT path, blob_sha FROM code_nodes
+          WHERE repository_id = ${repo.id} AND kind <> 'file'
+        `
+      ).map((r) => [r.path, r.blob_sha]),
+    );
+
+    const eligible = [...new Set(candidates)].slice(0, SYMBOL_FILE_CAP);
+    const toParse = eligible.filter((p) => parsedBefore.get(p) !== shaByPath.get(p));
+    const unchangedParsed = eligible.filter((p) => !toParse.includes(p));
+    if (toParse.length < eligible.length) {
+      await log(
+        `  symbols: ${toParse.length} file(s) changed, ${eligible.length - toParse.length} unchanged`,
+      );
+    }
     if (candidates.length > toParse.length) {
       // No silent truncation: a symbol that resolves for one doc and not
       // another because of an invisible cap is worse than no symbols.
       await log(
         `  symbol extraction capped at ${SYMBOL_FILE_CAP} file(s); ` +
-          `${new Set(candidates).size - toParse.length} source file(s) not parsed`,
+          `${new Set(candidates).size - eligible.length} source file(s) not parsed`,
       );
     }
 
@@ -352,17 +373,35 @@ export class KnowledgeService {
       // The file tree a doc can point at. Replaced wholesale: it is derived
       // from one listing of one commit, and a stale row would let a deleted
       // file keep answering for references to it.
-      await tx.sql`DELETE FROM code_nodes WHERE repository_id = ${repo.id}`;
+      // Upserted, not replaced. A file node's id is what a doc's link points
+      // at, so deleting and reinserting the inventory would null every link
+      // from a doc that did not change this run — and because it did not
+      // change, nothing would ever put it back.
       if (codePaths.length > 0) {
         await tx.sql`
-          INSERT INTO code_nodes (project_id, repository_id, kind, path, qualified_name)
-          SELECT ${repo.projectId}, ${repo.id}, 'file', p, p
-          FROM unnest(${codePaths}::text[]) AS p
+          INSERT INTO code_nodes (project_id, repository_id, kind, path, qualified_name, blob_sha)
+          SELECT ${repo.projectId}, ${repo.id}, 'file', p, p, s
+          FROM unnest(${codePaths}::text[], ${codePaths.map((p) => shaByPath.get(p) ?? '')}::text[]) AS t(p, s)
+          ON CONFLICT (repository_id, kind, qualified_name)
+          DO UPDATE SET blob_sha = EXCLUDED.blob_sha, indexed_at = now()
         `;
       }
+      await tx.sql`
+        DELETE FROM code_nodes
+        WHERE repository_id = ${repo.id} AND kind = 'file'
+          AND qualified_name <> ALL(${codePaths})
+      `;
+      // Symbols go only for files we re-read, or whose file is gone. The rest
+      // are still accurate: their blob did not move.
+      await tx.sql`
+        DELETE FROM code_nodes
+        WHERE repository_id = ${repo.id} AND kind <> 'file'
+          AND (path = ANY(${toParse}) OR path <> ALL(${codePaths}))
+      `;
       // Symbols share the table with files; a duplicate qualified name across
       // two parsed files is dropped rather than resolved arbitrarily, which is
       // the same rule the path resolver uses for ambiguous basenames.
+      void unchangedParsed;
       const bySymbol = new Map<string, { path: string; kind: string; line: number }>();
       const ambiguous = new Set<string>();
       for (const row of symbolRows) {
@@ -374,14 +413,15 @@ export class KnowledgeService {
       if (bySymbol.size > 0) {
         const names = [...bySymbol.keys()];
         await tx.sql`
-          INSERT INTO code_nodes (project_id, repository_id, kind, path, qualified_name, start_line)
-          SELECT ${repo.projectId}, ${repo.id}, k, p, q, l
+          INSERT INTO code_nodes (project_id, repository_id, kind, path, qualified_name, start_line, blob_sha)
+          SELECT ${repo.projectId}, ${repo.id}, k, p, q, l, b
           FROM unnest(
             ${names.map((n) => bySymbol.get(n)!.kind)}::text[],
             ${names.map((n) => bySymbol.get(n)!.path)}::text[],
             ${names}::text[],
-            ${names.map((n) => bySymbol.get(n)!.line)}::int[]
-          ) AS t(k, p, q, l)
+            ${names.map((n) => bySymbol.get(n)!.line)}::int[],
+            ${names.map((n) => shaByPath.get(bySymbol.get(n)!.path) ?? '')}::text[]
+          ) AS t(k, p, q, l, b)
           ON CONFLICT (repository_id, kind, qualified_name) DO NOTHING
         `;
       }
@@ -418,7 +458,7 @@ export class KnowledgeService {
         .where(eq(knowledgeDocs.projectId, repo.projectId));
       const anchors = anchorLookup(tx);
 
-      const scope = { code, ownTopLevel, symbols, symbolParents };
+      const scope = { code, ownTopLevel, symbols, symbolParents, shaByPath };
       for (const doc of changed) {
         await writeChunks(tx, doc.docId!, repo.projectId, doc);
         await writeLinks(
@@ -1046,10 +1086,19 @@ export class KnowledgeService {
    */
   async docLinks(projectId: string, docId: string) {
     const outbound = await this.handle.sql<
-      { kind: string; raw_target: string; site: string | null; state: string; target_path: string | null }[]
+      {
+        kind: string;
+        raw_target: string;
+        site: string | null;
+        state: string;
+        target_path: string | null;
+        stale: boolean | null;
+      }[]
     >`
       SELECT l.kind, l.raw_target, l.site, l.resolution_state AS state,
-             COALESCE(kd.path, cn.path) AS target_path
+             COALESCE(kd.path, cn.path) AS target_path,
+             (l.target_blob_sha IS NOT NULL AND cn.blob_sha IS NOT NULL
+                AND l.target_blob_sha <> cn.blob_sha) AS stale
       FROM knowledge_doc_links l
       LEFT JOIN knowledge_docs kd ON kd.id = l.resolved_doc_id
       LEFT JOIN code_nodes cn ON cn.id = l.resolved_code_id
@@ -1075,6 +1124,7 @@ export class KnowledgeService {
         site: l.site,
         state: l.state,
         targetPath: l.target_path,
+        stale: Boolean(l.stale),
       })),
       backlinks: inbound.map((l) => ({
         kind: l.kind,
@@ -1120,6 +1170,7 @@ export class KnowledgeService {
       {
         broken: number;
         broken_code: number;
+        stale_code: number;
         dangling: number;
         orphans: number;
         total_links: number;
@@ -1136,6 +1187,14 @@ export class KnowledgeService {
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId} AND resolution_state = 'unresolved'
             AND kind IN ('coderef', 'symbolref'))::int AS broken_code,
+        -- Still resolves, but the file has changed since the doc was last
+        -- touched. Not broken — nobody came back to check.
+        (SELECT count(*) FROM knowledge_doc_links l
+          JOIN code_nodes cn ON cn.id = l.resolved_code_id
+          WHERE l.project_id = ${projectId}
+            AND l.target_blob_sha IS NOT NULL
+            AND cn.blob_sha IS NOT NULL
+            AND l.target_blob_sha <> cn.blob_sha)::int AS stale_code,
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId} AND resolution_state = 'dangling_anchor')::int AS dangling,
         (SELECT count(*) FROM knowledge_doc_links
@@ -1164,6 +1223,7 @@ export class KnowledgeService {
     `;
     const brokenLinks = Number(graph?.broken ?? 0);
     const brokenCodeRefs = Number(graph?.broken_code ?? 0);
+    const staleCodeRefs = Number(graph?.stale_code ?? 0);
     const danglingAnchors = Number(graph?.dangling ?? 0);
     const orphanDocs = Number(graph?.orphans ?? 0);
     const totalLinks = Number(graph?.total_links ?? 0);
@@ -1235,6 +1295,14 @@ export class KnowledgeService {
         text:
           `${brokenCodeRefs} reference${brokenCodeRefs === 1 ? '' : 's'} to code that is no longer ` +
           `there — the doc is describing a file or a symbol that moved or was deleted.`,
+      });
+    }
+    if (staleCodeRefs > 0) {
+      notes.push({
+        icon: '🕰',
+        text:
+          `${staleCodeRefs} doc reference${staleCodeRefs === 1 ? '' : 's'} point at code that has ` +
+          `changed since the doc was last touched — still there, not re-read.`,
       });
     }
     if (undeclaredEdges > 0) {
@@ -1409,6 +1477,7 @@ async function writeLinks(
     ownTopLevel: Set<string>;
     symbols: Map<string, string>;
     symbolParents: Set<string>;
+    shaByPath: Map<string, string>;
   },
   /** Research records document other people's code; see the coderef branch. */
   kind: KnowledgeDocKind,
@@ -1464,6 +1533,10 @@ async function writeLinks(
         rawTarget: link.rawTarget,
         resolvedCodeId: hit?.id ?? null,
         resolutionState: hit ? 'resolved' : 'unresolved',
+        // Frozen at this doc's last indexing. When the file moves on without
+        // the doc, the two stop matching — which is what stale means, as
+        // opposed to broken.
+        targetBlobSha: hit ? (scope.shaByPath.get(hit.path) ?? null) : null,
       });
       continue;
     }

@@ -59,6 +59,17 @@ export interface VcsAdapter {
   /** List paths under a prefix at HEAD. */
   listFiles(repo: RepoTarget, prefix: string): Promise<string[]>;
 
+  /**
+   * The same listing with each file's content id — the git blob sha.
+   *
+   * Every provider already knows it: `git ls-files -s` prints it, and both
+   * hosted tree APIs return it and used to throw it away. It is what lets an
+   * index run tell "this file changed" from "this file is still here", which
+   * is the difference between re-reading a repository and re-reading three
+   * files.
+   */
+  listFilesWithSha(repo: RepoTarget, prefix: string): Promise<{ path: string; sha: string }[]>;
+
   /** Propose a change for human review. Never writes to the default branch. */
   propose(repo: RepoTarget, change: ProposedChange): Promise<ChangeResult>;
 }

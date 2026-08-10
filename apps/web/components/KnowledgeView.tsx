@@ -14,7 +14,14 @@ interface Doc {
 }
 
 interface DocLinks {
-  outbound: { kind: string; rawTarget: string; site: string | null; state: string; targetPath: string | null }[];
+  outbound: {
+    kind: string;
+    rawTarget: string;
+    site: string | null;
+    state: string;
+    targetPath: string | null;
+    stale?: boolean;
+  }[];
   backlinks: { kind: string; site: string | null; sourcePath: string; sourceDocId: string }[];
   coupledTo: { codePath: string; commitsTogether: number; commitsSince: number }[];
 }
@@ -157,13 +164,17 @@ export function KnowledgeView({ slug }: { slug: string }) {
                     <p className="muted">No links either way — nothing reaches this doc by following anything.</p>
                   )}
                 {links[doc.id]?.outbound.map((l, i) => (
-                  <p key={`o${i}`} className={l.state === 'resolved' ? 'muted' : 'bad'}>
+                  <p
+                    key={`o${i}`}
+                    className={l.state !== 'resolved' ? 'bad' : l.stale ? 'warnish' : 'muted'}
+                  >
                     {l.kind === 'coderef' ? '↳' : '→'} <b>{l.kind}</b>{' '}
                     {l.targetPath?.replace(/^knowledge\//, '') ?? l.rawTarget}
                     {l.state !== 'resolved' &&
                       (l.kind === 'coderef'
                         ? ' — no such file any more'
                         : ` — ${l.state.replace('_', ' ')}`)}
+                    {l.state === 'resolved' && l.stale && ' — changed since this doc was written'}
                   </p>
                 ))}
                 {links[doc.id]?.backlinks.map((l, i) => (
@@ -334,6 +345,9 @@ export function KnowledgeView({ slug }: { slug: string }) {
         }
         .bad {
           color: var(--danger);
+        }
+        .warnish {
+          color: var(--warn);
         }
         .counts {
           display: flex;

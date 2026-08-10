@@ -113,3 +113,32 @@ the last run is the fix, and needs the per-file content identity the
 `Parent.member` declared in two parsed files, resolves to neither: 56 of 1,027
 symbols here. Guessing which one an author meant is how a citation stops being
 checkable.
+
+
+## Update — 2026-08-10: content identity
+
+Every provider already knew each file's blob sha — `git ls-files -s` prints it,
+and both hosted tree APIs return it — and all three were throwing it away.
+Keeping it does three things.
+
+**It makes symbol extraction incremental.** A file whose blob is unchanged has
+the declarations it had last run, so re-reading it is one HTTP GET spent to
+learn nothing. Steady state on a hosted repository is now the files that
+actually changed, not every file the docs might reference.
+
+**It separates stale from broken.** A link records the blob sha of its target
+when the source doc was last indexed, and a doc's links are rewritten only when
+that doc changes — so the sha stays frozen at the moment someone last looked.
+When the file moves on and the doc does not, the two disagree, and that is
+precisely "the code changed and nobody re-read the doc". Distinct from broken,
+where the target is gone, because it is a distinct repair: one needs a new
+path, the other needs a human to check whether the prose is still true.
+
+**It fixed a bug this ADR shipped with.** Replacing the file inventory
+wholesale each run gave every file node a new id, and a link points at that id.
+`ON DELETE SET NULL` then nulled every reference from a doc that had not
+changed — and because it had not changed, nothing would ever rewrite it. A
+resolved reference silently became broken on the next index run. File nodes are
+upserted now, so ids are stable, and the regression test does the only thing
+that catches this: re-indexes without changing anything and asserts the
+reference survives.

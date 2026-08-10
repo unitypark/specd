@@ -1,21 +1,39 @@
 {
   "target": "/Users/junghwpark/Dev/Projects/specd",
-  "files": 152,
-  "oracleSymbols": 1100,
-  "precision": 0.9874326750448833,
-  "recall": 1,
-  "f1": 0.993676603432701,
-  "worstFalsePositives": [
-    "bootstrap ×1",
-    "AppModule ×1",
-    "ContactsService ×1",
-    "ContactsService.list ×1",
-    "ContactsService.merge ×1",
-    "ContactFilters ×1",
-    "DealsService ×1",
-    "DealsService.advanceStage ×1",
-    "DealStage ×1",
-    "OutboxWorker ×1"
-  ],
-  "worstFalseNegatives": []
+  "typescript": {
+    "files": 152,
+    "oracleSymbols": 1102,
+    "precision": 0.9874551971326165,
+    "recall": 1,
+    "f1": 0.993688007213706,
+    "worstFalsePositives": [
+      "bootstrap ×1",
+      "AppModule ×1",
+      "ContactsService ×1",
+      "ContactsService.list ×1",
+      "ContactsService.merge ×1",
+      "ContactFilters ×1",
+      "DealsService ×1",
+      "DealsService.advanceStage ×1",
+      "DealStage ×1",
+      "OutboxWorker ×1"
+    ],
+    "worstFalseNegatives": []
+  },
+  "native": [
+    {
+      "language": "go",
+      "files": 6,
+      "oracleSymbols": 137,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "falsePositives": [],
+      "falseNegatives": []
+    },
+    {
+      "language": "python",
+      "skipped": "no .py files in this corpus"
+    }
+  ]
 }

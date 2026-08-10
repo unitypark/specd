@@ -10,54 +10,106 @@
  *   pnpm eval --target ../other    # any checkout you point it at
  */
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readdirSync, writeFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { gradeAll } from './symbols.eval.js';
+import { gradeGo, gradePython, isSkip } from './native-oracles.eval.js';
 import { specForPath } from '../apps/api/src/knowledge/symbols.js';
 
 const args = process.argv.slice(2);
 const at = args.indexOf('--target');
 const target = resolve(at === -1 ? process.cwd() : (args[at + 1] ?? process.cwd()));
 
-const tracked = execFileSync('git', ['ls-files'], { cwd: target, encoding: 'utf8' })
-  .split('\n')
-  .filter(Boolean);
+/**
+ * Files to grade. `git ls-files` where the target is a checkout — it respects
+ * .gitignore for free — and a plain walk where it is not, so an external
+ * corpus like a language's own standard library can be graded without being
+ * turned into a repository first. That path is how the stdlib numbers in
+ * README.md were produced, and it is what makes them reproducible.
+ */
+function listFiles(root: string): string[] {
+  try {
+    return execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\n')
+      .filter(Boolean);
+  } catch {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        if (entry.name.startsWith('.') || entry.name === 'node_modules') return [];
+        const full = join(dir, entry.name);
+        return entry.isDirectory() ? walk(full) : [relative(root, full)];
+      });
+    return walk(root);
+  }
+}
 
-// TypeScript only: the oracle is the TypeScript compiler, so it is the only
-// language it can grade. Go and Python are ungraded until each has an oracle
-// of its own — which is the honest state, not a passing one.
+const tracked = listFiles(target);
+
 const files = tracked
   .filter((f) => /\.tsx?$/.test(f) && !f.endsWith('.d.ts'))
   .filter((f) => specForPath(f) !== null)
   .map((f) => join(target, f));
 
-if (files.length === 0) {
-  console.error(`no TypeScript files under ${target}`);
-  process.exit(1);
-}
-
-const score = gradeAll(files);
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+console.log(`\ntarget      ${target}`);
 
-console.log(`\nsymbol extraction vs the TypeScript compiler`);
-console.log(`target      ${target}`);
-console.log(`files       ${score.files}`);
-console.log(`oracle says ${score.oracleSymbols} declarations`);
-console.log(`precision   ${pct(score.precision)}   (what we report that is real)`);
-console.log(`recall      ${pct(score.recall)}   (what is real that we report)`);
-console.log(`f1          ${pct(score.f1)}`);
+// Each language is graded only if the corpus has any of it. A corpus of one
+// language is a normal thing to point this at — a language's own standard
+// library, say — and the other graders should say "nothing here" rather than
+// the run failing.
+const score = files.length === 0 ? null : gradeAll(files);
+if (!score) {
+  console.log(`\ntypescript — skipped: no .ts/.tsx files in this corpus`);
+} else {
+  console.log(`\nsymbol extraction vs the TypeScript compiler`);
+  console.log(`files       ${score.files}`);
+  console.log(`oracle says ${score.oracleSymbols} declarations`);
+  console.log(`precision   ${pct(score.precision)}   (what we report that is real)`);
+  console.log(`recall      ${pct(score.recall)}   (what is real that we report)`);
+  console.log(`f1          ${pct(score.f1)}`);
 
-if (score.worstFalsePositives.length) {
-  console.log(`\nreported but not real:`);
-  for (const s of score.worstFalsePositives) console.log(`  + ${s}`);
+  if (score.worstFalsePositives.length) {
+    console.log(`  reported but not real:`);
+    for (const s of score.worstFalsePositives) console.log(`    + ${s}`);
+  }
+  if (score.worstFalseNegatives.length) {
+    console.log(`  real but missed:`);
+    for (const s of score.worstFalseNegatives) console.log(`    - ${s}`);
+  }
 }
-if (score.worstFalseNegatives.length) {
-  console.log(`\nreal but missed:`);
-  for (const s of score.worstFalseNegatives) console.log(`  - ${s}`);
+
+// ─── go and python ───────────────────────────────────────────────────────────
+// Each graded by an oracle written in its own toolchain, so no oracle shares
+// an assumption with the extractor it grades.
+const native = [
+  gradeGo(tracked.filter((f) => f.endsWith('.go')), target),
+  gradePython(tracked.filter((f) => f.endsWith('.py')), target),
+];
+
+for (const result of native) {
+  console.log('');
+  if (isSkip(result)) {
+    console.log(`${result.language} — skipped: ${result.skipped}`);
+    continue;
+  }
+  console.log(`symbol extraction vs the ${result.language} toolchain`);
+  console.log(`files       ${result.files}`);
+  console.log(`oracle says ${result.oracleSymbols} declarations`);
+  console.log(`precision   ${pct(result.precision)}`);
+  console.log(`recall      ${pct(result.recall)}`);
+  console.log(`f1          ${pct(result.f1)}`);
+  if (result.falsePositives.length) {
+    console.log(`  reported but not real:`);
+    for (const s of result.falsePositives) console.log(`    + ${s}`);
+  }
+  if (result.falseNegatives.length) {
+    console.log(`  real but missed:`);
+    for (const s of result.falseNegatives) console.log(`    - ${s}`);
+  }
 }
 
 const out = join(process.cwd(), 'evals/results/symbols.json');
-writeFileSync(out, `${JSON.stringify({ target, ...score }, null, 2)}\n`);
+writeFileSync(out, `${JSON.stringify({ target, typescript: score, native }, null, 2)}\n`);
 console.log(`\nwritten to ${out}\n`);
 
 // ─── retrieval ───────────────────────────────────────────────────────────────

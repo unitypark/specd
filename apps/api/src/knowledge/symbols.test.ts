@@ -106,6 +106,58 @@ describe('extractSymbols — Go', () => {
   });
 });
 
+describe('extractSymbols — Go grouped declarations', () => {
+  // Found by the Go oracle: `const (…)` is how Go declares related constants,
+  // and every member is a top-level declaration with no keyword of its own,
+  // so a per-line keyword rule saw none of them. Seventeen missing in this
+  // repository's own CLI.
+  const syms = extractSymbols(
+    'cli/cmd/specd/main.go',
+    [
+      'package main',
+      '',
+      'const (',
+      '\texitOK = 0',
+      '\texitError = 1',
+      '\t_ = 2',
+      ')',
+      '',
+      'var (',
+      '\tbannerStyle = lipgloss.NewStyle().',
+      '\t\tBorder(lipgloss.RoundedBorder()).',
+      '\t\tPadding(0, 1)',
+      '\tplain, dim = 1, 2',
+      ')',
+      '',
+      'func main() {}',
+    ].join('\n'),
+  );
+
+  it('finds every member of a grouped declaration', () => {
+    expect(q(syms)).toEqual(expect.arrayContaining(['exitOK', 'exitError', 'bannerStyle', 'main']));
+  });
+
+  it('reads a comma-separated member as two declarations', () => {
+    expect(q(syms)).toEqual(expect.arrayContaining(['plain', 'dim']));
+  });
+
+  it('does not mistake a wrapped method chain for a declaration', () => {
+    // `Border(` starts a line inside the group and is shaped exactly like a
+    // member; what tells them apart is the `(` that follows.
+    expect(q(syms)).not.toContain('Border');
+    expect(q(syms)).not.toContain('Padding');
+  });
+
+  it('skips the blank identifier', () => {
+    expect(q(syms)).not.toContain('_');
+  });
+
+  it('closes the group at the closing paren', () => {
+    // `main` is declared after `)`, so finding it proves the group ended.
+    expect(syms.find((s) => s.name === 'main')?.kind).toBe('function');
+  });
+});
+
 describe('extractSymbols — Python', () => {
   const syms = extractSymbols(
     'svc/app.py',

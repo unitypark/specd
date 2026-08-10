@@ -73,6 +73,11 @@ jobs:
       # create one.
       - run: pnpm db:migrate
 
+      # Builds the workspace packages first, because their dependents typecheck
+      # against published types rather than source. That was a real defect
+      # found by this workflow's own first run: `pnpm typecheck` had never
+      # worked on a clean checkout, and everyone who thought it did had stale
+      # dist/ output on disk.
       - run: pnpm typecheck
 
       # The documented gate, verbatim, so CI cannot drift from the command

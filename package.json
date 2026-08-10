@@ -17,7 +17,7 @@
     "db:migrate": "pnpm --filter @specd/db migrate",
     "db:seed": "pnpm --filter @specd/api seed",
     "test": "pnpm -r test && pnpm cli:test",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm --filter \"./packages/*\" build && pnpm -r typecheck",
     "cli:build": "cd cli && go build -o ../bin/specd ./cmd/specd && echo \"built \u2192 ./bin/specd  (run 'pnpm cli:install' to put it on your PATH)\"",
     "cli:install": "cd cli && go install ./cmd/specd && node ../scripts/check-cli-path.mjs",
     "cli:test": "cd cli && go vet ./... && go test ./...",

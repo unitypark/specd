@@ -37,6 +37,7 @@ const ICONS: Record<string, string> = {
   adr: '⚖️',
   runbook: '🧰',
   spec: '📗',
+  research: '🔬',
 };
 
 export function KnowledgeView({ slug }: { slug: string }) {
@@ -157,8 +158,12 @@ export function KnowledgeView({ slug }: { slug: string }) {
                   )}
                 {links[doc.id]?.outbound.map((l, i) => (
                   <p key={`o${i}`} className={l.state === 'resolved' ? 'muted' : 'bad'}>
-                    → <b>{l.kind}</b> {l.targetPath?.replace(/^knowledge\//, '') ?? l.rawTarget}
-                    {l.state !== 'resolved' && ` — ${l.state.replace('_', ' ')}`}
+                    {l.kind === 'coderef' ? '↳' : '→'} <b>{l.kind}</b>{' '}
+                    {l.targetPath?.replace(/^knowledge\//, '') ?? l.rawTarget}
+                    {l.state !== 'resolved' &&
+                      (l.kind === 'coderef'
+                        ? ' — no such file any more'
+                        : ` — ${l.state.replace('_', ' ')}`)}
                   </p>
                 ))}
                 {links[doc.id]?.backlinks.map((l, i) => (

@@ -124,3 +124,28 @@ export function headingAnchorsOf(content: string): Set<string> {
   }
   return anchors;
 }
+
+/** A code node a doc can point at. */
+export interface ResolvableCode {
+  id: string;
+  path: string;
+}
+
+/**
+ * Resolve a source path a doc mentions against the indexed file tree.
+ *
+ * Exact path first. Failing that, a unique suffix match, because docs write
+ * `runner-jobs.service.ts` far more often than the full path — but only when
+ * it is unambiguous. Two files with the same basename resolve to neither:
+ * guessing which one an author meant is how a citation stops being checkable.
+ */
+export function resolveCodeTarget(raw: string, code: ResolvableCode[]): ResolvableCode | null {
+  const cleaned = raw.replace(/^\.\//, '').trim();
+  if (!cleaned) return null;
+
+  const exact = code.find((c) => c.path === cleaned);
+  if (exact) return exact;
+
+  const suffix = code.filter((c) => c.path.endsWith(`/${cleaned}`));
+  return suffix.length === 1 ? suffix[0]! : null;
+}

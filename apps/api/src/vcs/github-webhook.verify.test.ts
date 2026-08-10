@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  commitsFromPush,
   classifyPullRequest,
   classifyPush,
   pushedPaths,
@@ -243,5 +244,72 @@ describe('classifyPush', () => {
   it('survives a push payload with no commits at all', () => {
     expect(classifyPush({ ref: 'refs/heads/main' }, 'main').kind).toBe('ignore');
     expect(classifyPush({}, 'main').kind).toBe('ignore');
+  });
+});
+
+/**
+ * The history ledger's input (0013). A repo specd cannot clone still pushes,
+ * and a push already carries what history mining needs.
+ */
+describe('commitsFromPush', () => {
+  const push = (over: Record<string, unknown> = {}) => ({
+    ref: 'refs/heads/main',
+    commits: [
+      {
+        id: 'sha1',
+        timestamp: '2026-08-10T10:00:00Z',
+        added: ['apps/api/src/new.ts'],
+        modified: ['knowledge/architecture.md'],
+        removed: ['apps/api/src/old.ts'],
+      },
+    ],
+    ...over,
+  });
+
+  it('reads sha, time and every touched path', () => {
+    expect(commitsFromPush(push(), 'main')).toEqual([
+      {
+        sha: 'sha1',
+        at: new Date('2026-08-10T10:00:00Z'),
+        files: ['apps/api/src/new.ts', 'knowledge/architecture.md', 'apps/api/src/old.ts'],
+      },
+    ]);
+  });
+
+  it('records a push that touched no knowledge doc', () => {
+    // The one classifyPush ignores, and precisely what drift is made of: code
+    // moving while the docs stand still.
+    const commits = commitsFromPush(
+      push({ commits: [{ id: 's', timestamp: '2026-08-10T10:00:00Z', modified: ['apps/api/src/a.ts'] }] }),
+      'main',
+    );
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.files).toEqual(['apps/api/src/a.ts']);
+  });
+
+  it('ignores a push to any branch but the default', () => {
+    // Coupling has to describe what landed, not work that may never merge.
+    expect(commitsFromPush(push({ ref: 'refs/heads/feature/x' }), 'main')).toEqual([]);
+  });
+
+  it('does not record the head commit twice', () => {
+    const event = push();
+    const withHead = { ...event, head_commit: event.commits[0] };
+    expect(commitsFromPush(withHead, 'main')).toHaveLength(1);
+  });
+
+  it('skips a commit with no id or no usable timestamp', () => {
+    expect(
+      commitsFromPush(
+        push({
+          commits: [
+            { timestamp: '2026-08-10T10:00:00Z', modified: ['a.ts'] },
+            { id: 'x', timestamp: 'not-a-date', modified: ['b.ts'] },
+            { id: 'y', modified: ['c.ts'] },
+          ],
+        }),
+        'main',
+      ),
+    ).toEqual([]);
   });
 });

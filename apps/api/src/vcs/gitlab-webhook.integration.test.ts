@@ -36,6 +36,7 @@ let ticketId = '';
 let userId = '';
 let specId = '';
 
+const recordedCommits: { sha: string; files: string[] }[] = [];
 const reindexCalls: { projectId: string; repositoryIds?: string[]; triggeredByName?: string }[] = [];
 
 const GITLAB_PROJECT_ID = 778899;
@@ -164,7 +165,13 @@ describe.skipIf(!reachable)('gitlab webhooks (integration)', () => {
       },
     } as unknown as PipelineService;
 
-    service = new GitLabWebhookService(handle.db, repositoriesService, specs, pipeline);
+    const knowledge = {
+      recordCommits: async (_r: unknown, c: unknown[]) => {
+        recordedCommits.push(...(c as { sha: string; files: string[] }[]));
+      },
+    } as unknown as KnowledgeService;
+
+    service = new GitLabWebhookService(handle.db, repositoriesService, specs, pipeline, knowledge);
   });
 
   afterAll(async () => {
@@ -339,6 +346,7 @@ describe.skipIf(!reachable)('gitlab webhooks (integration)', () => {
           throw new Error('database on fire');
         },
       } as unknown as PipelineService,
+      { recordCommits: async () => undefined } as unknown as KnowledgeService,
     );
 
     const deliveryId = randomUUID();

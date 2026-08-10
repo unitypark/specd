@@ -17,6 +17,9 @@ import type { WebhookIntent } from './github-webhook.verify.js';
  */
 export { classifyPush, pushedPaths } from './github-webhook.verify.js';
 export type { PushEvent, WebhookIntent } from './github-webhook.verify.js';
+// GitLab's push hook carries the same commits[].{id,timestamp,added,modified,
+// removed} shape, so the ledger extractor is shared rather than duplicated.
+export { commitsFromPush } from './github-webhook.verify.js';
 
 export type TokenFailure = 'no-secret' | 'missing-token' | 'mismatch';
 export type VerifyResult = { ok: true } | { ok: false; reason: TokenFailure };

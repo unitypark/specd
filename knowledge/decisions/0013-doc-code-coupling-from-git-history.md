@@ -76,13 +76,43 @@ run whose indexing already succeeded.
   matters, and one coupled to five unrelated areas is probably three docs.
 - Coupling is recomputed per index run for local repos, over a bounded window,
   so cost is proportional to the window rather than to repository age.
-- **Hosted repositories get nothing from this yet.** Two ways in, both
-  deliberately not taken here: a bootstrap clone at onboarding (the build agent
-  already clones hosted repos, so the capability exists), or accumulating
-  coupling forward from webhook push payloads, which carry per-commit file
-  lists and need no clone at all. The second is the better long-term answer and
-  the worse short-term one, because it starts empty.
+- ~~**Hosted repositories get nothing from this yet.**~~ Closed the same day by
+  taking the webhook route (see the update below).
 - This is the first thing specd derives from history rather than from HEAD. If
   it earns its place, the same walk yields hotspots and change cadence for the
   onboarding draft — the generated architecture doc could describe the parts of
   the system that actually move.
+
+
+## Update — 2026-08-10: hosted repositories
+
+The webhook route was taken, and no clone was needed after all.
+
+A push delivery already carries what history mining wants: sha, timestamp, and
+the files each commit touched. Those land in `repo_commits`, keyed on
+`(repository_id, sha)` so a redelivery cannot double-count, and pruned to the
+same twelve-month window. Both providers now read through one history source —
+`git log` where there is a working tree, the ledger where there is not — and
+everything downstream is unchanged, because `couplingFrom` never knew where its
+commits came from.
+
+Three consequences worth stating plainly:
+
+- **Only default-branch pushes are recorded.** Coupling has to describe what
+  landed. This also means `classifyPush` and the ledger answer different
+  questions: a push touching only application code triggers no re-index and is
+  exactly what drift is made of, so it is recorded even though nothing else
+  happens because of it.
+- **The ledger is a lower bound, and is treated as one.** It knows nothing from
+  before specd was installed, and GitHub truncates `commits` on very large
+  pushes. Both lose history rather than corrupting it: an uncoupled doc reads
+  as unmeasured, which is what it is, and the existing "freshness unknown"
+  path already says so rather than claiming freshness.
+- **A hosted doc gets a real change date.** The ledger knows when each doc's
+  path was last touched, which is the first time `doc_updated_at` has been
+  anything but null outside local mode. That was the false negative behind
+  every hosted doc reporting as permanently fresh.
+
+The per-doc `commitsSince` git call this originally used is gone: the same
+number now falls out of the single history walk that coupling already does, for
+every provider, instead of one subprocess per doc.

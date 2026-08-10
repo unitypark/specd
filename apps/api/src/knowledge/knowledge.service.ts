@@ -7,6 +7,7 @@ import {
   knowledgeDocLinks,
   knowledgeDocs,
   knowledgeHealth,
+  repoCommits,
   repositories,
   type Db,
   type DbContext,
@@ -25,7 +26,7 @@ import { VcsService } from '../vcs/vcs.service.js';
 import { EmbeddingService } from './embeddings.js';
 import { CHUNKER_VERSION, chunkMarkdown, headingAnchor } from './chunker.js';
 import { extractLinks } from './link-extract.js';
-import { couplingFrom } from './history.js';
+import { couplingFrom, type HistoryCommit } from './history.js';
 import {
   EDGE_WEIGHT,
   LINK_KINDS,
@@ -307,15 +308,16 @@ export class KnowledgeService {
       await this.recomputeHealth(repo.projectId, tx);
     });
 
-    // Drift, for providers that can answer it. `commitsSince` was written as
+    // Drift, from whatever history is available: `git log` for a repo with a
+    // working tree, the webhook-fed ledger for one specd cannot clone. Where
+    // neither has anything yet, nothing is written and freshness keeps saying
+    // "unmeasured" rather than inventing a number. `commitsSince` was written as
     // the drift signal when the index was built and then never called, so the
     // "flags docs that have drifted from the code" claim in knowledge/README.md
     // has until now been backed by a 90-day timer — the calendar, not the
     // codebase. This is the real thing, and it stays null where the provider
     // gives us no commit dates rather than pretending to a measurement.
-    if (repo.provider === 'local') {
-      await this.refreshDrift(repo, target);
-    }
+    await this.refreshDrift(repo, target);
 
     // Logged after the commit: until it lands, none of this happened.
     for (const doc of relink) await log(`  links refreshed for ${doc.path}`);
@@ -623,6 +625,69 @@ export class KnowledgeService {
   }
 
   /**
+   * Record default-branch commits from a push webhook (0013).
+   *
+   * This is history for repositories specd cannot clone. Idempotent on
+   * (repository, sha) because deliveries retry, and pruned to the coupling
+   * window so the ledger does not grow without bound.
+   */
+  async recordCommits(repo: Repository, commits: HistoryCommit[]): Promise<void> {
+    if (commits.length === 0) return;
+
+    await this.db
+      .insert(repoCommits)
+      .values(
+        commits.map((c) => ({
+          repositoryId: repo.id,
+          sha: c.sha,
+          committedAt: c.at,
+          files: c.files,
+        })),
+      )
+      .onConflictDoNothing();
+
+    await this.handle.sql`
+      DELETE FROM repo_commits
+      WHERE repository_id = ${repo.id}
+        AND committed_at < now() - make_interval(days => ${COUPLING_WINDOW_DAYS})
+    `;
+  }
+
+  /**
+   * History for a repo, from wherever it can be had.
+   *
+   * A local repo has a working tree, so `git log` answers completely and
+   * immediately. A hosted one has the ledger, which is accurate for
+   * everything since specd was installed and empty before it — a lower bound
+   * that grows, never a guess.
+   */
+  private async historyFor(
+    repo: Repository,
+    target: ReturnType<VcsService['toTarget']>,
+    since: Date,
+  ): Promise<HistoryCommit[]> {
+    if (repo.provider === 'local') {
+      try {
+        return await this.vcs.localAdapter.commitFiles(target, since);
+      } catch {
+        return [];
+      }
+    }
+
+    const rows = await this.handle.sql<
+      { sha: string; committed_at: Date; files: string[] }[]
+    >`
+      SELECT sha, committed_at, files
+      FROM repo_commits
+      -- ISO text with an explicit cast: the pool disables postgres.js type
+      -- handling, so it will not serialize a Date parameter for us.
+      WHERE repository_id = ${repo.id} AND committed_at >= ${since.toISOString()}::timestamptz
+      ORDER BY committed_at
+    `;
+    return rows.map((r) => ({ sha: r.sha, at: new Date(r.committed_at), files: r.files ?? [] }));
+  }
+
+  /**
    * Recount code commits since each doc last changed. Outside the index
    * transaction on purpose: it is a derived hint, and a git call per doc must
    * not hold write locks or fail a run that has already succeeded.
@@ -633,22 +698,38 @@ export class KnowledgeService {
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.repositoryId, repo.id));
 
-    // Repo-wide fallback: blunt, but it is all there is for a doc that has
-    // never moved with any code.
-    for (const doc of docs) {
-      if (!doc.docUpdatedAt) continue;
-      try {
-        const commits = await this.vcs.localAdapter.commitsSince(target, doc.docUpdatedAt);
-        await this.db
-          .update(knowledgeDocs)
-          .set({ codeCommitsSince: commits })
-          .where(eq(knowledgeDocs.id, doc.id));
-      } catch {
-        // A hint that cannot be computed is left null, never guessed at.
+    const since = new Date(Date.now() - COUPLING_WINDOW_DAYS * 86_400_000);
+    const history = await this.historyFor(repo, target, since);
+    if (history.length === 0) return;
+
+    // A hosted repo has no per-file commit date from its API, but the ledger
+    // knows when each doc was last touched. Deriving it here is what stops
+    // freshness reporting "unmeasured" forever on a repo specd cannot clone.
+    const docTouchedAt = new Map<string, Date>();
+    for (const commit of history) {
+      for (const file of commit.files) {
+        const at = docTouchedAt.get(file);
+        if (!at || commit.at > at) docTouchedAt.set(file, commit.at);
       }
     }
 
-    await this.refreshCoupling(repo, target, docs);
+    for (const doc of docs) {
+      const derived = doc.docUpdatedAt ?? docTouchedAt.get(doc.path) ?? null;
+      if (!derived) continue;
+
+      // Repo-wide fallback: blunt, but it is all there is for a doc that has
+      // never moved with any code.
+      const commitsSince = history.filter(
+        (c) => c.at > derived && c.files.some((f) => !f.startsWith(KNOWLEDGE_PREFIX)),
+      ).length;
+
+      await this.db
+        .update(knowledgeDocs)
+        .set({ codeCommitsSince: commitsSince, docUpdatedAt: derived })
+        .where(eq(knowledgeDocs.id, doc.id));
+    }
+
+    await this.refreshCoupling(repo, history, docs);
   }
 
   /**
@@ -660,18 +741,9 @@ export class KnowledgeService {
    */
   private async refreshCoupling(
     repo: Repository,
-    target: ReturnType<VcsService['toTarget']>,
+    commits: HistoryCommit[],
     docs: { id: string; path: string }[],
   ): Promise<void> {
-    const since = new Date(Date.now() - COUPLING_WINDOW_DAYS * 86_400_000);
-    let commits;
-    try {
-      commits = await this.vcs.localAdapter.commitFiles(target, since);
-    } catch {
-      return;
-    }
-    if (commits.length === 0) return;
-
     const idByPath = new Map(docs.map((d) => [d.path, d.id]));
     const perDoc = new Map<string, number>();
     const rows: (typeof knowledgeDocCoupling.$inferInsert)[] = [];

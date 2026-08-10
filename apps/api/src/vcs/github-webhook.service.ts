@@ -12,12 +12,14 @@ import {
 import { slugify, specBranchName } from '@specd/shared';
 import { DB } from '../db/db.module.js';
 import { PipelineService } from '../agents/pipeline.service.js';
+import { KnowledgeService } from '../knowledge/knowledge.service.js';
 import { RepositoriesService } from '../projects/repositories.service.js';
 import { SpecsService } from '../specs/specs.service.js';
 import { GitHubAppService } from './github-app.service.js';
 import {
   classifyPullRequest,
   classifyPush,
+  commitsFromPush,
   type PullRequestEvent,
   type PushEvent,
   type WebhookIntent,
@@ -60,6 +62,7 @@ export class GitHubWebhookService {
     private readonly specs: SpecsService,
     private readonly pipeline: PipelineService,
     private readonly app: GitHubAppService,
+    private readonly knowledge: KnowledgeService,
   ) {}
 
   /**
@@ -249,6 +252,11 @@ export class GitHubWebhookService {
 
     const defaultBranch = event.repository?.default_branch ?? repo.defaultBranch;
     const intent = classifyPush(event, defaultBranch);
+
+    // Record the commits before deciding whether to re-index. A push that
+    // touched only code triggers nothing here and is exactly what drift is
+    // made of, so it has to reach the ledger anyway (0013).
+    await this.knowledge.recordCommits(repo, commitsFromPush(event, defaultBranch));
 
     if (intent.kind !== 'reindex') {
       return {

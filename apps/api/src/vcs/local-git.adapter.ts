@@ -217,25 +217,6 @@ export class LocalGitAdapter implements VcsAdapter {
     }
   }
 
-  /** Commits touching anything but knowledge/ since a date — drift signal. */
-  async commitsSince(repo: RepoTarget, since: Date): Promise<number> {
-    const { git } = this.git(repo);
-    try {
-      const out = await git.raw([
-        'rev-list',
-        '--count',
-        `--since=${since.toISOString()}`,
-        'HEAD',
-        '--',
-        '.',
-        ':(exclude)knowledge',
-      ]);
-      return Number(out.trim()) || 0;
-    } catch {
-      return 0;
-    }
-  }
-
   /**
    * True only when `path` is itself the root of a repository.
    *

@@ -81,8 +81,20 @@ export interface PullRequestEvent {
 
 export interface PushEvent {
   ref?: string;
-  commits?: { added?: string[]; modified?: string[]; removed?: string[] }[];
-  head_commit?: { added?: string[]; modified?: string[]; removed?: string[] } | null;
+  commits?: {
+    id?: string;
+    timestamp?: string;
+    added?: string[];
+    modified?: string[];
+    removed?: string[];
+  }[];
+  head_commit?: {
+    id?: string;
+    timestamp?: string;
+    added?: string[];
+    modified?: string[];
+    removed?: string[];
+  } | null;
   repository?: { full_name?: string; default_branch?: string };
   installation?: { id?: number };
 }
@@ -148,6 +160,42 @@ export function pushedPaths(event: PushEvent): string[] {
     }
   }
   return [...paths];
+}
+
+/**
+ * Commits worth recording in the history ledger (0013).
+ *
+ * Deliberately not the same question as `classifyPush`. A push touching only
+ * application code triggers no re-index and is exactly what drift is made of,
+ * so it must be recorded even though nothing else happens because of it.
+ *
+ * Default branch only: coupling should describe what landed, not work on a
+ * branch that may never merge. GitHub truncates `commits` on very large
+ * pushes, which loses history rather than corrupting it — the ledger is a
+ * lower bound on what happened, and treated as one.
+ */
+export function commitsFromPush(
+  event: PushEvent,
+  defaultBranch: string,
+): { sha: string; at: Date; files: string[] }[] {
+  if ((event.ref ?? '') !== `refs/heads/${defaultBranch}`) return [];
+
+  const seen = new Set<string>();
+  const out: { sha: string; at: Date; files: string[] }[] = [];
+
+  for (const commit of [...(event.commits ?? []), ...(event.head_commit ? [event.head_commit] : [])]) {
+    const sha = commit.id;
+    if (!sha || seen.has(sha)) continue;
+    const at = commit.timestamp ? new Date(commit.timestamp) : null;
+    if (!at || Number.isNaN(at.getTime())) continue;
+    seen.add(sha);
+    out.push({
+      sha,
+      at,
+      files: [...new Set([...(commit.added ?? []), ...(commit.modified ?? []), ...(commit.removed ?? [])])],
+    });
+  }
+  return out;
 }
 
 /**

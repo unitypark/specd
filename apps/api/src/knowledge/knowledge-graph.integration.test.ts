@@ -39,7 +39,6 @@ const files = new Map<string, string>();
 
 /** Mutable so a test can give the repo a commit history to drift against. */
 let fakeCommitDate: Date | null = null;
-let fakeCodeCommits = 0;
 /** Commit history the fake repo reports, for coupling (0013). */
 let fakeHistory: { sha: string; at: Date; files: string[] }[] = [];
 
@@ -52,7 +51,6 @@ const fakeVcs = {
   toTarget: () => ({}),
   localAdapter: {
     lastCommitDate: async () => fakeCommitDate,
-    commitsSince: async () => fakeCodeCommits,
     commitFiles: async () => fakeHistory,
   },
 } as unknown as VcsService;
@@ -440,8 +438,16 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
   });
 
   it('calls a doc drifted when code moved under it, not merely when time passed', async () => {
+    // The fallback path: this doc has never moved with any code, so there is
+    // no coupling to measure against and the blunt repo-wide count is all
+    // there is. Still better than the calendar.
     fakeCommitDate = new Date(Date.now() - 5 * 86_400_000); // touched 5 days ago
-    fakeCodeCommits = 25;
+    // …and the code moved after that, which is the only ordering that counts.
+    fakeHistory = Array.from({ length: 12 }, (_, i) => ({
+      sha: `d${i}`,
+      at: new Date(Date.now() - 4 * 86_400_000 + i * 3_600_000),
+      files: [`apps/api/src/unrelated/f${i}.ts`],
+    }));
     files.set('knowledge/orphan.md', '# Orphan\n\nNothing links here. Edited.\n');
     await service.indexRepository(repo);
 
@@ -450,10 +456,10 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     // otherwise, and that is the claim knowledge/README.md has always made.
     expect(doc?.freshness.unknown).toBe(false);
     expect(doc?.freshness.stale).toBe(true);
-    expect(doc?.freshness.reason).toContain('25 commits touched code');
+    expect(doc?.freshness.reason).toContain('12 commits touched code');
 
     fakeCommitDate = null;
-    fakeCodeCommits = 0;
+    fakeHistory = [];
   });
 
   it('gives a chunk an anchor the coverage set actually contains', async () => {
@@ -531,6 +537,53 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     fakeCommitDate = null;
     files.set('knowledge/architecture.md', '# Architecture\n\n## Runtime\n\nPostgres only. Retrieval is hybrid.\n');
     await service.indexRepository(repo);
+  });
+
+  it('mines the same coupling for a repo it cannot clone', async () => {
+    // A hosted repo has no working tree, so history arrives from push
+    // webhooks instead of git log. Everything downstream is identical — the
+    // point of routing both providers through one history source.
+    const [hosted] = await handle!.db
+      .insert(repositories)
+      .values({ projectId, provider: 'github', name: 'acme/hosted', externalId: '99' })
+      .returning();
+
+    const at = (n: number) => new Date(Date.now() - (30 - n) * 86_400_000);
+    await service.recordCommits(hosted!, [
+      { sha: 'h1', at: at(1), files: ['knowledge/hosted.md', 'apps/api/src/pay/a.ts'] },
+      { sha: 'h2', at: at(2), files: ['knowledge/hosted.md', 'apps/api/src/pay/b.ts'] },
+      ...Array.from({ length: 12 }, (_, i) => ({
+        sha: `hc${i}`,
+        at: at(3 + i),
+        files: [`apps/api/src/pay/c${i}.ts`],
+      })),
+    ]);
+
+    // Redelivery is normal; the ledger must not double-count it.
+    await service.recordCommits(hosted!, [
+      { sha: 'h1', at: at(1), files: ['knowledge/hosted.md', 'apps/api/src/pay/a.ts'] },
+    ]);
+
+    files.set('knowledge/hosted.md', '# Hosted\n\nPayments live here.\n');
+    await service.indexRepository(hosted!);
+
+    const doc = await docByPath('knowledge/hosted.md');
+    const coupling = await service.docCoupling(projectId, doc!.id);
+    expect(coupling[0]).toMatchObject({
+      codePath: 'apps/api/src/',
+      commitsTogether: 2,
+      commitsSince: 12,
+    });
+
+    // And the freshness that used to be permanently "unmeasured" on a hosted
+    // repo now has a date behind it, derived from the ledger.
+    const listed = (await service.listDocs(projectId)).find((d) => d.path === 'knowledge/hosted.md');
+    expect(listed?.freshness.unknown).toBe(false);
+    expect(listed?.freshness.stale).toBe(true);
+    expect(listed?.freshness.reason).toContain('apps/api/src/');
+
+    files.delete('knowledge/hosted.md');
+    await handle!.db.delete(repositories).where(eq(repositories.id, hosted!.id));
   });
 
   it('rolls the whole run back when a step fails partway through', async () => {

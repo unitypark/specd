@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import {
+  codeNodes,
   knowledgeChunks,
   knowledgeDocCoupling,
   knowledgeDocLinks,
@@ -36,8 +37,10 @@ import {
 } from './graph-schema.js';
 import {
   headingAnchorsOf,
+  resolveCodeTarget,
   resolvePathTarget,
   resolveWikiStem,
+  type ResolvableCode,
   type ResolvableDoc,
 } from './link-resolve.js';
 
@@ -158,10 +161,16 @@ export class KnowledgeService {
     const adapter = await this.vcs.adapterFor(repo);
     const target = this.vcs.toTarget(repo);
 
-    const paths = (await adapter.listFiles(target, KNOWLEDGE_PREFIX)).filter((p) =>
-      p.endsWith('.md'),
+    // One listing for both halves of the index. For a hosted repo this is a
+    // recursive tree call, so asking twice would double the cost of every run.
+    const allFiles = await adapter.listFiles(target, '');
+    const paths = allFiles.filter(
+      (p) => p.startsWith(KNOWLEDGE_PREFIX) && p.endsWith('.md'),
     );
-    await log(`scanning ${repo.name}: ${paths.length} knowledge doc(s)`);
+    const codePaths = allFiles.filter((p) => !p.startsWith(KNOWLEDGE_PREFIX));
+    await log(
+      `scanning ${repo.name}: ${paths.length} knowledge doc(s), ${codePaths.length} code file(s)`,
+    );
 
     const files = await adapter.readFiles(target, paths);
 
@@ -268,6 +277,27 @@ export class KnowledgeService {
         touched.add(doc.id);
       }
 
+      // The file tree a doc can point at. Replaced wholesale: it is derived
+      // from one listing of one commit, and a stale row would let a deleted
+      // file keep answering for references to it.
+      await tx.sql`DELETE FROM code_nodes WHERE repository_id = ${repo.id}`;
+      if (codePaths.length > 0) {
+        await tx.sql`
+          INSERT INTO code_nodes (project_id, repository_id, kind, path, qualified_name)
+          SELECT ${repo.projectId}, ${repo.id}, 'file', p, p
+          FROM unnest(${codePaths}::text[]) AS p
+        `;
+      }
+      const code: ResolvableCode[] = await tx.db
+        .select({ id: codeNodes.id, path: codeNodes.path })
+        .from(codeNodes)
+        .where(eq(codeNodes.repositoryId, repo.id));
+      // First segment of every path in the repo. A coderef whose first segment
+      // is not one of these was never ours — a Go module path, an npm
+      // specifier — and calling it broken is the false alarm S-102's v2
+      // deviation was written to stop.
+      const ownTopLevel = new Set(codePaths.map((p) => p.split('/')[0]!));
+
       // The doc set is final now, so every link in this run resolves against
       // one snapshot of it — the previous code re-read the whole project's doc
       // list once per doc.
@@ -277,13 +307,19 @@ export class KnowledgeService {
         .where(eq(knowledgeDocs.projectId, repo.projectId));
       const anchors = anchorLookup(tx);
 
+      const scope = { code, ownTopLevel };
       for (const doc of changed) {
         await writeChunks(tx, doc.docId!, repo.projectId, doc);
-        await writeLinks(tx, doc.docId!, repo.projectId, doc.path, doc.content, docs, anchors);
+        await writeLinks(
+          tx, doc.docId!, repo.projectId, doc.path, doc.content, docs, anchors, scope, doc.kind,
+        );
       }
 
       for (const doc of relink) {
-        await writeLinks(tx, doc.docId, repo.projectId, doc.path, doc.content, docs, anchors);
+        await writeLinks(
+          tx, doc.docId, repo.projectId, doc.path, doc.content, docs, anchors, scope,
+          classify(doc.path),
+        );
         await tx.db
           .update(knowledgeDocs)
           .set({ linksVersion: LINKS_VERSION })
@@ -340,13 +376,17 @@ export class KnowledgeService {
     docs: ResolvableDoc[],
     anchors: AnchorLookup,
   ): Promise<void> {
-    // A deleted target leaves resolved rows with a NULLed doc id.
+    // A deleted target leaves resolved rows with a NULLed id. Either id: a
+    // coderef points at a code node instead of a doc, so demoting on a null
+    // doc id alone would demote every one of them — and checking both is also
+    // what catches a doc whose source file was deleted.
     await tx.sql`
       UPDATE knowledge_doc_links
       SET resolution_state = 'unresolved'
       WHERE project_id = ${projectId}
         AND resolution_state IN ('resolved', 'dangling_anchor')
         AND resolved_doc_id IS NULL
+        AND resolved_code_id IS NULL
     `;
 
     const pending = await tx.db
@@ -362,6 +402,10 @@ export class KnowledgeService {
         and(
           eq(knowledgeDocLinks.projectId, projectId),
           eq(knowledgeDocLinks.resolutionState, 'unresolved'),
+          // A coderef resolves against the file tree, which the index pass has
+          // just rewritten; re-resolving it here against docs would only ever
+          // fail and would overwrite a correct verdict.
+          ne(knowledgeDocLinks.kind, 'coderef'),
         ),
       );
     if (pending.length === 0) return;
@@ -892,9 +936,11 @@ export class KnowledgeService {
     const outbound = await this.handle.sql<
       { kind: string; raw_target: string; site: string | null; state: string; target_path: string | null }[]
     >`
-      SELECT l.kind, l.raw_target, l.site, l.resolution_state AS state, kd.path AS target_path
+      SELECT l.kind, l.raw_target, l.site, l.resolution_state AS state,
+             COALESCE(kd.path, cn.path) AS target_path
       FROM knowledge_doc_links l
       LEFT JOIN knowledge_docs kd ON kd.id = l.resolved_doc_id
+      LEFT JOIN code_nodes cn ON cn.id = l.resolved_code_id
       WHERE l.project_id = ${projectId} AND l.source_doc_id = ${docId}
       ORDER BY l.kind, l.raw_target
     `;
@@ -961,6 +1007,7 @@ export class KnowledgeService {
     const [graph] = await ctx.sql<
       {
         broken: number;
+        broken_code: number;
         dangling: number;
         orphans: number;
         total_links: number;
@@ -969,7 +1016,14 @@ export class KnowledgeService {
     >`
       SELECT
         (SELECT count(*) FROM knowledge_doc_links
-          WHERE project_id = ${projectId} AND resolution_state = 'unresolved')::int AS broken,
+          WHERE project_id = ${projectId} AND resolution_state = 'unresolved'
+            AND kind <> 'coderef')::int AS broken,
+        -- Docs pointing at source files that are not there any more. Its own
+        -- number: a dead link between docs and a doc describing code that was
+        -- deleted are different repairs.
+        (SELECT count(*) FROM knowledge_doc_links
+          WHERE project_id = ${projectId} AND resolution_state = 'unresolved'
+            AND kind = 'coderef')::int AS broken_code,
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId} AND resolution_state = 'dangling_anchor')::int AS dangling,
         (SELECT count(*) FROM knowledge_doc_links
@@ -997,6 +1051,7 @@ export class KnowledgeService {
             ))::int AS orphans
     `;
     const brokenLinks = Number(graph?.broken ?? 0);
+    const brokenCodeRefs = Number(graph?.broken_code ?? 0);
     const danglingAnchors = Number(graph?.dangling ?? 0);
     const orphanDocs = Number(graph?.orphans ?? 0);
     const totalLinks = Number(graph?.total_links ?? 0);
@@ -1014,7 +1069,9 @@ export class KnowledgeService {
       // beside. Broken edges are scored as a *rate* over the edges that exist,
       // so a well-linked base with one dead link is not judged like a
       // two-link base with one dead link.
-      if (totalLinks > 0) score -= ((brokenLinks + danglingAnchors) / totalLinks) * 15;
+      if (totalLinks > 0) {
+        score -= ((brokenLinks + danglingAnchors + brokenCodeRefs) / totalLinks) * 15;
+      }
       score -= (orphanDocs / docCount) * 10;
       // Never fully penalise a young knowledge base for having no history yet.
       score = Math.max(0, Math.min(100, score));
@@ -1058,6 +1115,14 @@ export class KnowledgeService {
       notes.push({
         icon: '⚓',
         text: `${danglingAnchors} citation anchor${danglingAnchors === 1 ? '' : 's'} no longer exist in their target doc.`,
+      });
+    }
+    if (brokenCodeRefs > 0) {
+      notes.push({
+        icon: '🧩',
+        text:
+          `${brokenCodeRefs} reference${brokenCodeRefs === 1 ? '' : 's'} to source files that no ` +
+          `longer exist — the doc is describing code that moved or was deleted.`,
       });
     }
     if (undeclaredEdges > 0) {
@@ -1226,6 +1291,10 @@ async function writeLinks(
   content: string,
   docs: ResolvableDoc[],
   anchors: AnchorLookup,
+  /** The file tree a `coderef` resolves against, and what counts as ours. */
+  scope: { code: ResolvableCode[]; ownTopLevel: Set<string> },
+  /** Research records document other people's code; see the coderef branch. */
+  kind: KnowledgeDocKind,
 ): Promise<void> {
   await tx.db
     .delete(knowledgeDocLinks)
@@ -1241,6 +1310,27 @@ async function writeLinks(
 
   const rows: (typeof knowledgeDocLinks.$inferInsert)[] = [];
   for (const link of extracted) {
+    if (link.kind === 'coderef') {
+      // A research record's paths point into the system it describes, not into
+      // this repository — resolving them would report someone else's file tree
+      // as our broken references.
+      if (kind === 'research') continue;
+      const hit = resolveCodeTarget(link.rawTarget, scope.code);
+      // Out of scope rather than broken: a path whose first segment is not a
+      // directory of this repo was never ours to resolve.
+      if (!hit && !scope.ownTopLevel.has(link.rawTarget.split('/')[0] ?? '')) continue;
+      rows.push({
+        projectId,
+        sourceDocId: docId,
+        kind: link.kind,
+        site: link.site,
+        rawTarget: link.rawTarget,
+        resolvedCodeId: hit?.id ?? null,
+        resolutionState: hit ? 'resolved' : 'unresolved',
+      });
+      continue;
+    }
+
     const resolved =
       link.kind === 'wikilink'
         ? resolveWikiStem(link.rawTarget, docs)
@@ -1392,6 +1482,7 @@ export async function assertNoUnexplainedEdgeLoss(
 }
 
 function classify(path: string): KnowledgeDocKind {
+  if (path.includes('/research/')) return 'research';
   if (path.includes('/specs/')) return 'spec';
   if (path.includes('/decisions/')) return 'adr';
   if (path.includes('/runbooks/')) return 'runbook';

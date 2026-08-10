@@ -54,13 +54,18 @@ interface Edge {
 }
 
 const edges: Edge[] = docs.flatMap((doc) =>
-  extractLinks(contentOf(doc.path)).map((link) => {
-    const target =
-      link.kind === 'wikilink'
-        ? resolveWikiStem(link.rawTarget, docs)
-        : resolvePathTarget(link.rawTarget, doc.path, docs);
-    return { from: doc.path, to: target?.docId ?? null, raw: link.rawTarget };
-  }),
+  extractLinks(contentOf(doc.path))
+    // A `coderef` points at the target repo's source, which resolves against
+    // the indexed file tree rather than against these docs — the scaffold
+    // naming a real entry point is correct, not a broken link.
+    .filter((link) => link.kind !== 'coderef')
+    .map((link) => {
+      const target =
+        link.kind === 'wikilink'
+          ? resolveWikiStem(link.rawTarget, docs)
+          : resolvePathTarget(link.rawTarget, doc.path, docs);
+      return { from: doc.path, to: target?.docId ?? null, raw: link.rawTarget };
+    }),
 );
 
 describe('the generated knowledge scaffold', () => {

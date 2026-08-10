@@ -418,6 +418,10 @@ export const knowledgeDocLinks = pgTable(
     resolvedAnchor: text('resolved_anchor'),
     /** resolved | unresolved | dangling_anchor */
     resolutionState: text('resolution_state').notNull().default('unresolved'),
+    /** Set instead of `resolvedDocId` when the target is code, not a doc. */
+    resolvedCodeId: uuid('resolved_code_id').references(() => codeNodes.id, {
+      onDelete: 'set null',
+    }),
     /** 'deterministic' today; a later LLM tier coexists, never overwrites. */
     originTier: text('origin_tier').notNull().default('deterministic'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -451,6 +455,36 @@ export const deviceCodes = pgTable(
 );
 
 /** Freshness/health snapshot, recomputed on every index run. */
+/**
+ * Code the docs can point at (Phase 3). `kind` is 'file' today; symbols land
+ * in the same table with a span and a dotted qualified name.
+ */
+export const codeNodes = pgTable(
+  'code_nodes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    repositoryId: uuid('repository_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull().default('file'),
+    path: text('path').notNull(),
+    qualifiedName: text('qualified_name').notNull(),
+    startLine: integer('start_line'),
+    endLine: integer('end_line'),
+    /** Content identity — what tells "moved" from "changed" later. */
+    blobSha: text('blob_sha'),
+    indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('code_nodes_repo_kind_qname_key').on(t.repositoryId, t.kind, t.qualifiedName),
+    index('code_nodes_project_idx').on(t.projectId),
+    index('code_nodes_path_idx').on(t.repositoryId, t.path),
+  ],
+);
+
 /**
  * Commits on the default branch, recorded from push webhooks for repositories
  * specd cannot clone (0013). The same history a `git log` gives locally,

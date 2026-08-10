@@ -13,7 +13,12 @@ export type AgentRunKind = 'onboard' | 'spec' | 'index' | 'build';
 export type AgentRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type RunnerKind = 'hosted' | 'self_hosted';
 
-export type KnowledgeDocKind = 'doc' | 'adr' | 'runbook' | 'spec';
+/**
+ * `research` is a record of how some *other* system works. It is the one kind
+ * whose file paths point outside this repository, so code references in it are
+ * not resolved against the file tree — see knowledge/decisions/0014.
+ */
+export type KnowledgeDocKind = 'doc' | 'adr' | 'runbook' | 'spec' | 'research';
 
 export interface KnowledgeFreshness {
   /** 0–100. Feeds the "knowledge health" number on the dashboard (§P6). */

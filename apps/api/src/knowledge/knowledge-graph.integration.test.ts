@@ -586,6 +586,60 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     await handle!.db.delete(repositories).where(eq(repositories.id, hosted!.id));
   });
 
+  it('resolves a doc reference to source code, and flags one that points at nothing', async () => {
+    // The 25+ code paths in this repository's own knowledge tree used to
+    // produce no edge at all: the extractor required a .md suffix, so a doc
+    // could describe a file deleted two renames ago and nothing would say so.
+    files.set('apps/api/src/live.ts', 'export const live = 1;\n');
+    files.set(
+      'knowledge/codeuser.md',
+      [
+        '# Code user',
+        '',
+        '## Design',
+        '',
+        'The entry point is `apps/api/src/live.ts` today.',
+        'It replaced `apps/api/src/deleted.ts`, which is gone.',
+        'Unrelated: golang.org/x/term.IsTerm is a package, not our file.',
+      ].join('\n'),
+    );
+    await service.indexRepository(repo);
+
+    const doc = await docByPath('knowledge/codeuser.md');
+    const { outbound } = await service.docLinks(projectId, doc!.id);
+    const code = outbound.filter((l) => l.kind === 'coderef');
+
+    expect(code).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rawTarget: 'apps/api/src/live.ts',
+          state: 'resolved',
+          targetPath: 'apps/api/src/live.ts',
+        }),
+        expect.objectContaining({ rawTarget: 'apps/api/src/deleted.ts', state: 'unresolved' }),
+      ]),
+    );
+
+    // A path that was never ours is out of scope, not broken — the false
+    // alarm S-102's v2 deviation was written to stop.
+    expect(code.some((l) => l.rawTarget.startsWith('golang.org/'))).toBe(false);
+
+    const health = await service.health(projectId);
+    const text = (health.notes as { text: string }[]).map((n) => n.text).join(' | ');
+    expect(text).toMatch(/source files that no longer exist/);
+
+    // Deleting the file it pointed at is what makes a live reference break.
+    files.delete('apps/api/src/live.ts');
+    await service.indexRepository(repo);
+    const after = await service.docLinks(projectId, doc!.id);
+    expect(
+      after.outbound.find((l) => l.rawTarget === 'apps/api/src/live.ts')?.state,
+    ).toBe('unresolved');
+
+    files.delete('knowledge/codeuser.md');
+    await service.indexRepository(repo);
+  });
+
   it('rolls the whole run back when a step fails partway through', async () => {
     // The failure this exists to prevent: a doc's chunks are deleted before
     // its new ones are written, so a run that dies in between leaves the doc

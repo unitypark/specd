@@ -49,6 +49,13 @@ export const LINK_KINDS = [
     description: 'An ordinary markdown link. Intentional, but often navigational rather than evidential.',
   },
   {
+    kind: 'coderef',
+    weight: 0.5,
+    syntax: '`apps/api/src/runners/runner-jobs.service.ts`, or the same path bare in prose',
+    description:
+      'A reference to source code rather than to another doc. Resolves against the indexed file tree, so a doc pointing at a file that no longer exists says so.',
+  },
+  {
     kind: 'pathref',
     weight: 0.4,
     syntax: '`decisions/0008-remove-unused-queue.md`, or the same path bare in prose',

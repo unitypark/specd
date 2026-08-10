@@ -126,6 +126,10 @@
   rows only for wikilinks and explicitly knowledge/-rooted paths. The
   flag-don't-drop rule bends here, knowingly: a typo'd tree-relative path is
   silently skipped, and that trade is documented in code.
+  _Partly superseded 2026-08-10 by [[0014-the-index-holds-code-not-only-docs]]:
+  paths pointing at **source files** are now resolved against an indexed file
+  tree, so they are edges rather than false alarms. The rule survives for what
+  it was really about — references specd has no way to check._
 - **No CHECK constraint on resolution consistency.** The planned
   `resolved ⇒ resolved_doc_id` CHECK conflicted with `ON DELETE SET NULL` —
   deleting a target doc transiently produces resolved-with-no-target, so the

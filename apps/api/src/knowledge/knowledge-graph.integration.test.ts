@@ -598,6 +598,9 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     // The 25+ code paths in this repository's own knowledge tree used to
     // produce no edge at all: the extractor required a .md suffix, so a doc
     // could describe a file deleted two renames ago and nothing would say so.
+    // A sibling keeps the directory in the tree, so deleting the referenced
+    // file tests a broken reference rather than a repo that lost apps/ whole.
+    files.set('apps/api/src/sibling.ts', 'export const sibling = 1;\n');
     files.set('apps/api/src/live.ts', 'export const live = 1;\n');
     files.set(
       'knowledge/codeuser.md',
@@ -671,6 +674,7 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     ).toBe('unresolved');
 
     files.delete('knowledge/codeuser.md');
+    files.delete('apps/api/src/sibling.ts');
     await service.indexRepository(repo);
   });
 
@@ -727,6 +731,72 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
 
     files.delete('knowledge/payments.md');
     files.delete('apps/api/src/pay/charge.ts');
+    await service.indexRepository(repo);
+  });
+
+  it('reaches the same index incrementally as it would from scratch', async () => {
+    /**
+     * The oracle is a clean rebuild.
+     *
+     * Every other test here asserts a specific behaviour; this one asserts
+     * that a sequence of incremental runs cannot drift from what a single run
+     * over the same tree would have produced. That is the check the
+     * benchmarked engine credits with catching its real bugs — only 10 of 25
+     * edits reproduced a clean index before it was written
+     * (per knowledge/research/code-graph-rag-engine-analysis.md#7-the-clever-parts)
+     * — and it is the shape that would have caught the stale-node-id bug in
+     * this repository without anyone suspecting it first.
+     */
+    const shape = async () => {
+      const rows = await handle!.sql<
+        { path: string; kind: string; raw_target: string; state: string; target: string | null }[]
+      >`
+        SELECT kd.path, l.kind, l.raw_target, l.resolution_state AS state,
+               COALESCE(tkd.path, cn.path) AS target
+        FROM knowledge_doc_links l
+        JOIN knowledge_docs kd ON kd.id = l.source_doc_id
+        LEFT JOIN knowledge_docs tkd ON tkd.id = l.resolved_doc_id
+        LEFT JOIN code_nodes cn ON cn.id = l.resolved_code_id
+        WHERE l.project_id = ${projectId}
+        ORDER BY kd.path, l.kind, l.raw_target, l.resolution_state
+      `;
+      return rows.map((r) => `${r.path} ${r.kind} ${r.raw_target} ${r.state} ${r.target ?? '-'}`);
+    };
+
+    // A sequence a real project would produce: add, cross-reference, edit,
+    // rename a target, delete.
+    // A sibling that outlives the file under test: deleting one source file
+    // does not delete its directory, and the scope rule that decides whether
+    // a reference was ever ours keys on the top-level directory existing.
+    files.set('apps/api/src/inc/keep.ts', 'export const keep = 1;\n');
+    files.set('apps/api/src/inc/a.ts', 'export class Alpha {\n  run() {}\n}\n');
+    files.set('knowledge/inc-one.md', '# One\n\n## Body\n\nUses `apps/api/src/inc/a.ts` and `Alpha.run()`.\n');
+    await service.indexRepository(repo);
+
+    files.set('knowledge/inc-two.md', '# Two\n\n## Body\n\nSee [[inc-one]] and `apps/api/src/inc/a.ts`.\n');
+    await service.indexRepository(repo);
+
+    files.set('apps/api/src/inc/a.ts', 'export class Alpha {\n  run() {}\n  extra() {}\n}\n');
+    await service.indexRepository(repo);
+
+    files.set('knowledge/inc-one.md', '# One\n\n## Body\n\nUses `apps/api/src/inc/a.ts` and `Alpha.extra()` now.\n');
+    await service.indexRepository(repo);
+
+    files.delete('apps/api/src/inc/a.ts');
+    await service.indexRepository(repo);
+
+    const incremental = await shape();
+
+    // Now the oracle: throw the derived state away and build it once.
+    await handle!.sql`DELETE FROM knowledge_docs WHERE project_id = ${projectId}`;
+    await handle!.sql`DELETE FROM code_nodes WHERE project_id = ${projectId}`;
+    await service.indexRepository(repo);
+
+    expect(incremental).toEqual(await shape());
+
+    files.delete('knowledge/inc-one.md');
+    files.delete('knowledge/inc-two.md');
+    files.delete('apps/api/src/inc/keep.ts');
     await service.indexRepository(repo);
   });
 

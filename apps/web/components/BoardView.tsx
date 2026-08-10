@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { BUILDABLE_STATUSES, type SpecStatus } from '@specd/shared';
-import { get, post } from '@/lib/api';
+import { del, get, patch, post } from '@/lib/api';
 import { COLUMN_STATUS, dropCheck } from '@/lib/board';
+import { ConfirmDialog } from './ConfirmDialog';
 import styles from './board.module.css';
 
 interface Card {
@@ -78,6 +79,12 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
   const [waitingForRunner, setWaitingForRunner] = useState(false);
   const [commentOpen, setCommentOpen] = useState<number | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [confirmDeleteTicket, setConfirmDeleteTicket] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const board = await get<{ columns: Column[]; cards: Card[] }>(`/projects/${slug}/board`);
@@ -124,6 +131,8 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
       setWaitingForRunner(false);
       setCommentOpen(null);
       setCommentDrafts({});
+      setEditing(false);
+      setConfirmDeleteTicket(false);
       const d = await get<TicketDetail>(`/projects/${slug}/board/tickets/${ticketId}`);
       setDetail(d);
     },
@@ -181,6 +190,26 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
 
   const spec = detail?.spec ?? null;
   const commentable = Boolean(spec && !BUILDABLE_STATUSES.includes(spec.status as SpecStatus));
+  // Mirrors the server's refusal (`ticket_has_delivered_work`): a ticket
+  // whose spec reached the gate is audit trail, not clutter.
+  const ticketGated = Boolean(spec && BUILDABLE_STATUSES.includes(spec.status as SpecStatus));
+
+  async function deleteTicket() {
+    if (!open) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await del(`/projects/${slug}/board/tickets/${open}`);
+      setConfirmDeleteTicket(false);
+      setOpen(null);
+      await load();
+      onChange();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete the ticket');
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   async function submitComment(itemIndex: number) {
     const body = (commentDrafts[itemIndex] ?? '').trim();
@@ -362,10 +391,98 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                     ) : (
                       <span className="pill">no spec yet</span>
                     )}
+                    <span className={styles.dgrow} />
+                    {!editing && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => {
+                            setEditing(true);
+                            setEditTitle(detail.ticket.title);
+                            setEditBody(detail.ticket.body);
+                          }}
+                        >
+                          ✎ Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm danger"
+                          disabled={ticketGated}
+                          title={
+                            ticketGated
+                              ? 'This ticket has an approved or built spec — it is part of the audit trail and cannot be deleted.'
+                              : undefined
+                          }
+                          onClick={() => {
+                            setDeleteError(null);
+                            setConfirmDeleteTicket(true);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
-                {!spec && (
+                {editing && (
+                  <div className={styles.dbody}>
+                    <div className="field">
+                      <label htmlFor="et">Title</label>
+                      <input
+                        id="et"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        maxLength={200}
+                        autoFocus
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="eb">The business ask, in plain language</label>
+                      <textarea
+                        id="eb"
+                        rows={7}
+                        value={editBody}
+                        onChange={(e) => setEditBody(e.target.value)}
+                      />
+                      {spec && (
+                        <p className="hint">
+                          The next spec draft reads this wording — v{spec.version} was drafted from
+                          the previous one.
+                        </p>
+                      )}
+                    </div>
+                    <div className={styles.dactions}>
+                      <button
+                        type="button"
+                        className="btn primary"
+                        disabled={!editTitle.trim() || busy === 'edit-ticket'}
+                        onClick={() =>
+                          act('edit-ticket', async () => {
+                            await patch(`/projects/${slug}/board/tickets/${detail.ticket.id}`, {
+                              title: editTitle.trim(),
+                              body: editBody,
+                            });
+                            setEditing(false);
+                          })
+                        }
+                      >
+                        {busy === 'edit-ticket' && <span className="spinner" />} Save
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy === 'edit-ticket'}
+                        onClick={() => setEditing(false)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {!editing && !spec && (
                   <div className={styles.dbody}>
                     <h6>Business ask (verbatim)</h6>
                     <p className={styles.verbatim}>
@@ -378,7 +495,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                   </div>
                 )}
 
-                {spec && (
+                {!editing && spec && (
                   <>
                     <div className={styles.dtabs}>
                       {(
@@ -696,6 +813,23 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
             )}
           </aside>
         </>
+      )}
+
+      {confirmDeleteTicket && detail && (
+        <ConfirmDialog
+          title={`Delete ${detail.ticket.key}?`}
+          body={
+            <>
+              Deletes <b>{detail.ticket.title}</b> and any draft specs under it. Run history
+              survives with the ticket reference cleared.
+            </>
+          }
+          confirmLabel="Delete ticket"
+          busy={deleteBusy}
+          error={deleteError}
+          onConfirm={deleteTicket}
+          onCancel={() => setConfirmDeleteTicket(false)}
+        />
       )}
     </div>
   );

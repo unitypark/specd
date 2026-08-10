@@ -137,6 +137,12 @@ export interface ProjectSummary {
   spendCapCents: number;
   knowledgeHealth: number;
   defaultModel: string;
+  /**
+   * The kill switch, as the server knows it. The UI renders this rather than
+   * a local guess — a kill switch whose label can disagree with reality is
+   * worse than none.
+   */
+  agentsPaused: boolean;
 }
 
 export interface SpecView {

@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { API_BASE, del, get, patch, post } from '@/lib/api';
 import type { ProjectSummary } from '@/lib/types';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface Connection {
   id: string;
@@ -46,18 +48,32 @@ export function SettingsView({
   project: ProjectSummary;
   onChange: () => void;
 }) {
+  const router = useRouter();
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? '');
   const [cap, setCap] = useState((project.spendCapCents / 100).toFixed(0));
   const [model, setModel] = useState(project.defaultModel);
-  const [paused, setPaused] = useState(false);
-  const [saved, setSaved] = useState(false);
+  // Seeded from the server, and only flipped once the server confirms — a
+  // kill switch whose label can disagree with reality is worse than none.
+  const [paused, setPaused] = useState(project.agentsPaused);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [saveBusy, setSaveBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmRemoveRunner, setConfirmRemoveRunner] = useState<RunnerSummary | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [runnerList, setRunnerList] = useState<RunnerSummary[]>([]);
   const [runnerName, setRunnerName] = useState('');
   const [justPaired, setJustPaired] = useState<{ name: string; pairCode: string } | null>(null);
   const [runnerBusy, setRunnerBusy] = useState(false);
   const [runnerError, setRunnerError] = useState<string | null>(null);
+
+  // The prop refreshes after every save/reload; the pause pill must follow
+  // the server, not the click that may have failed.
+  useEffect(() => setPaused(project.agentsPaused), [project.agentsPaused]);
 
   const load = useCallback(() => {
     get<Connection[]>(`/projects/${slug}/connections`).then(setConnections).catch(() => undefined);
@@ -104,6 +120,7 @@ export function SettingsView({
     setRunnerError(null);
     try {
       await del(`/projects/${slug}/runners/${id}`);
+      setConfirmRemoveRunner(null);
       loadRunners();
     } catch (err) {
       setRunnerError(err instanceof Error ? err.message : 'Failed to remove runner');
@@ -112,21 +129,83 @@ export function SettingsView({
     }
   }
 
-  async function save(body: Record<string, unknown>) {
+  async function save(what: string, body: Record<string, unknown>): Promise<boolean> {
     setError(null);
+    setSaveBusy(what);
     try {
       await patch(`/projects/${slug}`, body);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      setSaved(what);
+      setTimeout(() => setSaved((s) => (s === what ? null : s)), 2000);
       onChange();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
+      return false;
+    } finally {
+      setSaveBusy(null);
+    }
+  }
+
+  async function deleteProject() {
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await del(`/projects/${slug}`);
+      router.push('/projects');
+    } catch (err) {
+      // Deliberately stays open: the refusal (e.g. runs still executing) is
+      // the information the person needs before trying again.
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete the project');
+      setDeleteBusy(false);
     }
   }
 
   return (
     <div className="wrap">
       {error && <div className="err">{error}</div>}
+
+      <div className="card">
+        <h5>Project</h5>
+        <p className="sub">
+          The URL slug (<code>{slug}</code>) is permanent — links, webhooks and the CLI keep working
+          across a rename.
+        </p>
+        <div className="field">
+          <label htmlFor="pname">Name</label>
+          <input
+            id="pname"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={80}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="pdesc">Description</label>
+          <textarea
+            id="pdesc"
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={500}
+          />
+        </div>
+        <div className="inline">
+          <button
+            type="button"
+            className="btn sm"
+            disabled={saveBusy === 'project' || !name.trim()}
+            onClick={() =>
+              save('project', {
+                name: name.trim(),
+                description: description.trim() ? description.trim() : null,
+              })
+            }
+          >
+            {saveBusy === 'project' && <span className="spinner" />} Save
+          </button>
+          {saved === 'project' && <span className="ok">saved ✓</span>}
+        </div>
+      </div>
 
       {connections.map((c) => {
         const meta = KIND_LABEL[c.kind] ?? { icon: '🔌', title: c.kind };
@@ -172,7 +251,10 @@ export function SettingsView({
                   type="button"
                   className="btn sm"
                   disabled={runnerBusy}
-                  onClick={() => removeRunner(r.id)}
+                  onClick={() => {
+                    setRunnerError(null);
+                    setConfirmRemoveRunner(r);
+                  }}
                 >
                   Remove
                 </button>
@@ -228,16 +310,18 @@ export function SettingsView({
         <div className="inline">
           <select
             value={model}
+            disabled={saveBusy === 'model'}
             onChange={(e) => {
               setModel(e.target.value);
-              save({ defaultModel: e.target.value });
+              save('model', { defaultModel: e.target.value });
             }}
           >
             <option value="claude-opus-5">claude-opus-5 · deepest specs</option>
             <option value="claude-sonnet-5">claude-sonnet-5 · balanced</option>
             <option value="claude-haiku-4-5">claude-haiku-4-5 · drafts &amp; indexing</option>
           </select>
-          {saved && <span className="ok">saved ✓</span>}
+          {saveBusy === 'model' && <span className="spinner" />}
+          {saved === 'model' && <span className="ok">saved ✓</span>}
         </div>
       </div>
 
@@ -254,11 +338,12 @@ export function SettingsView({
           <button
             type="button"
             className="btn sm"
-            onClick={() => save({ spendCapCents: Math.round(Number(cap || '0') * 100) })}
+            disabled={saveBusy === 'cap'}
+            onClick={() => save('cap', { spendCapCents: Math.round(Number(cap || '0') * 100) })}
           >
-            Save
+            {saveBusy === 'cap' && <span className="spinner" />} Save
           </button>
-          {saved && <span className="ok">saved ✓</span>}
+          {saved === 'cap' && <span className="ok">saved ✓</span>}
         </div>
       </div>
 
@@ -271,14 +356,16 @@ export function SettingsView({
         <button
           type="button"
           className={paused ? 'btn' : 'btn danger'}
-          onClick={() => {
+          disabled={saveBusy === 'pause'}
+          onClick={async () => {
             const next = !paused;
-            setPaused(next);
-            save({ agentsPaused: next });
+            if (await save('pause', { agentsPaused: next })) setPaused(next);
           }}
         >
+          {saveBusy === 'pause' && <span className="spinner" />}{' '}
           {paused ? 'Resume agent runs' : 'Pause all agent runs'}
         </button>
+        {paused && <span className="pill warn" style={{ marginLeft: '0.6rem' }}>paused</span>}
       </div>
 
       <div className="card">
@@ -288,7 +375,53 @@ export function SettingsView({
           metadata and run history. Delete this project and everything that matters stays in your
           repositories, exactly where it already is.
         </p>
+        <button
+          type="button"
+          className="btn danger"
+          onClick={() => {
+            setDeleteError(null);
+            setConfirmDelete(true);
+          }}
+        >
+          Delete this project
+        </button>
       </div>
+
+      {confirmRemoveRunner && (
+        <ConfirmDialog
+          title={`Remove runner "${confirmRemoveRunner.name}"?`}
+          body={
+            <>
+              Unpairs the machine and revokes its token. A job it is mid-way through is reclaimed
+              once its lease expires; re-pairing later issues a fresh token.
+            </>
+          }
+          confirmLabel="Remove runner"
+          busy={runnerBusy}
+          error={runnerError}
+          onConfirm={() => removeRunner(confirmRemoveRunner.id)}
+          onCancel={() => setConfirmRemoveRunner(null)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete project "${project.name}"?`}
+          body={
+            <>
+              Deletes this project's tickets, specs, run history, connections (including stored
+              credentials) and its derived knowledge index. Your repositories — and every knowledge
+              doc in git — are untouched. <b>This cannot be undone.</b>
+            </>
+          }
+          confirmLabel="Delete project"
+          requireText={slug}
+          busy={deleteBusy}
+          error={deleteError}
+          onConfirm={deleteProject}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
 
       <style jsx>{`
         .wrap {

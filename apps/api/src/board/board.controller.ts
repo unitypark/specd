@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -102,6 +103,17 @@ export class BoardController {
   ) {
     const project = await this.scope(slug, user, ['owner', 'maintainer']);
     return this.board.update(project.id, ticketId, dto);
+  }
+
+  @Delete('tickets/:ticketId')
+  async removeTicket(
+    @Param('slug') slug: string,
+    @Param('ticketId', ParseUUIDPipe) ticketId: string,
+    @CurrentUser() user: TokenClaims,
+  ) {
+    const project = await this.scope(slug, user, ['owner', 'maintainer']);
+    await this.board.removeTicket(project.id, ticketId);
+    return { deleted: true };
   }
 
   /**

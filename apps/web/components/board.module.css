@@ -171,6 +171,16 @@
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.dgrow {
+  flex: 1;
+}
+
+.dactions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .dtabs {

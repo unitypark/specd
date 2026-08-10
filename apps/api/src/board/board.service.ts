@@ -1,7 +1,8 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
-import { specs, tickets, type Db } from '@specd/db';
-import { BOARD_COLUMNS, type SpecStatus } from '@specd/shared';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import { agentRuns, specs, tickets, type Db } from '@specd/db';
+import { BOARD_COLUMNS, BUILDABLE_STATUSES, type SpecStatus } from '@specd/shared';
+import { RunsInFlight, TicketHasDeliveredWork } from '../common/errors.js';
 import { DB } from '../db/db.module.js';
 
 export interface BoardCard {
@@ -182,6 +183,33 @@ export class BoardService {
       .where(eq(tickets.id, ticketId))
       .returning();
     return row!;
+  }
+
+  /**
+   * A ticket can be deleted while it is still just an intention — no spec,
+   * or drafts that never reached the gate (those cascade away with it). Once
+   * a spec is approved, building or delivered, the ticket is part of the
+   * audit trail and deletion is refused; run history survives either way
+   * because `agent_runs.ticket_id` nulls rather than cascades.
+   */
+  async removeTicket(projectId: string, ticketId: string): Promise<void> {
+    await this.get(projectId, ticketId);
+
+    const [gated] = await this.db
+      .select({ status: specs.status })
+      .from(specs)
+      .where(and(eq(specs.ticketId, ticketId), inArray(specs.status, [...BUILDABLE_STATUSES])))
+      .limit(1);
+    if (gated) throw new TicketHasDeliveredWork(gated.status);
+
+    const [running] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.ticketId, ticketId), eq(agentRuns.status, 'running')));
+    const runningCount = Number(running?.n ?? 0);
+    if (runningCount > 0) throw new RunsInFlight('ticket', runningCount);
+
+    await this.db.delete(tickets).where(eq(tickets.id, ticketId));
   }
 
   /** CRM-142 — sequential per project, so keys read like a tracker's. */

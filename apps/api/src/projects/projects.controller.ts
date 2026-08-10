@@ -146,6 +146,19 @@ export class ProjectsController {
     return this.projects.summarize(updated);
   }
 
+  /**
+   * Owner-only, and the UI double-confirms with a typed project name. The
+   * cascade semantics (what dies with it, what survives) live on
+   * `ProjectsService.remove`.
+   */
+  @Delete(':slug')
+  async remove(@Param('slug') slug: string, @CurrentUser() user: TokenClaims) {
+    const project = await this.projects.bySlug(slug);
+    await this.projects.requireRole(user.sub, project.id, ['owner']);
+    await this.projects.remove(project.id);
+    return { deleted: true };
+  }
+
   // ─── repositories ───────────────────────────────────────────────────────────
 
   @Get(':slug/repositories')

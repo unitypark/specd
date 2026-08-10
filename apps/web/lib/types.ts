@@ -12,4 +12,5 @@ export interface ProjectSummary {
   spendCapCents: number;
   knowledgeHealth: number;
   defaultModel: string;
+  agentsPaused: boolean;
 }

@@ -11,6 +11,7 @@ import {
   type Db,
 } from '@specd/db';
 import { isModelId, slugify, type ProjectSummary, type VcsProvider } from '@specd/shared';
+import { RunsInFlight } from '../common/errors.js';
 import { DB } from '../db/db.module.js';
 
 @Injectable()
@@ -111,6 +112,29 @@ export class ProjectsService {
     return row;
   }
 
+  /**
+   * Deleting a project is the owner's act, and it is total: memberships,
+   * connections (with their vaulted credentials), repositories, tickets,
+   * specs, runs and the whole knowledge index go with it via FK cascade —
+   * one delete, the schema does the rest. The exception is deliberate:
+   * webhook deliveries survive with `project_id` nulled, because they are
+   * the record of what GitHub/GitLab actually sent, and deleting a project
+   * must not be able to erase the evidence of what specd did in response.
+   *
+   * Refused while a run is executing; a `queued` row that never started
+   * simply dies with the project.
+   */
+  async remove(projectId: string): Promise<void> {
+    const [running] = await this.db
+      .select({ n: count() })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.projectId, projectId), eq(agentRuns.status, 'running')));
+    const runningCount = Number(running?.n ?? 0);
+    if (runningCount > 0) throw new RunsInFlight('project', runningCount);
+
+    await this.db.delete(projects).where(eq(projects.id, projectId));
+  }
+
   /** Agent spend so far this calendar month, in cents (§10). */
   async monthlySpendCents(projectId: string): Promise<number> {
     const monthStart = new Date();
@@ -174,6 +198,7 @@ export class ProjectsService {
       spendCapCents: project.spendCapCents,
       knowledgeHealth: Math.round(health?.score ?? 0),
       defaultModel: project.defaultModel,
+      agentsPaused: project.agentsPaused,
     };
   }
 

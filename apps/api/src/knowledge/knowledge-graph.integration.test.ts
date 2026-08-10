@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import {
   createDb,
@@ -58,6 +58,13 @@ const linkRows = () =>
     .from(knowledgeDocLinks)
     .where(eq(knowledgeDocLinks.projectId, projectId));
 
+const chunkCount = async (docId: string) => {
+  const [row] = await handle!.sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM knowledge_chunks WHERE doc_id = ${docId}
+  `;
+  return Number(row?.n ?? 0);
+};
+
 const docByPath = async (path: string) => {
   const [row] = await handle!.db
     .select()
@@ -107,6 +114,12 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     files.set('knowledge/decisions/0002-second.md', '# 0002 — Atomic claim ordering\n\nPostgres SKIP LOCKED semantics.\n');
     files.set('knowledge/architecture.md', '# Architecture\n\n## Runtime\n\nPostgres only. Retrieval is hybrid.\n');
     files.set('knowledge/orphan.md', '# Orphan\n\nNothing links here.\n');
+    // Body text before the first heading chunks with a null heading — the one
+    // shape the batched chunk insert has to carry through `unnest`.
+    files.set(
+      'knowledge/preamble.md',
+      'Loose prose before any heading at all.\n\n# Preamble\n\nAnd a section after it.\n',
+    );
 
     await service.indexRepository(repo);
   });
@@ -139,6 +152,17 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     // alarm, and they must not appear at all.
     expect(byTarget('docs/runners.md')).toBeUndefined();
     expect(byTarget('../../README.md')).toBeUndefined();
+  });
+
+  it('indexes a chunk that has no heading', async () => {
+    const doc = await docByPath('knowledge/preamble.md');
+    const rows = await handle!.sql<{ heading: string | null; embedding: string | null }[]>`
+      SELECT heading, embedding::text FROM knowledge_chunks WHERE doc_id = ${doc!.id} ORDER BY ord
+    `;
+    expect(rows.length).toBeGreaterThan(1);
+    expect(rows[0]?.heading).toBeNull();
+    expect(rows[0]?.embedding).toBeTruthy();
+    expect(rows.some((r) => r.heading === 'Preamble')).toBe(true);
   });
 
   it('marks a citation whose anchor does not exist as dangling, not resolved', async () => {
@@ -292,5 +316,40 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.projectId, projectId));
     expect(storedAfter.length).toBe(storedBefore.length);
+  });
+
+  it('rolls the whole run back when a step fails partway through', async () => {
+    // The failure this exists to prevent: a doc's chunks are deleted before
+    // its new ones are written, so a run that dies in between leaves the doc
+    // indexed-looking and unretrievable. Health recomputation stands in for
+    // any late failure — it is the last thing inside the transaction.
+    const path = 'knowledge/architecture.md';
+    const original = files.get(path)!;
+    const before = await docByPath(path);
+    const chunksBefore = await chunkCount(before!.id);
+    expect(chunksBefore).toBeGreaterThan(0);
+
+    files.set(path, `${original}\n\n## Added section\n\nA paragraph that changes the sha.\n`);
+    const boom = vi
+      .spyOn(service, 'recomputeHealth')
+      .mockRejectedValueOnce(new Error('health recompute exploded'));
+
+    await expect(service.indexRepository(repo)).rejects.toThrow(/exploded/);
+    boom.mockRestore();
+
+    // Nothing landed: not the doc row, not the chunks it had already replaced.
+    const after = await docByPath(path);
+    expect(after?.sha).toBe(before?.sha);
+    expect(after?.content).toBe(original);
+    expect(await chunkCount(before!.id)).toBe(chunksBefore);
+
+    // And the same run succeeds once the failure is gone.
+    await service.indexRepository(repo);
+    const committed = await docByPath(path);
+    expect(committed?.sha).not.toBe(before?.sha);
+    expect(committed?.content).toContain('Added section');
+
+    files.set(path, original);
+    await service.indexRepository(repo);
   });
 });

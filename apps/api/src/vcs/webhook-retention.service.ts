@@ -63,9 +63,14 @@ export class WebhookRetentionService implements OnModuleInit, OnModuleDestroy {
         const deleted = await this.db
           .delete(webhookDeliveries)
           .where(
+            // ISO text with an explicit cast: the pool disables the driver's
+            // type handling, so a Date parameter does not serialize — the
+            // exact bug the hosted-history work hit, and the reason the
+            // failure-path test below exists: this loop swallowing an error
+            // looks identical to an empty table.
             sql`${webhookDeliveries.id} IN (
               SELECT id FROM webhook_deliveries
-              WHERE received_at < ${cutoff}
+              WHERE received_at < ${cutoff.toISOString()}::timestamptz
               LIMIT ${BATCH_SIZE}
             )`,
           )

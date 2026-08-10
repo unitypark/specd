@@ -1,0 +1,21 @@
+{
+  "target": "/Users/junghwpark/Dev/Projects/specd",
+  "files": 148,
+  "oracleSymbols": 1067,
+  "precision": 0.9870490286771508,
+  "recall": 1,
+  "f1": 0.9934823091247673,
+  "worstFalsePositives": [
+    "bootstrap ×1",
+    "AppModule ×1",
+    "ContactsService ×1",
+    "ContactsService.list ×1",
+    "ContactsService.merge ×1",
+    "ContactFilters ×1",
+    "DealsService ×1",
+    "DealsService.advanceStage ×1",
+    "DealStage ×1",
+    "OutboxWorker ×1"
+  ],
+  "worstFalseNegatives": []
+}

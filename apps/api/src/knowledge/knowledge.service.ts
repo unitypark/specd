@@ -478,6 +478,19 @@ export class KnowledgeService {
         touched.add(doc.docId);
       }
 
+      // Code links are re-evaluated every run, not only when their doc
+      // changes. What makes them stale is the *code* moving, and a doc nobody
+      // edited is exactly the doc whose references rot — so leaving them
+      // frozen until the next doc edit both misses new findings and keeps old
+      // ones after they stop being true. Caught by the incremental-vs-clean
+      // eval: a symbolref whose file was deleted lingered as broken, where a
+      // clean build correctly dropped it.
+      // A reference that stops being in scope is a legitimate removal, so the
+      // docs it came from join `touched` — otherwise the edge shrink guard
+      // sees edges vanishing from docs this run never re-indexed and rolls the
+      // whole thing back, which is exactly what it did the first time.
+      for (const id of await reresolveCodeLinks(tx, repo, scope)) touched.add(id);
+
       // Re-resolution pass (S-102): a changed doc rewrote only its own outbound
       // edges, but the rest of the graph may point AT what changed — a link
       // whose target was just created resolves now, and a link whose target was
@@ -1578,6 +1591,79 @@ async function writeLinks(
   }
 
   if (rows.length > 0) await tx.db.insert(knowledgeDocLinks).values(rows);
+}
+
+/**
+ * Re-apply the code-resolution rules to every code link in the repo.
+ *
+ * Same rules `writeLinks` uses, so a doc that was re-indexed this run and one
+ * that was not end in the same state — which is the property the
+ * incremental-vs-clean eval checks, and the one that makes health counts a
+ * function of the tree rather than of edit history.
+ */
+async function reresolveCodeLinks(
+  tx: DbContext,
+  repo: Repository,
+  scope: {
+    code: ResolvableCode[];
+    ownTopLevel: Set<string>;
+    symbols: Map<string, string>;
+    symbolParents: Set<string>;
+    shaByPath: Map<string, string>;
+  },
+): Promise<Set<string>> {
+  const links = await tx.sql<
+    { id: string; kind: string; raw_target: string; source_doc_id: string }[]
+  >`
+    SELECT l.id, l.kind, l.raw_target, l.source_doc_id
+    FROM knowledge_doc_links l
+    JOIN knowledge_docs kd ON kd.id = l.source_doc_id
+    WHERE kd.repository_id = ${repo.id} AND l.kind IN ('coderef', 'symbolref')
+  `;
+  if (links.length === 0) return new Set();
+
+  const drop: string[] = [];
+  /** Docs this pass is entitled to remove edges from, for the shrink guard. */
+  const affected = new Set<string>();
+  for (const link of links) {
+    if (link.kind === 'symbolref') {
+      const id = scope.symbols.get(link.raw_target);
+      if (!id && !scope.symbolParents.has(link.raw_target.split('.')[0] ?? '')) {
+        drop.push(link.id);
+        affected.add(link.source_doc_id);
+        continue;
+      }
+      await tx.sql`
+        UPDATE knowledge_doc_links
+        SET resolved_code_id = ${id ?? null},
+            resolution_state = ${id ? 'resolved' : 'unresolved'}
+        WHERE id = ${link.id}
+      `;
+      continue;
+    }
+
+    const hit = resolveCodeTarget(link.raw_target, scope.code);
+    if (!hit && !scope.ownTopLevel.has(link.raw_target.split('/')[0] ?? '')) {
+      drop.push(link.id);
+      affected.add(link.source_doc_id);
+      continue;
+    }
+    await tx.sql`
+      UPDATE knowledge_doc_links
+      SET resolved_code_id = ${hit?.id ?? null},
+          resolution_state = ${hit ? 'resolved' : 'unresolved'},
+          -- Existing value wins. The sha is frozen at the doc's last indexing
+          -- on purpose: refreshing it here would mean a reference could never
+          -- go stale, because every run would agree with itself.
+          target_blob_sha = COALESCE(target_blob_sha, ${hit ? (scope.shaByPath.get(hit.path) ?? null) : null})
+      WHERE id = ${link.id}
+    `;
+  }
+
+  if (drop.length > 0) {
+    await tx.sql`DELETE FROM knowledge_doc_links WHERE id = ANY(${drop})`;
+  }
+  return affected;
 }
 
 /** Heading anchors per target doc, read once and reused for the whole run. */

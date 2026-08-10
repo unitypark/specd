@@ -44,8 +44,8 @@ change like everything else.
 
 ## Runbooks
 
-- [local-dev.md](runbooks/local-dev.md) — first run, restarts, resets
-- [deploy.md](runbooks/deploy.md) — still the generated stub; needs an owner
+- [local-dev.md](runbooks/local-dev.md) — the day-two loop: tests, evals, migrations, the index
+- [deploy.md](runbooks/deploy.md) — what a first deployment needs, and what is still undecided
 - [specd-on-specd.md](runbooks/specd-on-specd.md) — running the loop on this repository
 
 ## Research

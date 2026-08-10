@@ -1,10 +1,10 @@
 {
   "target": "/Users/junghwpark/Dev/Projects/specd",
-  "files": 151,
-  "oracleSymbols": 1095,
-  "precision": 0.9873760144274121,
+  "files": 152,
+  "oracleSymbols": 1100,
+  "precision": 0.9874326750448833,
   "recall": 1,
-  "f1": 0.9936479128856625,
+  "f1": 0.993676603432701,
   "worstFalsePositives": [
     "bootstrap ×1",
     "AppModule ×1",

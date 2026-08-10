@@ -53,7 +53,7 @@ These apply to generated content and to knowledge docs in this repo:
 
 ## Behavioural rules for agents working in this repo
 
-- Read `knowledge/` before writing code; work from an approved spec; write what was built back to `knowledge/specs/` in the same PR.
+- Read `knowledge/` before writing code — the reading order lives in `knowledge/README.md` — work from an approved spec, and write what was built back to `knowledge/specs/` in the same PR.
 - Never push to a default branch. Work lands on the spec's own branch plus a PR (hosted) or a branch to diff (local mode).
 - `packages/templates` ships `AGENTS.md` and `CLAUDE.md` scaffolds — UNVERIFIED, check whether those templates also govern this repo or only onboarded projects.
 

@@ -12,12 +12,37 @@ reviewing. It is the source of truth — specd only holds a derived index.
 
 | Read this | When |
 | --- | --- |
-| `architecture.md` | Before any change that crosses a module boundary |
-| `conventions.md` | Before writing code — lint rules, layout, test patterns |
-| `glossary.md` | When a domain term is unfamiliar |
-| `decisions/` | Before revisiting a choice someone already made |
-| `runbooks/` | When running, deploying or debugging locally |
-| `specs/` | Before designing something adjacent — every delivered spec lands here |
+| [architecture.md](architecture.md) | Before any change that crosses a module boundary |
+| [conventions.md](conventions.md) | Before writing code — lint rules, layout, test patterns |
+| [glossary.md](glossary.md) | When a domain term is unfamiliar |
+| [decisions/](#decisions) | Before revisiting a choice someone already made — index below |
+| [runbooks/](#runbooks) | When running, deploying or debugging locally — index below |
+| [specs/](specs/README.md) | Before designing something adjacent — every delivered spec lands here |
+
+## Decisions
+
+Start at [0001 — adopt spec-driven delivery](decisions/0001-adopt-spec-driven.md);
+everything else is a consequence of it.
+
+- [0002 — GitLab via personal access token](decisions/0002-gitlab-via-personal-access-token.md)
+- [0003 — runner pairing before dispatch](decisions/0003-runner-pairing-before-dispatch.md)
+- [0004 — runner job dispatch](decisions/0004-runner-job-dispatch.md)
+- [0005 — onboard job dispatch](decisions/0005-onboard-job-dispatch.md)
+- [0006 — the CLI REPL](decisions/0006-cli-repl-bubbletea.md)
+- [0007 — the rebrand](decisions/0007-rebrand-golden-spiral.md)
+- [0008 — remove the unused queue](decisions/0008-remove-unused-queue.md)
+- [0009 — build dispatch uses the runner's own git](decisions/0009-build-dispatch-runner-git-credentials.md)
+- [0010 — Jira via API token](decisions/0010-jira-via-api-token-and-a-mirror-that-cannot-fail.md)
+- [0011 — specd develops specd](decisions/0011-specd-develops-specd.md)
+
+New decisions join this list in the PR that adds them — the map rides the
+change like everything else.
+
+## Runbooks
+
+- [local-dev.md](runbooks/local-dev.md) — first run, restarts, resets
+- [deploy.md](runbooks/deploy.md) — still the generated stub; needs an owner
+- [specd-on-specd.md](runbooks/specd-on-specd.md) — running the loop on this repository
 
 ## How this stays alive
 

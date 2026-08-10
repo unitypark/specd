@@ -21,6 +21,17 @@ const chunks: RetrievedChunk[] = [
     score: 0.7,
     via: 'vector',
   },
+  {
+    // A chunk the flat RRF shot missed and graph expansion pulled in (S-102).
+    docId: 'd3',
+    repoName: 'aurora-api',
+    path: 'knowledge/decisions/0007-signed-url-ttl.md',
+    heading: 'decision',
+    text: 'Signed URLs expire after 15 minutes.',
+    score: 0,
+    via: 'graph',
+    viaEdge: 'citation at knowledge/decisions/0003-file-delivery.md#context',
+  },
 ];
 
 const ctx = {
@@ -55,6 +66,21 @@ describe('spec normalization', () => {
       ctx,
     );
     expect(out.design[0]?.citation).toBeTruthy();
+  });
+
+  it('accepts a citation to a chunk that arrived via graph expansion (S-102)', () => {
+    // The whole point of widening retrieval: what the graph pulled in is as
+    // citable as what RRF found, because it was genuinely retrieved.
+    const out = normalizeSpecContent(
+      draft({
+        design: [{ text: 'links expire quickly', citation: 'knowledge/decisions/0007-signed-url-ttl.md#decision' }],
+      }),
+      ctx,
+    );
+    expect(out.design[0]).toMatchObject({
+      citation: 'knowledge/decisions/0007-signed-url-ttl.md#decision',
+    });
+    expect(out.design[0]!.unverified).toBeUndefined();
   });
 
   it('demotes a citation to a document that was never retrieved', () => {

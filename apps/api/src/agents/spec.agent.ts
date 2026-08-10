@@ -153,13 +153,25 @@ export class SpecAgent {
     await run.log(`ticket ${input.ticketKey} fetched`);
 
     const query = `${input.title}\n${input.body}`;
-    const chunks = await this.knowledge.retrieve(input.projectId, query, 14);
+    const retrieval = await this.knowledge.retrieve(input.projectId, query, 14);
+    const { chunks } = retrieval;
+    const graphAdded = chunks.filter((c) => c.via === 'graph');
     await run.log(
       `retrieved ${chunks.length} chunk(s) from the knowledge base` +
         (chunks.length
           ? `: ${[...new Set(chunks.map((c) => c.path))].slice(0, 4).join(', ')}`
           : ' — nothing indexed yet, the design will be mostly UNVERIFIED'),
     );
+    for (const added of graphAdded) {
+      // WHY a chunk arrived is part of its provenance — say it where the
+      // person watching the run can see it.
+      await run.log(`  graph expansion added ${added.path} (${added.viaEdge ?? 'linked'})`);
+    }
+    if (retrieval.truncatedCount > 0) {
+      await run.log(
+        `  ${retrieval.truncatedCount} more matching chunk(s) were cut for budget — the prompt says so`,
+      );
+    }
 
     const slug = slugify(input.title);
     return {
@@ -168,7 +180,7 @@ export class SpecAgent {
         primaryRepo: input.primaryRepo,
         asBuiltFile: asBuiltPath(input.ticketKey, slug),
       }),
-      user: buildUserPrompt({ ...input, chunks, slug }),
+      user: buildUserPrompt({ ...input, chunks, truncatedCount: retrieval.truncatedCount, slug }),
       schema: SPEC_SCHEMA as unknown as Record<string, unknown>,
       chunks,
       slug,
@@ -401,15 +413,30 @@ function buildUserPrompt(input: {
   title: string;
   body: string;
   chunks: RetrievedChunk[];
+  truncatedCount?: number;
   slug: string;
   revisionNotes?: string[];
   previousContent?: SpecContent;
 }): string {
+  // Truncation is announced at the TOP of the block, before any excerpt (T8,
+  // S-102). An agent cannot tell a cut from an absence, and "the knowledge
+  // base says nothing about X" is exactly the wrong conclusion to let it
+  // draw when X was on the far side of the budget.
+  const truncationNotice =
+    input.truncatedCount && input.truncatedCount > 0
+      ? `NOTE: ${input.truncatedCount} more matching excerpt(s) exist in the knowledge base but were ` +
+        `omitted for budget. Absence from the excerpts below is NOT evidence the knowledge base is ` +
+        `silent — mark claims that would need the missing material UNVERIFIED rather than asserting ` +
+        `the base says nothing.\n\n`
+      : '';
+
   const knowledge = input.chunks.length
-    ? input.chunks
+    ? truncationNotice +
+      input.chunks
         .map(
           (chunk, i) =>
-            `[${i + 1}] CITE-AS: ${citationRef(chunk)}   (repo: ${chunk.repoName})\n${chunk.text.slice(0, 2_200)}`,
+            `[${i + 1}] CITE-AS: ${citationRef(chunk)}   (repo: ${chunk.repoName})` +
+            `${chunk.via === 'graph' ? `   (via ${chunk.viaEdge ?? 'doc link'})` : ''}\n${chunk.text.slice(0, 2_200)}`,
         )
         .join('\n\n---\n\n')
     : '(The knowledge base is empty or nothing matched. Every design claim must be UNVERIFIED.)';

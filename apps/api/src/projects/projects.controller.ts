@@ -368,6 +368,11 @@ export class ProjectsController {
   ) {
     const project = await this.projects.bySlug(slug);
     await this.projects.requireRole(user.sub, project.id, ['owner', 'maintainer', 'reviewer']);
-    return this.knowledge.getDoc(project.id, docId);
+    const doc = await this.knowledge.getDoc(project.id, docId);
+    if (!doc) return null;
+    // Links and backlinks ride the doc view (S-102): where this doc points,
+    // what points here, and which of its links are broken.
+    const links = await this.knowledge.docLinks(project.id, docId);
+    return { ...doc, ...links };
   }
 }

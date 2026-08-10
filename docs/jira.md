@@ -1,9 +1,12 @@
 # Jira Cloud
 
-**Status: connected over the API, not yet from the wizard.** Issue import,
-backlink comments and status mirroring all work. The setup wizard's Jira tile
-is still disabled — connecting is a `POST` for now, the same way GitLab was
-when its adapter landed.
+**Status: working, and connectable from the setup wizard.** Pick *Jira Cloud*
+at step 4, paste a site URL, an account email and an API token, choose a
+project, and optionally import its open issues. Issue import, backlink
+comments and status mirroring all work.
+
+The `curl` calls below are the same thing without the browser — useful for
+scripting, and for adding a status map, which the wizard does not yet expose.
 
 **Cloud only.** Jira Server/Data Center uses a different base path and
 different auth, and is out of scope rather than half-supported.
@@ -117,7 +120,8 @@ raised. Local state is authoritative; Jira is a projection of it.
 
 ## What is not built yet
 
-- **The wizard tile.** Connecting is the `POST` above.
+- **A status-map editor.** The wizard connects Jira and picks a project, but
+  the lifecycle → status map is set with the `PATCH` above.
 - **Inbound webhooks.** specd writes to Jira but does not listen: moving an
   issue in Jira does not move the spec. Registering a Jira webhook needs site
   admin, so this needs a polling fallback as well — neither is built.

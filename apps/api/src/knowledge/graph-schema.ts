@@ -49,6 +49,13 @@ export const LINK_KINDS = [
     description: 'An ordinary markdown link. Intentional, but often navigational rather than evidential.',
   },
   {
+    kind: 'symbolref',
+    weight: 0.7,
+    syntax: '`RunnerJobsService.claim()`',
+    description:
+      'A named declaration in the code. Resolved only when exactly one indexed symbol matches, and dropped otherwise — there is no way to tell a deleted symbol from a word that was never one, so it never reports as broken.',
+  },
+  {
     kind: 'coderef',
     weight: 0.5,
     syntax: '`apps/api/src/runners/runner-jobs.service.ts`, or the same path bare in prose',

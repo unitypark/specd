@@ -18,6 +18,7 @@ reviewing. It is the source of truth — specd only holds a derived index.
 | [decisions/](#decisions) | Before revisiting a choice someone already made — index below |
 | [runbooks/](#runbooks) | When running, deploying or debugging locally — index below |
 | [specs/](specs/README.md) | Before designing something adjacent — every delivered spec lands here |
+| [research/](#research) | Before designing against an external system — prior-art analyses, index below |
 
 ## Decisions
 
@@ -43,6 +44,15 @@ change like everything else.
 - [local-dev.md](runbooks/local-dev.md) — first run, restarts, resets
 - [deploy.md](runbooks/deploy.md) — still the generated stub; needs an owner
 - [specd-on-specd.md](runbooks/specd-on-specd.md) — running the loop on this repository
+
+## Research
+
+Point-in-time analyses of external systems — historical records like `specs/`,
+never rewritten as the analyzed system evolves.
+
+- [graphify engine analysis](research/graphify-engine-analysis.md) — what the
+  knowledge-graph engine ([S-102](specs/S-102-knowledge-graph-link-aware-retrieval-and-health.md))
+  learned from Graphify-Labs/graphify, and what it deliberately did not copy
 
 ## How this stays alive
 

@@ -94,6 +94,15 @@ const EDGE_WEIGHT: Record<string, number> = {
 const GRAPH_EXPANSION_BUDGET: number = 4;
 
 /**
+ * An expanded chunk scores its seed's score, discounted by the edge kind and
+ * again by this, because a neighbour is evidence about the query only at one
+ * remove. Zero was the old value: correct in ordering — expansion is appended
+ * and never displaces an RRF pick — but it threw away which expansions were
+ * strong, so nothing downstream could rank, threshold or explain them.
+ */
+const GRAPH_SCORE_DISCOUNT = 0.5;
+
+/**
  * Docs with more resolved edges than this are hubs (READMEs, indexes).
  * Expansion never travels THROUGH a hub that was not itself a seed — the
  * "everything is one hop from the index page" blowup. A hub that IS a seed
@@ -496,6 +505,7 @@ export class KnowledgeService {
     // Both directions: a doc the seed cites, and a doc that cites the seed.
     const edges = await this.handle.sql<
       {
+        edge_id: string;
         neighbor_id: string;
         neighbor_path: string;
         kind: string;
@@ -506,7 +516,7 @@ export class KnowledgeService {
       }[]
     >`
       WITH resolved AS (
-        SELECT l.source_doc_id, l.resolved_doc_id, l.kind, l.site
+        SELECT l.id, l.source_doc_id, l.resolved_doc_id, l.kind, l.site
         FROM knowledge_doc_links l
         WHERE l.project_id = ${projectId} AND l.resolution_state = 'resolved'
       ),
@@ -518,13 +528,13 @@ export class KnowledgeService {
         ) d GROUP BY doc_id
       ),
       hops AS (
-        SELECT r.resolved_doc_id AS neighbor_id, r.kind, r.source_doc_id AS seed_doc_id, r.site
+        SELECT r.id, r.resolved_doc_id AS neighbor_id, r.kind, r.source_doc_id AS seed_doc_id, r.site
         FROM resolved r WHERE r.source_doc_id = ANY(${seedDocIds})
         UNION ALL
-        SELECT r.source_doc_id AS neighbor_id, r.kind, r.resolved_doc_id AS seed_doc_id, r.site
+        SELECT r.id, r.source_doc_id AS neighbor_id, r.kind, r.resolved_doc_id AS seed_doc_id, r.site
         FROM resolved r WHERE r.resolved_doc_id = ANY(${seedDocIds})
       )
-      SELECT h.neighbor_id, kd.path AS neighbor_path, h.kind, h.seed_doc_id,
+      SELECT h.id AS edge_id, h.neighbor_id, kd.path AS neighbor_path, h.kind, h.seed_doc_id,
              skd.path AS source_path, h.site,
              COALESCE(dg.degree, 0) AS degree
       FROM hops h
@@ -537,9 +547,10 @@ export class KnowledgeService {
 
     // Best edge per neighbor; hub-gate non-seed hubs; rank by edge weight,
     // then by how high the seed that led here ranked.
+    const seedScore = new Map(seeds.map((c) => [c.docId, c.score]));
     const byNeighbor = new Map<
       string,
-      { weight: number; seedOrd: number; edgeLabel: string }
+      { weight: number; seedOrd: number; edgeLabel: string; edgeId: string; score: number }
     >();
     for (const edge of edges) {
       if (edge.degree > HUB_DEGREE) continue;
@@ -548,7 +559,13 @@ export class KnowledgeService {
       const label = `${edge.kind} ${edge.site ? `at ${edge.source_path}#${edge.site}` : `from ${edge.source_path}`}`;
       const current = byNeighbor.get(edge.neighbor_id);
       if (!current || weight > current.weight || (weight === current.weight && seedOrd < current.seedOrd)) {
-        byNeighbor.set(edge.neighbor_id, { weight, seedOrd, edgeLabel: label });
+        byNeighbor.set(edge.neighbor_id, {
+          weight,
+          seedOrd,
+          edgeLabel: label,
+          edgeId: edge.edge_id,
+          score: (seedScore.get(edge.seed_doc_id) ?? 0) * weight * GRAPH_SCORE_DISCOUNT,
+        });
       }
     }
     if (byNeighbor.size === 0) return [];
@@ -590,9 +607,10 @@ export class KnowledgeService {
         path: row.path,
         heading: headingAnchor(row.heading),
         text: row.text,
-        score: 0,
+        score: byNeighbor.get(row.doc_id)?.score ?? 0,
         via: 'graph' as const,
         viaEdge: byNeighbor.get(row.doc_id)?.edgeLabel,
+        viaEdgeId: byNeighbor.get(row.doc_id)?.edgeId,
       }));
   }
 

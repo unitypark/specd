@@ -276,6 +276,26 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     expect(expanded).toBeTruthy();
     expect(expanded?.viaEdge).toMatch(/wikilink at knowledge\/decisions\/0001-first\.md#context/);
 
+    // The label says which edge in words; the id is the same fact as a key.
+    // Two docs can be linked more than once, so only the id identifies which
+    // edge actually fired (S-102 asked for it and shipped without it).
+    expect(expanded?.viaEdgeId).toBeTruthy();
+    const [edge] = await handle!.db
+      .select()
+      .from(knowledgeDocLinks)
+      .where(eq(knowledgeDocLinks.id, expanded!.viaEdgeId!));
+    expect(edge).toMatchObject({
+      kind: 'wikilink',
+      rawTarget: '0002-second',
+      resolutionState: 'resolved',
+    });
+
+    // Scored, not zeroed: a neighbour is evidence at one remove, so it ranks
+    // below the seed that reached it rather than reporting no strength at all.
+    const seed = rrf.find((c) => c.path === 'knowledge/decisions/0001-first.md');
+    expect(expanded!.score).toBeGreaterThan(0);
+    expect(expanded!.score).toBeLessThan(seed!.score);
+
     // The orphan is not reachable by any edge and must not be expanded to.
     expect(graph.some((c) => c.path === 'knowledge/orphan.md')).toBe(false);
   });

@@ -39,6 +39,14 @@ export interface RetrievedChunk {
    * arrived (S-102).
    */
   viaEdge?: string;
+  /**
+   * For `via: 'graph'` only: the `knowledge_doc_links` row that pulled this
+   * chunk in. The human label above says which edge in words; this is the
+   * same fact as a key, so provenance can be joined back to the graph instead
+   * of parsed out of a sentence — two docs can be linked more than once, and
+   * only the id says which of those edges was the one that fired.
+   */
+  viaEdgeId?: string;
 }
 
 /**

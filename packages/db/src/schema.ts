@@ -348,6 +348,11 @@ export const knowledgeDocs = pgTable(
     /** Link-extractor version that last processed this doc (S-102). 0 = never. */
     linksVersion: integer('links_version').notNull().default(0),
     /**
+     * Commits touching code since this doc last changed — the drift signal, as
+     * opposed to the calendar. Null where the provider gives no commit date.
+     */
+    codeCommitsSince: integer('code_commits_since'),
+    /**
      * Chunker + embedder identity behind this doc's current chunks. The sha
      * answers "did the source change"; this answers "would we produce the same
      * rows from it today". Empty string = indexed before the stamp existed.
@@ -455,6 +460,12 @@ export const knowledgeHealth = pgTable('knowledge_health', {
   staleCount: integer('stale_count').notNull().default(0),
   stubCount: integer('stub_count').notNull().default(0),
   asBuiltCount: integer('as_built_count').notNull().default(0),
+  /** Graph signals as numbers, not sentences — so the UI can badge and sort. */
+  brokenLinks: integer('broken_links').notNull().default(0),
+  danglingAnchors: integer('dangling_anchors').notNull().default(0),
+  orphanDocs: integer('orphan_docs').notNull().default(0),
+  /** Docs with no commit date, whose freshness is unmeasurable rather than good. */
+  unknownFreshnessCount: integer('unknown_freshness_count').notNull().default(0),
   notes: jsonb('notes').$type<{ icon: string; text: string }[]>().notNull().default([]),
   computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
 });

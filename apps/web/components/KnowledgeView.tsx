@@ -10,7 +10,12 @@ interface Doc {
   title: string | null;
   hasUnverified: boolean;
   isStub: boolean;
-  freshness: { ageDays: number; stale: boolean; reason?: string };
+  freshness: { ageDays: number | null; stale: boolean; unknown: boolean; reason?: string };
+}
+
+interface DocLinks {
+  outbound: { kind: string; rawTarget: string; site: string | null; state: string; targetPath: string | null }[];
+  backlinks: { kind: string; site: string | null; sourcePath: string; sourceDocId: string }[];
 }
 
 interface Health {
@@ -18,6 +23,10 @@ interface Health {
   docCount: number;
   staleCount: number;
   stubCount: number;
+  brokenLinks: number;
+  danglingAnchors: number;
+  orphanDocs: number;
+  unknownFreshnessCount: number;
   asBuiltCount: number;
   notes: { icon: string; text: string }[];
 }
@@ -36,6 +45,23 @@ export function KnowledgeView({ slug }: { slug: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
+  const [openDoc, setOpenDoc] = useState<string | null>(null);
+  const [links, setLinks] = useState<Record<string, DocLinks>>({});
+
+  async function toggleDoc(id: string) {
+    if (openDoc === id) {
+      setOpenDoc(null);
+      return;
+    }
+    setOpenDoc(id);
+    if (links[id]) return;
+    try {
+      const res = await get<DocLinks>(`/projects/${slug}/knowledge/${id}`);
+      setLinks((prev) => ({ ...prev, [id]: { outbound: res.outbound, backlinks: res.backlinks } }));
+    } catch {
+      // A doc whose links will not load still lists; the row just does not expand.
+    }
+  }
 
   const load = useCallback(async () => {
     const res = await get<{ docs: Doc[]; health: Health; grounding: typeof grounding }>(
@@ -98,16 +124,47 @@ export function KnowledgeView({ slug }: { slug: string }) {
         )}
 
         {docs.map((doc) => (
-          <div key={doc.id} className="row">
-            <span className="ic">{ICONS[doc.kind] ?? '📄'}</span>
-            <span className="path">{doc.path.replace(/^knowledge\//, '')}</span>
-            <span className="flex" />
-            {doc.isStub && <span className="pill">stub</span>}
-            {doc.hasUnverified && <span className="pill unverified">UNVERIFIED</span>}
-            {doc.kind === 'spec' && <span className="pill on">as-built</span>}
-            <span className={`pill ${doc.freshness.stale ? 'warn' : ''}`}>
-              {doc.freshness.stale ? `⚠ ${doc.freshness.ageDays}d` : 'fresh'}
-            </span>
+          <div key={doc.id}>
+            <button type="button" className="row" onClick={() => void toggleDoc(doc.id)}>
+              <span className="ic">{ICONS[doc.kind] ?? '📄'}</span>
+              <span className="path">{doc.path.replace(/^knowledge\//, '')}</span>
+              <span className="flex" />
+              {doc.isStub && <span className="pill">stub</span>}
+              {doc.hasUnverified && <span className="pill unverified">UNVERIFIED</span>}
+              {doc.kind === 'spec' && <span className="pill on">as-built</span>}
+              {/* Three states, because "we cannot tell" is not "fresh". */}
+              <span
+                className={`pill ${doc.freshness.stale ? 'warn' : ''}`}
+                title={doc.freshness.reason ?? ''}
+              >
+                {doc.freshness.stale
+                  ? `⚠ ${doc.freshness.reason ?? 'stale'}`
+                  : doc.freshness.unknown
+                    ? '· age unknown'
+                    : 'fresh'}
+              </span>
+            </button>
+
+            {openDoc === doc.id && (
+              <div className="links">
+                {(links[doc.id]?.outbound.length ?? 0) === 0 &&
+                  (links[doc.id]?.backlinks.length ?? 0) === 0 && (
+                    <p className="muted">No links either way — nothing reaches this doc by following anything.</p>
+                  )}
+                {links[doc.id]?.outbound.map((l, i) => (
+                  <p key={`o${i}`} className={l.state === 'resolved' ? 'muted' : 'bad'}>
+                    → <b>{l.kind}</b> {l.targetPath?.replace(/^knowledge\//, '') ?? l.rawTarget}
+                    {l.state !== 'resolved' && ` — ${l.state.replace('_', ' ')}`}
+                  </p>
+                ))}
+                {links[doc.id]?.backlinks.map((l, i) => (
+                  <p key={`b${i}`} className="muted">
+                    ← <b>{l.kind}</b> from {l.sourcePath.replace(/^knowledge\//, '')}
+                    {l.site && `#${l.site}`}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -127,6 +184,16 @@ export function KnowledgeView({ slug }: { slug: string }) {
                 <span>{n.icon}</span> {n.text}
               </p>
             ))}
+            <div className="counts">
+              <span className={health?.brokenLinks ? 'bad' : ''}>{health?.brokenLinks ?? 0} broken</span>
+              <span className={health?.danglingAnchors ? 'bad' : ''}>
+                {health?.danglingAnchors ?? 0} dangling
+              </span>
+              <span className={health?.orphanDocs ? 'bad' : ''}>{health?.orphanDocs ?? 0} orphaned</span>
+              {(health?.unknownFreshnessCount ?? 0) > 0 && (
+                <span>{health?.unknownFreshnessCount} unmeasured</span>
+              )}
+            </div>
             {health && health.notes.length === 0 && (
               <p className="note">
                 <span>✓</span> Nothing rotting. Keep docs riding the change that describes them.
@@ -224,6 +291,41 @@ export function KnowledgeView({ slug }: { slug: string }) {
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+        .row {
+          width: 100%;
+          background: none;
+          text-align: left;
+          cursor: pointer;
+          font: inherit;
+          color: inherit;
+        }
+        .row:hover {
+          background: var(--panel-2);
+        }
+        .links {
+          padding: 0.35rem 0.9rem 0.6rem 2rem;
+          border-bottom: 1px solid var(--line);
+          font-family: var(--mono);
+          font-size: 0.862rem;
+        }
+        .links p {
+          margin: 0.2rem 0;
+        }
+        .muted {
+          color: var(--ink-3);
+        }
+        .bad {
+          color: var(--danger);
+        }
+        .counts {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.75rem;
+          font-family: var(--mono);
+          font-size: 0.862rem;
+          color: var(--ink-3);
+          margin-top: 0.6rem;
         }
         .note {
           display: flex;

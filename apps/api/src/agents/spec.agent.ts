@@ -11,6 +11,8 @@ import {
   type SpecContent,
   type SpecDraftResult,
   type EarsCriterion,
+  type CitationCoverage,
+  type CitationVerdict,
 } from '@specd/shared';
 import { KnowledgeService } from '../knowledge/knowledge.service.js';
 import { ModelRouter } from './model.router.js';
@@ -100,6 +102,7 @@ export interface PreparedSpecCall {
   user: string;
   schema: Record<string, unknown>;
   chunks: RetrievedChunk[];
+  coverage: CitationCoverage;
   slug: string;
 }
 
@@ -173,6 +176,14 @@ export class SpecAgent {
       );
     }
 
+    // Captured with the retrieval it describes: by the time the reply comes
+    // back the index may have moved on, and a verdict has to reflect what the
+    // model was actually shown.
+    const coverage = {
+      ...(await this.knowledge.coverageFor(input.projectId, chunks.map((c) => c.path))),
+      truncatedCount: retrieval.truncatedCount,
+    };
+
     const slug = slugify(input.title);
     return {
       system: buildSystemPrompt({
@@ -183,6 +194,7 @@ export class SpecAgent {
       user: buildUserPrompt({ ...input, chunks, truncatedCount: retrieval.truncatedCount, slug }),
       schema: SPEC_SCHEMA as unknown as Record<string, unknown>,
       chunks,
+      coverage,
       slug,
     };
   }
@@ -191,7 +203,7 @@ export class SpecAgent {
   finalize(
     parsed: SpecContent | undefined,
     chunks: RetrievedChunk[],
-    ctx: { ticketKey: string; slug: string; primaryRepo: string },
+    ctx: { ticketKey: string; slug: string; primaryRepo: string; coverage?: CitationCoverage },
   ): SpecContent {
     return normalizeSpecContent(parsed, { ...ctx, chunks });
   }
@@ -250,13 +262,20 @@ export class SpecAgent {
       ticketKey: input.ticketKey,
       slug: prepared.slug,
       primaryRepo: input.primaryRepo,
+      coverage: prepared.coverage,
     });
 
+    const unknowns = content.design.filter((c) => c.verdict === 'unknown');
     await run.log(
       `drafted ${content.requirements.length} requirement(s) · ` +
         `${countCitations(content)} citation(s) · ${countUnverified(content)} UNVERIFIED · ` +
         `${content.tasks.length} task(s)`,
     );
+    for (const claim of unknowns) {
+      // Not a failure — a gap in what retrieval could show, named where the
+      // person watching can close it.
+      await run.log(`  unchecked: ${claim.unverified}`, 'warn');
+    }
 
     return { content, model: result.model, usedChunks: prepared.chunks };
   }
@@ -273,14 +292,105 @@ export class SpecAgent {
  *   2. The last task always files the as-built spec. That task is what closes
  *      the Learn loop, so it is appended if the model omitted it.
  */
+/**
+ * Check one citation against what was retrieved, and against what could have
+ * been retrieved.
+ *
+ * The three-way split is the point. A binary check can only ask "was this in
+ * the prompt", so a real doc that simply did not make the top-k is reported
+ * identically to an invented one — and a reviewer who learns that the marker
+ * cries wolf stops reading it. Separating them means an UNSUPPORTED verdict
+ * is worth acting on, and an UNKNOWN verdict says which gap to close.
+ */
+function judgeCitation(
+  citation: string,
+  chunks: RetrievedChunk[],
+  coverage: CitationCoverage | undefined,
+): { citation?: string; unverified?: string; verdict: CitationVerdict } {
+  const [rawPath = '', anchor] = citation.split('#');
+  const path = rawPath.trim();
+
+  // Exactly what was put in front of the model: the strongest answer there is.
+  if (chunks.some((chunk) => citationRef(chunk) === citation)) {
+    return { citation, verdict: 'supported' };
+  }
+
+  const retrievedPaths = new Set(chunks.map((c) => c.path));
+
+  // Without coverage there is no way to tell a gap from a fabrication, so fall
+  // back to the old rule rather than accusing the model of inventing a doc we
+  // simply cannot check.
+  if (!coverage) {
+    return retrievedPaths.has(path)
+      ? { citation, verdict: 'supported' }
+      : {
+          unverified: `cited "${citation}", which is not in the retrieved knowledge — verify by hand`,
+          verdict: 'unsupported',
+        };
+  }
+
+  if (!coverage.knownPaths.includes(path)) {
+    return {
+      unverified: `cited "${citation}" — no such doc in the knowledge base`,
+      verdict: 'unsupported',
+    };
+  }
+
+  if (coverage.unretrievablePaths.includes(path)) {
+    return {
+      citation,
+      unverified: `cites "${citation}", a doc that holds no indexed content — retrieval could not see it, so this is unchecked rather than wrong`,
+      verdict: 'unknown',
+    };
+  }
+
+  if (!retrievedPaths.has(path)) {
+    const budget =
+      coverage.truncatedCount > 0
+        ? ` (${coverage.truncatedCount} matching chunk(s) were cut for budget)`
+        : '';
+    return {
+      citation,
+      unverified: `cites "${citation}", a real doc that was not among the retrieved chunks${budget} — confirm the section says this`,
+      verdict: 'unknown',
+    };
+  }
+
+  // The doc was retrieved. If the anchor is not one of its headings at all,
+  // that is a fabricated section and checkable as such.
+  if (anchor) {
+    const anchors = coverage.anchorsByPath[path];
+    if (anchors && !anchors.includes(anchor)) {
+      return {
+        unverified: `cited "${citation}" — "${path}" has no section "${anchor}"`,
+        verdict: 'unsupported',
+      };
+    }
+    return {
+      citation,
+      unverified: `cites "${citation}"; that section exists but was not among the retrieved chunks of the doc — confirm it says this`,
+      verdict: 'unknown',
+    };
+  }
+
+  // A bare path whose doc was retrieved: the claim points at the doc as a
+  // whole, and the doc is in front of the model.
+  return { citation, verdict: 'supported' };
+}
+
 export function normalizeSpecContent(
   parsed: SpecContent | undefined,
-  ctx: { ticketKey: string; slug: string; primaryRepo: string; chunks: RetrievedChunk[] },
+  ctx: {
+    ticketKey: string;
+    slug: string;
+    primaryRepo: string;
+    chunks: RetrievedChunk[];
+    /** Absent for callers with no retrieval behind them; checking then falls
+     *  back to "was it retrieved", which cannot tell a gap from a fabrication. */
+    coverage?: CitationCoverage;
+  },
 ): SpecContent {
   if (!parsed) throw new Error('SpecAgent returned no structured content');
-
-  const validRefs = new Set(ctx.chunks.map((c) => citationRef(c)));
-  const validPaths = new Set(ctx.chunks.map((c) => c.path));
 
   const design = parsed.design.map((claim) => {
     if (!claim.citation) {
@@ -289,13 +399,7 @@ export function normalizeSpecContent(
         unverified: claim.unverified ?? 'not grounded in the knowledge base — confirm with the team',
       };
     }
-    if (validRefs.has(claim.citation) || validPaths.has(claim.citation.split('#')[0] ?? '')) {
-      return { text: claim.text, citation: claim.citation };
-    }
-    return {
-      text: claim.text,
-      unverified: `cited "${claim.citation}", which is not in the retrieved knowledge — verify by hand`,
-    };
+    return { text: claim.text, ...judgeCitation(claim.citation, ctx.chunks, ctx.coverage) };
   });
 
   const tasks = parsed.tasks.map((task, i) => ({

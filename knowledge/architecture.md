@@ -58,7 +58,7 @@ The README claims each of these is enforced by code plus a test. Treat the mecha
 | Only a named human approves | `SpecsService.transition` rejects `approved` without an actor; state machine; DB CHECK constraint on approver |
 | Gate cannot be bypassed | `specd spec pull` 409s server-side for unapproved; CLI tokens audience-scoped and rejected on author/approve routes |
 | Approval is append-only | `approved → draft` refused; v2 supersedes v1, v1 keeps its stamp |
-| Citations are checkable | Citations validated against retrieved content; invented paths demoted to `UNVERIFIED` |
+| Citations are checkable | Citations validated against retrieved content and against coverage: `supported` / `unsupported` / `unknown`. Invented docs and invented sections are demoted; a real doc that retrieval never surfaced is reported as unchecked rather than wrong |
 | Loop closes | Last task of every spec files as-built copy to `knowledge/specs/`; appended if the model omits it |
 | Spend capped | Caps checked before a run starts; cost in integer EUR cents |
 | Agents never push | Build agent gets editing tools only; specd pushes only to the spec's branch, never a default branch |

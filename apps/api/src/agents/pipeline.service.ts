@@ -229,6 +229,7 @@ export class PipelineService {
           maxTokens: 32_000,
           effort: 'high',
           chunks: prepared.chunks,
+          coverage: prepared.coverage,
           slug: prepared.slug,
           ticketKey: ticket.key,
           ticketId: ticket.id,

@@ -138,3 +138,45 @@
   they need tuning. The `via` enum gained `'graph'` additively plus a
   `viaEdge` provenance string; the shrink guard is a pre-delete assertion in
   the index pass, so a refused run aborts before any row is removed.
+
+### Appended 2026-08-10 — foundation hardening
+
+A file-level audit of the as-built engine found three requirements above that
+the original build did not actually meet. They are recorded here rather than
+quietly fixed, and the fixes landed together.
+
+- **There was no transaction.** Two requirements say a guard "SHALL abort the
+  transaction"; every write autocommitted instead. The failure that made this
+  more than pedantry: a doc's chunks are deleted before its replacements are
+  written, so a run that died in between left the doc's row saying "indexed"
+  with nothing retrievable behind it. The write half of `indexRepository` now
+  runs as one transaction. The slow, fallible work — the VCS listing, the file
+  reads, the embedding call — was hoisted out of it first, because a
+  transaction held open across a network round trip is a lock held across a
+  network round trip.
+- **The doc-level shrink guard is a credibility heuristic, not the provenance
+  check the requirement describes** — and it cannot be one. Every removal is
+  by definition a path the listing did not return, so nothing distinguishes
+  "deleted on purpose" from "listing failed" at that layer. What was added is
+  the case the count floor let through: a listing that comes back *empty*
+  while the index holds docs is now refused at any size (three docs vanishing
+  from a three-doc repo used to pass silently). The >50% rule stands as it was.
+- **The edge shrink guard had no implementation at all.** It now exists, and
+  unlike the doc guard it is a real provenance check: edges may only disappear
+  for a doc that this run re-extracted or deleted, and any other source doc
+  losing edges rolls the whole transaction back.
+
+Known and still outstanding, deliberately, so the next pass has them written
+down rather than rediscovered:
+
+- The re-resolution pass is an application loop over pending edges, not the
+  SQL pass the requirement names. The behaviour matches; the query count does
+  not.
+- The `(project_id, resolution_state)` partial index named in the Design was
+  never created. Both the re-resolution select and the broken-link count scan
+  without it.
+- Expansion provenance carries a readable `viaEdge` label, not the edge id the
+  requirement asks for, so a chunk cannot be joined back to the row that
+  pulled it in.
+- The doc *list* API returns no links or backlinks; only the single-doc
+  endpoint does, and nothing in the web app calls it yet.

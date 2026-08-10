@@ -8,6 +8,7 @@ import {
   knowledgeHealth,
   repositories,
   type Db,
+  type DbContext,
   type Repository,
 } from '@specd/db';
 import type { KnowledgeDocKind, RetrievalResult, RetrievedChunk } from '@specd/shared';
@@ -49,6 +50,26 @@ const LINKS_VERSION = 2;
  */
 const SHRINK_GUARD_MIN_REMOVALS = 4;
 
+/** One doc's worth of work, prepared before the transaction opens. */
+interface PreparedDoc {
+  path: string;
+  content: string;
+  sha: string;
+  kind: KnowledgeDocKind;
+  title: string;
+  hasUnverified: boolean;
+  isStub: boolean;
+  docUpdatedAt: Date | null;
+  existingId: string | undefined;
+  chunks: ReturnType<typeof chunkMarkdown>;
+  vectors: (number[] | undefined)[];
+  /** Assigned inside the transaction, once the row exists. */
+  docId?: string;
+}
+
+/** Resolves a doc's heading anchors once per run, not once per link. */
+type AnchorLookup = (docId: string) => Promise<Set<string>>;
+
 /** Edge-kind weights for expansion: an authored citation outranks a bare
  *  path mention. Tuned by rank only — the absolute values never mix with
  *  RRF scores. */
@@ -80,9 +101,17 @@ export class KnowledgeService {
   ) {}
 
   /**
-   * Re-index one repo's knowledge/ directory from git. Called on merge, on
-   * demand, and nightly. Docs whose sha is unchanged are skipped, so the
-   * common case costs a directory listing and nothing else.
+   * Re-index one repo's knowledge/ directory from git. Called on merge and on
+   * demand. Docs whose sha is unchanged are skipped, so the common case costs
+   * a directory listing and nothing else.
+   *
+   * Two phases, deliberately. Everything slow and fallible — the VCS listing,
+   * the file reads, the embedding call — happens first, outside any
+   * transaction, because a transaction held open across a network round trip
+   * is a lock held across a network round trip. Then every write lands in one
+   * transaction: either the whole run is visible or none of it is. Before that
+   * transaction can commit, two guards have to agree that what it is about to
+   * throw away was actually meant to go.
    */
   async indexRepository(
     repo: Repository,
@@ -97,241 +126,140 @@ export class KnowledgeService {
     await log(`scanning ${repo.name}: ${paths.length} knowledge doc(s)`);
 
     const files = await adapter.readFiles(target, paths);
+
+    // --- Prepare (no writes, no transaction) -----------------------------
+    const stored = await this.db
+      .select({
+        id: knowledgeDocs.id,
+        path: knowledgeDocs.path,
+        sha: knowledgeDocs.sha,
+        linksVersion: knowledgeDocs.linksVersion,
+      })
+      .from(knowledgeDocs)
+      .where(eq(knowledgeDocs.repositoryId, repo.id));
+    const storedByPath = new Map(stored.map((doc) => [doc.path, doc]));
+
     const seen = new Set<string>();
-    let indexed = 0;
+    const changed: PreparedDoc[] = [];
+    const relink: { docId: string; path: string; content: string }[] = [];
     let skipped = 0;
 
     for (const file of files) {
       seen.add(file.path);
       const sha = createHash('sha256').update(file.content).digest('hex');
-
-      const [existing] = await this.db
-        .select({
-          id: knowledgeDocs.id,
-          sha: knowledgeDocs.sha,
-          linksVersion: knowledgeDocs.linksVersion,
-        })
-        .from(knowledgeDocs)
-        .where(
-          and(eq(knowledgeDocs.repositoryId, repo.id), eq(knowledgeDocs.path, file.path)),
-        )
-        .limit(1);
+      const existing = storedByPath.get(file.path);
 
       if (existing && existing.sha === sha) {
         if (existing.linksVersion !== LINKS_VERSION) {
           // Content unchanged, extractor newer (or the doc predates the graph
           // entirely): refresh links only. No re-chunk, no re-embed.
-          await this.reindexLinks(existing.id, repo.projectId, file.path, file.content);
-          await this.db
-            .update(knowledgeDocs)
-            .set({ linksVersion: LINKS_VERSION })
-            .where(eq(knowledgeDocs.id, existing.id));
-          await log(`  links refreshed for ${file.path}`);
+          relink.push({ docId: existing.id, path: file.path, content: file.content });
         }
         skipped += 1;
         continue;
       }
 
-      const docUpdatedAt =
-        repo.provider === 'local'
-          ? await this.vcs.localAdapter.lastCommitDate(target, file.path)
-          : null;
-
-      const kind = classify(file.path);
-      const hasUnverified = /UNVERIFIED/.test(file.content);
-      const isStub = /This is a generated stub/i.test(file.content);
-      const title = firstHeading(file.content) ?? file.path;
-
-      const docId = await this.upsertDoc({
-        projectId: repo.projectId,
-        repositoryId: repo.id,
+      changed.push({
         path: file.path,
-        kind,
-        title,
-        sha,
         content: file.content,
-        docUpdatedAt,
-        hasUnverified,
-        isStub,
+        sha,
+        kind: classify(file.path),
+        title: firstHeading(file.content) ?? file.path,
+        hasUnverified: /UNVERIFIED/.test(file.content),
+        isStub: /This is a generated stub/i.test(file.content),
+        docUpdatedAt:
+          repo.provider === 'local'
+            ? await this.vcs.localAdapter.lastCommitDate(target, file.path)
+            : null,
         existingId: existing?.id,
+        chunks: chunkMarkdown(file.content),
+        vectors: [],
       });
-
-      await this.reindexChunks(docId, repo.projectId, file.content);
-      await this.reindexLinks(docId, repo.projectId, file.path, file.content);
-      indexed += 1;
-      await log(`  indexed ${file.path}${hasUnverified ? ' (has UNVERIFIED markers)' : ''}`);
     }
 
-    // Drop docs that no longer exist in git — the index is derived data and
-    // must never outlive its source.
-    const stored = await this.db
-      .select({ id: knowledgeDocs.id, path: knowledgeDocs.path })
-      .from(knowledgeDocs)
-      .where(eq(knowledgeDocs.repositoryId, repo.id));
+    // One embedding call for the whole run. Per-doc calls meant one HTTP round
+    // trip per doc against a provider that batches anyway.
+    const texts = changed.flatMap((doc) =>
+      doc.chunks.map((chunk) => `${chunk.heading ?? ''}\n${chunk.text}`),
+    );
+    if (texts.length > 0) {
+      const vectors = await this.embeddings.embed(texts);
+      let at = 0;
+      for (const doc of changed) {
+        doc.vectors = vectors.slice(at, at + doc.chunks.length);
+        at += doc.chunks.length;
+      }
+    }
 
+    // Docs that no longer exist in git — the index is derived data and must
+    // never outlive its source.
     const removals = stored.filter((doc) => !seen.has(doc.path));
-    assertNoUnexplainedShrink(stored.length, removals.length, repo.name);
 
-    let removed = 0;
-    for (const doc of removals) {
-      await this.db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, doc.id));
-      removed += 1;
-    }
+    // --- Commit (one transaction, guarded) -------------------------------
+    await this.handle.transaction(async (tx) => {
+      assertNoUnexplainedShrink(stored.length, removals.length, paths.length, repo.name);
 
-    // Re-resolution pass (S-102): a changed doc rewrote only its own outbound
-    // edges, but the rest of the graph may point AT what changed — a link
-    // whose target was just created resolves now, and a link whose target was
-    // just deleted must fall back to unresolved (ON DELETE SET NULL left it
-    // resolved-shaped with no target). One pass over this project's non-green
-    // edges, resolving against the current doc set in SQL+memory, no
-    // re-parsing of any unchanged doc.
-    await this.reresolveLinks(repo.projectId);
+      const edgesBefore = await edgeCountsBySource(tx, repo.projectId);
+      /** Docs this run is entitled to remove rows from. */
+      const touched = new Set<string>();
 
-    await this.db
-      .update(repositories)
-      .set({ lastIndexedAt: new Date(), kbStatus: paths.length > 0 ? 'indexed' : 'none' })
-      .where(eq(repositories.id, repo.id));
-
-    await this.recomputeHealth(repo.projectId);
-    return { indexed, skipped, removed };
-  }
-
-  private async upsertDoc(input: {
-    projectId: string;
-    repositoryId: string;
-    path: string;
-    kind: KnowledgeDocKind;
-    title: string;
-    sha: string;
-    content: string;
-    docUpdatedAt: Date | null;
-    hasUnverified: boolean;
-    isStub: boolean;
-    existingId?: string;
-  }): Promise<string> {
-    const values = {
-      projectId: input.projectId,
-      repositoryId: input.repositoryId,
-      path: input.path,
-      kind: input.kind,
-      title: input.title,
-      sha: input.sha,
-      content: input.content,
-      docUpdatedAt: input.docUpdatedAt,
-      indexedAt: new Date(),
-      hasUnverified: input.hasUnverified,
-      isStub: input.isStub,
-      linksVersion: LINKS_VERSION,
-    };
-
-    if (input.existingId) {
-      await this.db.update(knowledgeDocs).set(values).where(eq(knowledgeDocs.id, input.existingId));
-      return input.existingId;
-    }
-
-    const [row] = await this.db
-      .insert(knowledgeDocs)
-      .values(values)
-      .returning({ id: knowledgeDocs.id });
-    if (!row) throw new Error('failed to insert knowledge doc');
-    return row.id;
-  }
-
-  private async reindexChunks(docId: string, projectId: string, content: string): Promise<void> {
-    await this.db.delete(knowledgeChunks).where(eq(knowledgeChunks.docId, docId));
-
-    const chunks = chunkMarkdown(content);
-    if (chunks.length === 0) return;
-
-    const vectors = await this.embeddings.embed(chunks.map((c) => `${c.heading ?? ''}\n${c.text}`));
-
-    for (const [i, chunk] of chunks.entries()) {
-      const vec = vectors[i];
-      await this.handle.sql`
-        INSERT INTO knowledge_chunks (doc_id, project_id, ord, heading, text, tokens, embedding)
-        VALUES (
-          ${docId}, ${projectId}, ${chunk.ord}, ${chunk.heading}, ${chunk.text}, ${chunk.tokens},
-          ${vec ? EmbeddingService.toSqlVector(vec) : null}::vector
-        )
-      `;
-    }
-  }
-
-  /**
-   * Replace one doc's outbound edges from a fresh extraction (S-102).
-   *
-   * Scoped to the deterministic tier: a later LLM-derived tier coexists in
-   * the same table and a re-extract of one must never wipe the other. Links
-   * that do not resolve are kept as `unresolved` — flag, don't drop.
-   */
-  private async reindexLinks(
-    docId: string,
-    projectId: string,
-    sourcePath: string,
-    content: string,
-  ): Promise<void> {
-    await this.db
-      .delete(knowledgeDocLinks)
-      .where(
-        and(
-          eq(knowledgeDocLinks.sourceDocId, docId),
-          eq(knowledgeDocLinks.originTier, 'deterministic'),
-        ),
-      );
-
-    const extracted = extractLinks(content);
-    if (extracted.length === 0) return;
-
-    const docs: ResolvableDoc[] = await this.db
-      .select({ id: knowledgeDocs.id, path: knowledgeDocs.path })
-      .from(knowledgeDocs)
-      .where(eq(knowledgeDocs.projectId, projectId));
-
-    for (const link of extracted) {
-      const resolved =
-        link.kind === 'wikilink'
-          ? resolveWikiStem(link.rawTarget, docs)
-          : resolvePathTarget(link.rawTarget, sourcePath, docs);
-
-      // The graph is scoped to knowledge docs. An unresolved path that never
-      // claimed to be under knowledge/ is a reference to some other real file
-      // (docs/runners.md, README.md) — out of scope, not broken. Reporting it
-      // as "points at nothing" would be a false alarm, and a health signal
-      // that cries wolf gets ignored. Wikilinks and knowledge/-rooted paths
-      // stay: unresolved, those are genuinely broken.
-      if (
-        !resolved &&
-        link.kind !== 'wikilink' &&
-        !link.rawTarget.replace(/^\.\//, '').startsWith('knowledge/')
-      ) {
-        continue;
+      for (const doc of changed) {
+        doc.docId = await upsertDoc(tx, repo, doc);
+        touched.add(doc.docId);
       }
 
-      let state: 'resolved' | 'unresolved' | 'dangling_anchor' = resolved
-        ? 'resolved'
-        : 'unresolved';
-      if (resolved && link.anchor) {
-        const [target] = await this.db
-          .select({ content: knowledgeDocs.content })
-          .from(knowledgeDocs)
-          .where(eq(knowledgeDocs.id, resolved.docId))
-          .limit(1);
-        if (target && !headingAnchorsOf(target.content).has(link.anchor)) {
-          state = 'dangling_anchor';
-        }
+      for (const doc of removals) {
+        await tx.db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, doc.id));
+        touched.add(doc.id);
       }
 
-      await this.db.insert(knowledgeDocLinks).values({
-        projectId,
-        sourceDocId: docId,
-        kind: link.kind,
-        site: link.site,
-        rawTarget: link.rawTarget,
-        resolvedDocId: state === 'unresolved' ? null : (resolved?.docId ?? null),
-        resolvedAnchor: link.anchor,
-        resolutionState: state,
-      });
+      // The doc set is final now, so every link in this run resolves against
+      // one snapshot of it — the previous code re-read the whole project's doc
+      // list once per doc.
+      const docs: ResolvableDoc[] = await tx.db
+        .select({ id: knowledgeDocs.id, path: knowledgeDocs.path })
+        .from(knowledgeDocs)
+        .where(eq(knowledgeDocs.projectId, repo.projectId));
+      const anchors = anchorLookup(tx);
+
+      for (const doc of changed) {
+        await writeChunks(tx, doc.docId!, repo.projectId, doc);
+        await writeLinks(tx, doc.docId!, repo.projectId, doc.path, doc.content, docs, anchors);
+      }
+
+      for (const doc of relink) {
+        await writeLinks(tx, doc.docId, repo.projectId, doc.path, doc.content, docs, anchors);
+        await tx.db
+          .update(knowledgeDocs)
+          .set({ linksVersion: LINKS_VERSION })
+          .where(eq(knowledgeDocs.id, doc.docId));
+        touched.add(doc.docId);
+      }
+
+      // Re-resolution pass (S-102): a changed doc rewrote only its own outbound
+      // edges, but the rest of the graph may point AT what changed — a link
+      // whose target was just created resolves now, and a link whose target was
+      // just deleted must fall back to unresolved (ON DELETE SET NULL left it
+      // resolved-shaped with no target). Nothing is re-parsed.
+      await this.reresolveLinks(tx, repo.projectId, docs, anchors);
+
+      await assertNoUnexplainedEdgeLoss(tx, repo.projectId, edgesBefore, touched, repo.name);
+
+      await tx.db
+        .update(repositories)
+        .set({ lastIndexedAt: new Date(), kbStatus: paths.length > 0 ? 'indexed' : 'none' })
+        .where(eq(repositories.id, repo.id));
+
+      await this.recomputeHealth(repo.projectId, tx);
+    });
+
+    // Logged after the commit: until it lands, none of this happened.
+    for (const doc of relink) await log(`  links refreshed for ${doc.path}`);
+    for (const doc of changed) {
+      await log(`  indexed ${doc.path}${doc.hasUnverified ? ' (has UNVERIFIED markers)' : ''}`);
     }
+
+    return { indexed: changed.length, skipped, removed: removals.length };
   }
 
   /**
@@ -340,9 +268,14 @@ export class KnowledgeService {
    * attention) — nothing is re-parsed, which is what keeps incremental
    * indexing O(changed docs).
    */
-  private async reresolveLinks(projectId: string): Promise<void> {
+  private async reresolveLinks(
+    tx: DbContext,
+    projectId: string,
+    docs: ResolvableDoc[],
+    anchors: AnchorLookup,
+  ): Promise<void> {
     // A deleted target leaves resolved rows with a NULLed doc id.
-    await this.handle.sql`
+    await tx.sql`
       UPDATE knowledge_doc_links
       SET resolution_state = 'unresolved'
       WHERE project_id = ${projectId}
@@ -350,7 +283,7 @@ export class KnowledgeService {
         AND resolved_doc_id IS NULL
     `;
 
-    const pending = await this.db
+    const pending = await tx.db
       .select({
         id: knowledgeDocLinks.id,
         kind: knowledgeDocLinks.kind,
@@ -367,10 +300,6 @@ export class KnowledgeService {
       );
     if (pending.length === 0) return;
 
-    const docs: ResolvableDoc[] = await this.db
-      .select({ id: knowledgeDocs.id, path: knowledgeDocs.path })
-      .from(knowledgeDocs)
-      .where(eq(knowledgeDocs.projectId, projectId));
     const sourcePaths = new Map(docs.map((d) => [d.id, d.path]));
 
     for (const link of pending) {
@@ -380,19 +309,12 @@ export class KnowledgeService {
           : resolvePathTarget(link.rawTarget, sourcePaths.get(link.sourceDocId) ?? '', docs);
       if (!resolved) continue;
 
-      let state: 'resolved' | 'dangling_anchor' = 'resolved';
-      if (link.anchor) {
-        const [target] = await this.db
-          .select({ content: knowledgeDocs.content })
-          .from(knowledgeDocs)
-          .where(eq(knowledgeDocs.id, resolved.docId))
-          .limit(1);
-        if (target && !headingAnchorsOf(target.content).has(link.anchor)) {
-          state = 'dangling_anchor';
-        }
-      }
+      const state: 'resolved' | 'dangling_anchor' =
+        link.anchor && !(await anchors(resolved.docId)).has(link.anchor)
+          ? 'dangling_anchor'
+          : 'resolved';
 
-      await this.db
+      await tx.db
         .update(knowledgeDocLinks)
         .set({ resolvedDocId: resolved.docId, resolutionState: state })
         .where(eq(knowledgeDocLinks.id, link.id));
@@ -699,8 +621,8 @@ export class KnowledgeService {
    * (§P6). Deliberately simple and explainable: a score nobody can reason
    * about gets ignored.
    */
-  async recomputeHealth(projectId: string): Promise<void> {
-    const docs = await this.db
+  async recomputeHealth(projectId: string, ctx: DbContext = this.handle): Promise<void> {
+    const docs = await ctx.db
       .select({
         docUpdatedAt: knowledgeDocs.docUpdatedAt,
         indexedAt: knowledgeDocs.indexedAt,
@@ -722,7 +644,7 @@ export class KnowledgeService {
 
     // Graph health (S-102): links that point nowhere, anchors that no longer
     // exist, and docs nothing links to. Cheap SQL over the links table.
-    const [graph] = await this.handle.sql<
+    const [graph] = await ctx.sql<
       { broken: number; dangling: number; orphans: number }[]
     >`
       SELECT
@@ -798,7 +720,7 @@ export class KnowledgeService {
       });
     }
 
-    await this.handle.sql`
+    await ctx.sql`
       INSERT INTO knowledge_health (project_id, score, doc_count, stale_count, stub_count, as_built_count, notes, computed_at)
       VALUES (${projectId}, ${score}, ${docCount}, ${stale.length}, ${stubs.length}, ${asBuiltCount},
               ${JSON.stringify(notes)}::jsonb, now())
@@ -859,6 +781,167 @@ export class KnowledgeService {
   }
 }
 
+/** Insert or update one doc row. Transaction-scoped: no ambient handle. */
+async function upsertDoc(tx: DbContext, repo: Repository, doc: PreparedDoc): Promise<string> {
+  const values = {
+    projectId: repo.projectId,
+    repositoryId: repo.id,
+    path: doc.path,
+    kind: doc.kind,
+    title: doc.title,
+    sha: doc.sha,
+    content: doc.content,
+    docUpdatedAt: doc.docUpdatedAt,
+    indexedAt: new Date(),
+    hasUnverified: doc.hasUnverified,
+    isStub: doc.isStub,
+    linksVersion: LINKS_VERSION,
+  };
+
+  if (doc.existingId) {
+    await tx.db.update(knowledgeDocs).set(values).where(eq(knowledgeDocs.id, doc.existingId));
+    return doc.existingId;
+  }
+
+  const [row] = await tx.db
+    .insert(knowledgeDocs)
+    .values(values)
+    .returning({ id: knowledgeDocs.id });
+  if (!row) throw new Error('failed to insert knowledge doc');
+  return row.id;
+}
+
+/**
+ * Replace a doc's chunks. One statement per doc rather than one per chunk:
+ * `unnest` zips the column arrays back into rows, and the explicit `::vector`
+ * cast keeps pgvector literals unambiguous.
+ */
+async function writeChunks(
+  tx: DbContext,
+  docId: string,
+  projectId: string,
+  doc: PreparedDoc,
+): Promise<void> {
+  await tx.db.delete(knowledgeChunks).where(eq(knowledgeChunks.docId, docId));
+  if (doc.chunks.length === 0) return;
+
+  const vectors = doc.chunks.map((_, i) => {
+    const vec = doc.vectors[i];
+    return vec ? EmbeddingService.toSqlVector(vec) : null;
+  });
+
+  await tx.sql`
+    INSERT INTO knowledge_chunks (doc_id, project_id, ord, heading, text, tokens, embedding)
+    SELECT ${docId}, ${projectId}, u.ord, u.heading, u.text, u.tokens, u.embedding::vector
+    FROM unnest(
+      ${doc.chunks.map((c) => c.ord)}::int[],
+      ${doc.chunks.map((c) => c.heading)}::text[],
+      ${doc.chunks.map((c) => c.text)}::text[],
+      ${doc.chunks.map((c) => c.tokens)}::int[],
+      ${vectors}::text[]
+    ) AS u(ord, heading, text, tokens, embedding)
+  `;
+}
+
+/**
+ * Replace one doc's outbound edges from a fresh extraction (S-102).
+ *
+ * Scoped to the deterministic tier: a later LLM-derived tier coexists in the
+ * same table and a re-extract of one must never wipe the other. Links that do
+ * not resolve are kept as `unresolved` — flag, don't drop.
+ */
+async function writeLinks(
+  tx: DbContext,
+  docId: string,
+  projectId: string,
+  sourcePath: string,
+  content: string,
+  docs: ResolvableDoc[],
+  anchors: AnchorLookup,
+): Promise<void> {
+  await tx.db
+    .delete(knowledgeDocLinks)
+    .where(
+      and(
+        eq(knowledgeDocLinks.sourceDocId, docId),
+        eq(knowledgeDocLinks.originTier, 'deterministic'),
+      ),
+    );
+
+  const extracted = extractLinks(content);
+  if (extracted.length === 0) return;
+
+  const rows: (typeof knowledgeDocLinks.$inferInsert)[] = [];
+  for (const link of extracted) {
+    const resolved =
+      link.kind === 'wikilink'
+        ? resolveWikiStem(link.rawTarget, docs)
+        : resolvePathTarget(link.rawTarget, sourcePath, docs);
+
+    // The graph is scoped to knowledge docs. An unresolved path that never
+    // claimed to be under knowledge/ is a reference to some other real file
+    // (docs/runners.md, README.md) — out of scope, not broken. Reporting it
+    // as "points at nothing" would be a false alarm, and a health signal
+    // that cries wolf gets ignored. Wikilinks and knowledge/-rooted paths
+    // stay: unresolved, those are genuinely broken.
+    if (
+      !resolved &&
+      link.kind !== 'wikilink' &&
+      !link.rawTarget.replace(/^\.\//, '').startsWith('knowledge/')
+    ) {
+      continue;
+    }
+
+    let state: 'resolved' | 'unresolved' | 'dangling_anchor' = resolved ? 'resolved' : 'unresolved';
+    if (resolved && link.anchor && !(await anchors(resolved.docId)).has(link.anchor)) {
+      state = 'dangling_anchor';
+    }
+
+    rows.push({
+      projectId,
+      sourceDocId: docId,
+      kind: link.kind,
+      site: link.site,
+      rawTarget: link.rawTarget,
+      resolvedDocId: state === 'unresolved' ? null : (resolved?.docId ?? null),
+      resolvedAnchor: link.anchor,
+      resolutionState: state,
+    });
+  }
+
+  if (rows.length > 0) await tx.db.insert(knowledgeDocLinks).values(rows);
+}
+
+/** Heading anchors per target doc, read once and reused for the whole run. */
+function anchorLookup(tx: DbContext): AnchorLookup {
+  const cache = new Map<string, Set<string>>();
+  return async (docId: string) => {
+    const hit = cache.get(docId);
+    if (hit) return hit;
+    const [row] = await tx.db
+      .select({ content: knowledgeDocs.content })
+      .from(knowledgeDocs)
+      .where(eq(knowledgeDocs.id, docId))
+      .limit(1);
+    const set = row ? headingAnchorsOf(row.content) : new Set<string>();
+    cache.set(docId, set);
+    return set;
+  };
+}
+
+async function edgeCountsBySource(
+  tx: DbContext,
+  projectId: string,
+): Promise<Map<string, number>> {
+  const rows = await tx.sql<{ source_doc_id: string; n: number }[]>`
+    SELECT source_doc_id, count(*)::int AS n
+    FROM knowledge_doc_links
+    WHERE project_id = ${projectId}
+    GROUP BY source_doc_id
+  `;
+  return new Map(rows.map((row) => [row.source_doc_id, Number(row.n)]));
+}
+
 /**
  * Refuse a re-index that would silently gut the repo's slice of the index.
  *
@@ -867,21 +950,76 @@ export class KnowledgeService {
  * (wrong branch, revoked token, empty response), and committing it destroys
  * every edge into those docs too. The error says exactly how to proceed when
  * the mass deletion is real.
+ *
+ * A listing that came back *empty* is refused whatever the size of the index:
+ * "the directory is gone" and "the request failed politely" produce the same
+ * empty array, and only one of them should be allowed to erase a knowledge
+ * base. That case is why the count floor alone was not enough — three docs
+ * vanishing from a three-doc repo used to pass.
  */
 export function assertNoUnexplainedShrink(
   storedCount: number,
   removalCount: number,
+  listedCount: number,
   repoName: string,
 ): void {
-  if (removalCount < SHRINK_GUARD_MIN_REMOVALS) return;
-  if (removalCount * 2 <= storedCount) return;
+  if (removalCount === 0) return;
+
+  const gutted = listedCount === 0 && storedCount > 0;
+  const disproportionate = removalCount >= SHRINK_GUARD_MIN_REMOVALS && removalCount * 2 > storedCount;
+  if (!gutted && !disproportionate) return;
 
   throw new Error(
     `Refusing to re-index ${repoName}: this run would remove ${removalCount} of ` +
-      `${storedCount} indexed knowledge doc(s). That usually means the listing was ` +
-      `wrong (branch, token, network), not that the docs are gone. If the deletion ` +
-      `is real, remove and re-add the repository — or delete the docs in smaller ` +
-      `batches — and the index will follow.`,
+      `${storedCount} indexed knowledge doc(s)${listedCount === 0 ? ', having listed none at all' : ''}. ` +
+      `That usually means the listing was wrong (branch, token, network), not that ` +
+      `the docs are gone. If the deletion is real, remove and re-add the repository — ` +
+      `or delete the docs in smaller batches — and the index will follow.`,
+  );
+}
+
+/**
+ * Refuse a re-index that would drop edges nobody asked it to touch (S-102).
+ *
+ * A doc's edges may legitimately disappear two ways: the doc was re-extracted
+ * this run (its deterministic tier is replaced wholesale) or the doc was
+ * deleted (cascade). Any other source doc losing edges means something removed
+ * rows outside those two paths — a stray delete, a cascade nobody intended, a
+ * bad migration — and the transaction is rolled back rather than committed.
+ *
+ * This is the provenance half of the guard: the doc-count check above reasons
+ * about volume, which cannot tell a legitimate mass deletion from an accident.
+ * This one reasons about *authorisation*, which can.
+ *
+ * Exported for direct testing — the pipeline cannot easily be talked into
+ * producing the input this has to refuse.
+ */
+export async function assertNoUnexplainedEdgeLoss(
+  tx: DbContext,
+  projectId: string,
+  before: Map<string, number>,
+  touched: Set<string>,
+  repoName: string,
+): Promise<void> {
+  const after = await edgeCountsBySource(tx, projectId);
+
+  let lost = 0;
+  const casualties: string[] = [];
+  for (const [docId, had] of before) {
+    if (touched.has(docId)) continue;
+    const has = after.get(docId) ?? 0;
+    if (has >= had) continue;
+    lost += had - has;
+    casualties.push(docId);
+  }
+  if (casualties.length === 0) return;
+
+  throw new Error(
+    `Refusing to re-index ${repoName}: this run would drop ${lost} link(s) from ` +
+      `${casualties.length} doc(s) it never re-indexed or deleted ` +
+      `(${casualties.slice(0, 3).join(', ')}${casualties.length > 3 ? ', …' : ''}). ` +
+      `Edges only disappear when their source doc is re-extracted or removed, so ` +
+      `this is a bug in the indexer, not a change in the repository.`,
   );
 }
 

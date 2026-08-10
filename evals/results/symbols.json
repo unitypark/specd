@@ -1,11 +1,11 @@
 {
   "target": "/Users/junghwpark/Dev/Projects/specd",
   "typescript": {
-    "files": 152,
-    "oracleSymbols": 1102,
-    "precision": 0.9874551971326165,
+    "files": 154,
+    "oracleSymbols": 1120,
+    "precision": 0.9876543209876543,
     "recall": 1,
-    "f1": 0.993688007213706,
+    "f1": 0.9937888198757764,
     "worstFalsePositives": [
       "bootstrap ×1",
       "AppModule ×1",
@@ -23,8 +23,8 @@
   "native": [
     {
       "language": "go",
-      "files": 6,
-      "oracleSymbols": 137,
+      "files": 7,
+      "oracleSymbols": 139,
       "precision": 1,
       "recall": 1,
       "f1": 1,
@@ -33,7 +33,13 @@
     },
     {
       "language": "python",
-      "skipped": "no .py files in this corpus"
+      "files": 1,
+      "oracleSymbols": 2,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "falsePositives": [],
+      "falseNegatives": []
     }
   ]
 }

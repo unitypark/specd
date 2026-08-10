@@ -825,6 +825,74 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     expect(dupes).toEqual([]);
   });
 
+  it('serves the code a seed doc references, as a citable chunk', async () => {
+    // The plan's last promise (0014): a doc citing RunnerJobsService.claim()
+    // gave specd a resolved edge, a path and a line — and retrieval never
+    // handed the SpecAgent the function itself. Now it does: a bounded
+    // snippet, read from the repository at retrieval time, citable exactly
+    // like a doc excerpt.
+    files.set(
+      'apps/api/src/billing/invoice.ts',
+      [
+        'export class InvoiceService {',
+        '  async issue(id: string) {',
+        "    return `issued-${id}`;",
+        '  }',
+        '}',
+        'export function voidInvoice() {}',
+      ].join('\n'),
+    );
+    files.set(
+      'knowledge/billing.md',
+      [
+        '# Billing',
+        '',
+        '## Issuing',
+        '',
+        'Invoices are issued by `InvoiceService.issue()` in',
+        '`apps/api/src/billing/invoice.ts`, never from the web tier.',
+      ].join('\n'),
+    );
+    await service.indexRepository(repo);
+
+    const result = await service.retrieve(projectId, 'how are invoices issued billing', 4);
+    const code = result.chunks.filter((c) => c.via === 'code');
+    expect(code.length).toBeGreaterThan(0);
+    expect(code.length).toBeLessThanOrEqual(2); // CODE_EXPANSION_BUDGET
+
+    // The symbol outranks the whole file: a symbolref weighs more than a
+    // coderef, and a 40-line window from a declaration beats a file head.
+    const snippet = code[0]!;
+    expect(snippet.path).toBe('apps/api/src/billing/invoice.ts');
+    expect(snippet.heading).toBe('InvoiceService.issue');
+    expect(snippet.text).toContain('async issue(id: string)');
+
+    // Citable like any excerpt: exact CITE-AS match → supported.
+    expect(`${snippet.path}#${snippet.heading}`).toBe(
+      'apps/api/src/billing/invoice.ts#InvoiceService.issue',
+    );
+
+    // Provenance joins back to the edge that pulled it in, and the score is
+    // a discounted seed score — never zero, never above its seed.
+    expect(snippet.viaEdge).toMatch(/symbolref at knowledge\/billing\.md#issuing/);
+    const [edge] = await handle!.db
+      .select()
+      .from(knowledgeDocLinks)
+      .where(eq(knowledgeDocLinks.id, snippet.viaEdgeId!));
+    expect(edge).toMatchObject({ kind: 'symbolref', rawTarget: 'InvoiceService.issue' });
+    const seed = result.chunks.find((c) => c.path === 'knowledge/billing.md');
+    expect(snippet.score).toBeGreaterThan(0);
+    expect(snippet.score).toBeLessThan(seed!.score);
+
+    // Append-only: code comes after every doc chunk.
+    const firstCode = result.chunks.findIndex((c) => c.via === 'code');
+    expect(result.chunks.slice(firstCode).every((c) => c.via === 'code')).toBe(true);
+
+    files.delete('knowledge/billing.md');
+    files.delete('apps/api/src/billing/invoice.ts');
+    await service.indexRepository(repo);
+  });
+
   it('rolls the whole run back when a step fails partway through', async () => {
     // The failure this exists to prevent: a doc's chunks are deleted before
     // its new ones are written, so a run that dies in between leaves the doc

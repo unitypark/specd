@@ -142,3 +142,40 @@ resolved reference silently became broken on the next index run. File nodes are
 upserted now, so ids are stable, and the regression test does the only thing
 that catches this: re-indexes without changing anything and asserts the
 reference survives.
+
+
+## Update — 2026-08-11: retrieval serves the code
+
+The gap this decision left open is closed: retrieval now hands the SpecAgent
+the code the seed docs reference, not only the fact of the reference.
+
+A third expansion stage follows the doc-graph hop. Resolved `coderef` and
+`symbolref` edges from the RRF seeds are ranked by the same rules doc
+expansion uses — edge-kind weight, seed rank as the tie-break — capped at two
+snippets, each a bounded window read from the repository **at retrieval
+time**. Nothing is stored: git stays the source of truth, and the cost is at
+most two file reads per retrieval, which on a hosted repository is that many
+HTTP GETs.
+
+The snippet enters the retrieved set as an ordinary chunk with
+`via: 'code'`, `path` = the source file and `heading` = the qualified symbol
+name — so its CITE-AS is `path#Class.method`, the citation validator's
+exact-match branch accepts it like any doc excerpt, and the prompt fences it
+so the model reads code as code. Provenance carries the edge id that pulled
+it in, and when the doc's frozen sha disagrees with the file's, the label
+says the code has moved since the doc last touched it — the snippet itself
+is current HEAD, deliberately: the model grounds against what exists while
+the stale verdict tells the reviewer the doc has not caught up.
+
+Measured against this repository's own knowledge tree: "how does a runner
+claim a queued job" now serves `RunnerJobsService.report` from ADR 0004's own
+citation, and "how are citations validated" serves `SpecAgent.prepare` and
+`RunnerJobsService.claim` from S-102's design section. The doc-retrieval eval
+is unchanged (recall 100%, MRR 0.861) — expansion appends and never
+displaces.
+
+Known refinement, deliberately not taken yet: candidates are ranked by edge
+weight and seed rank alone, not by query relevance — the same gap doc
+expansion had before the retrieval-quality pass fixed it there. Doing the
+same here should wait for a labelled case where it matters, rather than
+arriving as an unmeasured tweak.

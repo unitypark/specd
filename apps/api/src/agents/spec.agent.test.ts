@@ -379,6 +379,40 @@ describe('citation verdicts', () => {
     expect(countUnverified(out)).toBe(1);
   });
 
+  it('accepts a citation to a served code snippet as supported', () => {
+    // Code enters the retrieved set with path = source file and heading =
+    // qualified symbol name, so its CITE-AS is `path#Class.method` and the
+    // exact-match branch accepts it before any doc-coverage reasoning — which
+    // would otherwise call a source path "no such doc".
+    const withCode = [
+      ...chunks,
+      {
+        docId: 'code-1',
+        repoName: 'aurora-api',
+        path: 'apps/api/src/billing/invoice.ts',
+        heading: 'InvoiceService.issue',
+        text: 'export class InvoiceService { async issue(id: string) {} }',
+        score: 0.2,
+        via: 'code' as const,
+        viaEdge: 'symbolref at knowledge/billing.md#issuing',
+      },
+    ];
+    const out = normalizeSpecContent(
+      draft({
+        design: [
+          {
+            text: 'issuing goes through InvoiceService.issue',
+            citation: 'apps/api/src/billing/invoice.ts#InvoiceService.issue',
+          },
+        ],
+      }),
+      { ...ctx, chunks: withCode, coverage },
+    );
+    expect(out.design[0]?.verdict).toBe('supported');
+    expect(out.design[0]?.citation).toBe('apps/api/src/billing/invoice.ts#InvoiceService.issue');
+    expect(out.design[0]?.unverified).toBeUndefined();
+  });
+
   it('falls back to the retrieved-set check when no coverage was captured', () => {
     // Older runs and callers with no retrieval behind them still get the
     // binary answer rather than an accusation the checker cannot support.

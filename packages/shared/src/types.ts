@@ -35,8 +35,15 @@ export interface RetrievedChunk {
   heading: string | null;
   text: string;
   score: number;
-  /** How the chunk was found — hybrid retrieval reports its own provenance. */
-  via: 'vector' | 'fulltext' | 'both' | 'graph';
+  /**
+   * How the chunk was found — hybrid retrieval reports its own provenance.
+   * `code` is source code, not a doc: the text is a bounded snippet of a file
+   * or symbol that a seed doc references, read from the repository at
+   * retrieval time. `path` is the source file and `heading` the qualified
+   * symbol name, so `citationRef` yields `path#Class.method` and the exact-
+   * match branch of citation checking accepts it like any other excerpt.
+   */
+  via: 'vector' | 'fulltext' | 'both' | 'graph' | 'code';
   /**
    * For `via: 'graph'` only: the edge that pulled this chunk in, e.g.
    * `citation from knowledge/specs/S-104-….md#design`. Provenance for the

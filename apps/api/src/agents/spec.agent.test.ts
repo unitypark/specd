@@ -312,6 +312,73 @@ describe('citation verdicts', () => {
     expect(countUnverified(out)).toBe(1);
   });
 
+  it('calls a supported claim stale when its section describes code that moved', () => {
+    // A different axis from the three above: the evidence is exactly what was
+    // retrieved, and the paragraph it came from talks about code nobody has
+    // reconciled it with since. Accurate about the evidence, misleading about
+    // the world — so it keeps the citation and says why.
+    const claim = judge('knowledge/architecture.md#contacts', {
+      ...coverage,
+      staleSections: {
+        'knowledge/architecture.md': {
+          sections: ['contacts'],
+          wholeDoc: false,
+          detail: 'apps/api/src/contacts/list.ts',
+        },
+      },
+    });
+    expect(claim.verdict).toBe('stale');
+    expect(claim.citation).toBe('knowledge/architecture.md#contacts');
+    expect(claim.unverified).toContain('apps/api/src/contacts/list.ts');
+    expect(claim.unverified).toContain('may be accurate and out of date');
+  });
+
+  it('does not taint a section of the same doc that is still current', () => {
+    // One stale reference in one section says nothing about the others, and
+    // tainting a whole doc for it is how a caveat stops being read.
+    const claim = judge('knowledge/decisions/0003-file-delivery.md', {
+      ...coverage,
+      staleSections: {
+        'knowledge/architecture.md': {
+          sections: ['contacts'],
+          wholeDoc: false,
+          detail: 'apps/api/src/contacts/list.ts',
+        },
+      },
+    });
+    expect(claim.verdict).toBe('supported');
+    expect(claim.unverified).toBeUndefined();
+  });
+
+  it('taints every section when the stale reference sits above the first heading', () => {
+    const claim = judge('knowledge/architecture.md#contacts', {
+      ...coverage,
+      staleSections: {
+        'knowledge/architecture.md': { sections: [], wholeDoc: true, detail: 'apps/api/src/x.ts' },
+      },
+    });
+    expect(claim.verdict).toBe('stale');
+  });
+
+  it('keeps a stale claim out of the citation count', () => {
+    // Same reason an unknown is excluded: a claim a human still has to check
+    // is not grounding, and letting it inflate the metric is the metric lying.
+    const out = normalizeSpecContent(
+      draft({ design: [{ text: 'x', citation: 'knowledge/architecture.md#contacts' }] }),
+      {
+        ...ctx,
+        coverage: {
+          ...coverage,
+          staleSections: {
+            'knowledge/architecture.md': { sections: ['contacts'], wholeDoc: false, detail: 'a/b.ts' },
+          },
+        },
+      },
+    );
+    expect(countCitations(out)).toBe(0);
+    expect(countUnverified(out)).toBe(1);
+  });
+
   it('falls back to the retrieved-set check when no coverage was captured', () => {
     // Older runs and callers with no retrieval behind them still get the
     // binary answer rather than an accusation the checker cannot support.

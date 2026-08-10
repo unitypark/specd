@@ -1011,11 +1011,43 @@ export class KnowledgeService {
       }
     }
 
+    // Where a retrieved doc describes code that has moved on without it.
+    // Only for the docs actually retrieved: this exists to qualify citations,
+    // and a citation can only name a doc that was in front of the model.
+    const staleSections: NonNullable<CitationCoverage['staleSections']> = {};
+    if (wanted.length > 0) {
+      const rows = await this.handle.sql<
+        { path: string; site: string | null; raw_target: string; kind: string }[]
+      >`
+        SELECT kd.path, l.site, l.raw_target, l.kind
+        FROM knowledge_doc_links l
+        JOIN knowledge_docs kd ON kd.id = l.source_doc_id
+        LEFT JOIN code_nodes cn ON cn.id = l.resolved_code_id
+        WHERE l.project_id = ${projectId}
+          AND kd.path = ANY(${wanted})
+          AND l.kind IN ('coderef', 'symbolref')
+          AND (
+            -- the code it names is gone…
+            l.resolution_state = 'unresolved'
+            -- …or still there and changed since this doc was last touched
+            OR (l.target_blob_sha IS NOT NULL AND cn.blob_sha IS NOT NULL
+                AND l.target_blob_sha <> cn.blob_sha)
+          )
+      `;
+      for (const row of rows) {
+        const entry = (staleSections[row.path] ??= { sections: [], wholeDoc: false, detail: '' });
+        if (row.site) entry.sections.push(row.site);
+        else entry.wholeDoc = true;
+        if (!entry.detail) entry.detail = row.raw_target;
+      }
+    }
+
     return {
       knownPaths: docs.map((d) => d.path),
       anchorsByPath,
       unretrievablePaths: docs.filter((d) => !d.has_chunks).map((d) => d.path),
       truncatedCount: 0,
+      staleSections,
     };
   }
 

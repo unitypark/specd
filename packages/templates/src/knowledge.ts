@@ -32,12 +32,24 @@ reviewing. It is the source of truth — specd only holds a derived index.
 
 | Read this | When |
 | --- | --- |
-| \`architecture.md\` | Before any change that crosses a module boundary |
-| \`conventions.md\` | Before writing code — lint rules, layout, test patterns |
-| \`glossary.md\` | When a domain term is unfamiliar |
-| \`decisions/\` | Before revisiting a choice someone already made |
-| \`runbooks/\` | When running, deploying or debugging locally |
-| \`specs/\` | Before designing something adjacent — every delivered spec lands here |
+| [architecture.md](architecture.md) | Before any change that crosses a module boundary |
+| [conventions.md](conventions.md) | Before writing code — lint rules, layout, test patterns |
+| [glossary.md](glossary.md) | When a domain term is unfamiliar |
+| [decisions/](#decisions) | Before revisiting a choice someone already made — index below |
+| [runbooks/](#runbooks) | When running, deploying or debugging locally — index below |
+| [specs/](specs/README.md) | Before designing something adjacent — every delivered spec lands here |
+
+## Decisions
+
+- [0001 — adopt spec-driven delivery](decisions/0001-adopt-spec-driven.md)
+
+New decisions join this list in the PR that adds them. A decision nothing
+links to is a decision the next person re-litigates.
+
+## Runbooks
+
+- [local-dev.md](runbooks/local-dev.md) — first run, restarts, resets
+- [deploy.md](runbooks/deploy.md) — environments, deploying, rolling back
 
 ## How this stays alive
 
@@ -80,6 +92,8 @@ ${dirRows}
 UNVERIFIED — the repo scan can see the file tree but not the intent behind it.
 Describe here: which modules may call which, where transactions begin and end,
 and what crosses a network boundary. This is the section agents lean on most.
+Rules about *how* code inside a boundary is written belong in
+[conventions.md](conventions.md) instead.
 
 ## Data
 
@@ -118,7 +132,8 @@ ${stack.verifyCommand ?? '# UNVERIFIED — no verify command detected; add yours
 
 UNVERIFIED — the scan reads config files, not taste. Record the decisions a
 reviewer would otherwise repeat in every review: naming, file layout, error
-handling, when to add an abstraction.
+handling, when to add an abstraction. Where a rule follows from the shape of
+the system, say so and link [architecture.md](architecture.md).
 
 ## Tests
 
@@ -166,8 +181,9 @@ reinvented, and assumptions ship silently.
 ## Decision
 
 Work reaches coding agents as a **human-approved spec**, never as a bare prompt.
-Agents read \`knowledge/\` first, cite what they relied on, and file the as-built
-spec back into \`knowledge/specs/\` in the same PR as the code.
+Agents read [knowledge/README.md](../README.md) first, cite what they relied on,
+and file the as-built spec back into [knowledge/specs/](../specs/README.md) in
+the same PR as the code.
 
 The approval gate is structural: no agent may approve its own input.
 
@@ -209,6 +225,8 @@ ${input.stack.packageManager ? `${input.stack.packageManager} install` : '# UNVE
 ${input.stack.verifyCommand ?? '# UNVERIFIED'}
 \`\`\`
 
+The same command gates every PR — see [conventions.md](../conventions.md).
+
 ## When it breaks
 
 UNVERIFIED — the three failures newcomers actually hit.
@@ -237,6 +255,8 @@ UNVERIFIED — the fastest safe path backwards. Write this one first.
 ## Observability
 
 UNVERIFIED — where the logs, metrics and alerts live.
+
+Running it on your own machine instead: [local-dev.md](local-dev.md).
 `;
 }
 
@@ -249,6 +269,8 @@ spec — if reality diverged from the approved design, append a \`## Deviations\
 section to the existing file.
 
 This is the loop that makes context compound. The next spec retrieves these.
+
+Start at [knowledge/README.md](../README.md) for the rest of the map.
 `;
 }
 

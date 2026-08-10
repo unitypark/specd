@@ -52,6 +52,15 @@ export class Config {
   /** Reclaims allowed before the run is failed as repeatedly abandoned. */
   readonly runnerMaxReclaims = num('SPECD_RUNNER_MAX_RECLAIMS', 3);
 
+  // ─── Webhook delivery retention (S-103) ────────────────────────────────────
+  // Delivery rows are the audit trail for "why did specd do that last week",
+  // kept for a window and pruned by age — the intent 0003 documented when the
+  // table was created. Days, not a cron expression: subsequent prune runs pick
+  // a changed value up without a code change.
+  readonly webhookRetentionDays = num('SPECD_WEBHOOK_RETENTION_DAYS', 30);
+  /** Prune cadence. Daily; the job also runs once at startup. */
+  readonly webhookPruneIntervalMs = num('SPECD_WEBHOOK_PRUNE_INTERVAL_MS', 86_400_000);
+
   // ─── Index worker (0012) ───────────────────────────────────────────────────
   // Indexing left the webhook request path: a merge queues a run and a worker
   // in this process executes it, woken by Postgres LISTEN/NOTIFY.

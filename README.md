@@ -1,11 +1,44 @@
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <img src="assets/logo-light.svg" alt="specd" width="88" height="88">
+</picture>
+
 # specd
 
-**Spec-driven delivery, productized.** Connect your repos, an AI provider and a
-tracker; specd grounds a knowledge base in your code, drafts every ticket into a
-cited spec, gates it behind a named human, and files the delivered work back into
-the knowledge base so the next spec starts better than the last.
+**Spec-driven delivery, productized.**
 
-> Implementation of `SPEC-PLATFORM-PLAN.html` — P1 scope (§14).
+Connect your repos, an AI provider and a tracker. specd grounds a knowledge base
+in your code, drafts every ticket into a **cited** spec, gates it behind a
+**named human**, and files the delivered work back into the knowledge base — so
+the next spec starts better than the last.
+
+<p>
+  <a href="https://github.com/unitypark/specd/actions/workflows/ci.yml"><img src="https://github.com/unitypark/specd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white" alt="Node ≥ 22">
+  <img src="https://img.shields.io/badge/pnpm-10.32-F69220?logo=pnpm&logoColor=white" alt="pnpm 10.32">
+  <img src="https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25">
+  <img src="https://img.shields.io/badge/postgres-pgvector-4169E1?logo=postgresql&logoColor=white" alt="Postgres + pgvector">
+</p>
+
+<p>
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#the-knowledge-engine">Knowledge engine</a> ·
+  <a href="#the-cli">CLI</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#project-status">Status</a>
+</p>
+
+</div>
+
+> **Status: pre-1.0, local-first.** specd runs end to end as a development
+> platform on your machine — 465 TypeScript tests plus a Go suite, CI-gated
+> against real Postgres. Nothing deploys it as a service yet, and
+> [`knowledge/runbooks/deploy.md`](knowledge/runbooks/deploy.md) says exactly
+> what a first deployment would need rather than pretending one exists.
 
 ---
 
@@ -23,505 +56,525 @@ Connect → Ground → Spec → [HUMAN] → Build → Learn
                                               └──→ feeds 02
 ```
 
-The line is fixed (D11). Stations cannot be added, skipped or removed; only
-station 01 takes configuration; the gate at 04 is structural.
+The line is fixed. Stations cannot be added, skipped or removed; only station
+01 takes configuration; the gate at 04 is structural — no agent may approve its
+own input, and the server refuses an unapproved spec no matter who asks.
 
----
+## What you get
+
+- **Specs a reviewer can check, claim by claim.** Every design claim is either
+  cited to a retrieved excerpt or flagged `UNVERIFIED`. Citations are validated
+  against what was actually retrieved and judged with **four verdicts**:
+  `supported`, `unsupported` (checked and wrong — no such doc, or no such
+  section), `unknown` (the corpus couldn't answer — the doc never reached the
+  prompt, holds no indexed content, or was cut for budget), and `stale` (the
+  passage is real but describes **code that changed since the doc was last
+  touched**). "I found no evidence" and "no evidence exists" are different
+  answers, and only one of them is safe to write into a spec.
+- **A knowledge graph, not just a vector store.** Five deterministic link kinds
+  (`citation`, `wikilink`, `symbolref`, `mdlink`, `coderef`) extracted with
+  parser rules — **no LLM ever runs at index time**, because a hallucinated
+  edge poisons retrieval invisibly. Retrieval is Reciprocal Rank Fusion over
+  pgvector + Postgres full-text, then a one-hop expansion across the graph,
+  every added chunk carrying the edge that pulled it in.
+- **Code-aware.** specd indexes the repository's file tree and its declarations
+  (TypeScript, Go, Python — line-based tier, graded against real compilers,
+  see [Evals](#evals)). A doc citing `RunnerJobsService.claim()` resolves to
+  the real symbol; retrieval serves the function's **actual source** as a
+  citable excerpt; and when the code moves on without the doc, both the doc's
+  health and the spec's citation say so.
+- **Drift measured against the code, not the calendar.** Doc↔code coupling is
+  mined from a bounded window of git history — *"6 commits touched
+  `apps/api/src/runners/` since this doc last moved with it"* names the code to
+  go read, where a 90-day timer only measures time passing.
+- **Honest signals, everywhere.** Truncation notices fire only when matching
+  material was really cut. Freshness says "unmeasured" rather than "fresh" when
+  it cannot know. Health counts broken links, dangling anchors, orphans and
+  stale code references as numbers the UI can badge — and they move the score.
+- **Operations that survive contact.** Index runs are queued rows woken by
+  Postgres `LISTEN/NOTIFY` (no broker — Postgres is the only runtime
+  dependency), claimed with `FOR UPDATE SKIP LOCKED`, wrapped in one
+  transaction with **shrink guards** that roll back a run trying to delete
+  rows nobody authorised. Jobs abandoned by a dead runner are reclaimed by
+  lease. Run logs stream live over SSE, across API instances.
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph repo["your repository (git = source of truth)"]
+        K["knowledge/**.md"]
+        SRC["src/**"]
+    end
+    W["merge webhook"] -->|queued row + NOTIFY| IDX
+    repo -.-> W
+    subgraph engine["specd (Postgres is the only store)"]
+        IDX["indexer<br/>chunk · embed · links · symbols · coupling<br/>one transaction, shrink-guarded"]
+        PG[("docs · chunks · links<br/>code nodes · coupling")]
+        RET["retrieval<br/>RRF → doc-graph hop → code snippets"]
+        AGENT["SpecAgent<br/>drafts, cites, four verdicts"]
+    end
+    IDX --> PG
+    PG --> RET
+    RET --> AGENT
+    AGENT -->|"cited spec"| GATE["named human approves"]
+    GATE -->|"build on spec/<id> branch"| PR["PR / MR — you merge"]
+    PR -->|merge| W
+```
+
+The loop closes on merge: delivered work re-indexes, the as-built spec lands in
+`knowledge/specs/`, and the next spec retrieves it.
 
 ## Quick start
 
-```bash
-cp .env.example .env          # dev defaults work as-is
-pnpm install
-pnpm infra:up                 # Postgres + pgvector
-pnpm db:migrate
-pnpm db:seed                  # creates a fixture git repo to onboard
+### Prerequisites
 
-pnpm dev                      # API on :4000, web on :3000
+| You need | Why |
+| --- | --- |
+| **Node ≥ 22** and **pnpm 10.32.1** | The workspace pins pnpm via `packageManager` — run `corepack enable` once and the right version is used automatically. |
+| **Docker** | Postgres with the `vector` extension (`pgvector/pgvector:pg17`, provisioned by `docker-compose.yml`). Postgres is specd's *only* runtime dependency. |
+| **Go ≥ 1.25** *(optional)* | Only for building the `specd` CLI. The platform runs without it. |
+| **Claude Code CLI or an Anthropic API key** *(optional)* | Only for agent runs. Everything else — indexing, retrieval, the graph, health — works with neither. |
+
+### 1 · Clone and configure
+
+```bash
+git clone https://github.com/unitypark/specd.git
+cd specd
+cp .env.example .env
 ```
 
-Open <http://localhost:3000>, create an account, and run the wizard.
+`.env` only needs to **exist** — the dev defaults work as-is, and nothing needs
+sourcing into your shell: the API, the migration runner and Next.js each load
+the repo-root `.env` themselves. The file ships with a dev database URL, a dev
+JWT secret and a dev vault key; every value you'd change for a real environment
+is commented with what it does and how to generate it.
 
-To exercise the whole pipeline headlessly:
+### 2 · Install
+
+```bash
+corepack enable   # once per machine — activates the pinned pnpm
+pnpm install
+```
+
+### 3 · Start Postgres
+
+```bash
+pnpm infra:up
+```
+
+One container: `specd-postgres` (pgvector on Postgres 17), mapped to host port
+**5433** so it can never collide with a Postgres you already run on 5432. Data
+lives in a named volume and survives restarts — leave it running across
+sessions.
+
+### 4 · Create the schema
+
+```bash
+pnpm db:migrate
+```
+
+Applies plain-SQL migrations in filename order, each in its own transaction,
+tracked in `_specd_migrations` — idempotent, so it is also the command to run
+after pulling commits that added a migration. The SQL is authored rather than
+generated because the schema uses pgvector types, generated `tsvector` columns
+and partial indexes a diff tool cannot express.
+
+### 5 · Seed a playground
+
+```bash
+pnpm db:seed
+```
+
+Writes a small **fixture git repository** to onboard against, so you can walk
+the entire pipeline without connecting anything real.
+
+### 6 · Run it
+
+```bash
+pnpm dev
+```
+
+Two processes in parallel: the **API** on `:4000` (NestJS, restarts itself on
+save) and the **web app** on `:3000` (Next.js, fast refresh). Ctrl-C stops
+both; Postgres stays up independently.
+
+### 7 · Verify it's actually up
+
+```bash
+curl http://localhost:4000/api/health
+```
+
+```json
+{ "status": "ok", "database": "up", "ai": "no platform key (BYO key per project)",
+  "embeddings": "hash", "defaultModel": "claude-opus-5" }
+```
+
+`"ai"` saying no key is configured is normal and honest — agent runs will fail
+with a clear error until a project supplies one, and nothing else cares.
+
+### 8 · Walk the loop
+
+Open <http://localhost:3000>, create an account, and the wizard takes you
+through the stations:
+
+1. **Connect** — register the seeded fixture repo (or your own: a local path,
+   a GitHub App installation, or a GitLab token).
+2. **Ground** — onboarding scans the repo and opens a **setup PR/branch**
+   containing `AGENTS.md` and a `knowledge/` scaffold. Every claim the scan
+   could not verify is marked `UNVERIFIED` — the wizard does not pretend to
+   know your architecture.
+3. **Adopt** — merge the setup branch. Merging *is* the adoption signal;
+   specd indexes `knowledge/` the moment the webhook lands (local mode has an
+   "I merged it" button instead).
+4. **Spec** — create a ticket on the board, hit *Draft spec*. The SpecAgent
+   retrieves from your knowledge base and drafts requirements (EARS-shaped),
+   design claims with citations, and tasks.
+5. **The gate** — a named human reviews and approves. This is enforced in the
+   state machine *and* a database CHECK constraint: an approved spec without
+   an approver cannot exist even via a direct write.
+6. **Build** — the build agent implements the tasks, one commit each, on the
+   spec's own branch, and opens a PR. It never touches your working tree and
+   never pushes to a default branch.
+7. **Learn** — you merge, the webhook fires, the as-built spec is filed into
+   `knowledge/specs/`, and the index refreshes. The next spec starts better.
+
+Or exercise the whole thing headlessly over the real HTTP API:
 
 ```bash
 pnpm --filter @specd/api loop
 ```
 
-That walks Connect → Ground → Spec → gate → CLI handoff → Learn over the real
-HTTP API and reports each station. Steps that need a model are **skipped and
-labelled**, never silently passed.
+Steps that need a model are **skipped and labelled**, never silently passed.
 
 ### Giving it a model
 
-Three ways in (§P3), and the wizard preflights which of them this machine can
-actually do.
+Three ways in, and the wizard preflights which of them this machine can do:
 
-**Your Claude subscription** — no API key. specd drives the Claude Code
+**Your Claude subscription — no API key.** specd drives the Claude Code CLI
 already signed in on this machine:
 
 ```bash
 export SPECD_AI_MODE=subscription_runner
-pnpm --filter @specd/api loop        # 22 passed, 0 skipped
 ```
 
-This is D2's self-hosted runner path, and the constraint is the architecture,
-not a limitation: specd never sees, stores or proxies a subscription
-credential — it shells out to a CLI that is already logged in. A *hosted*
-specd therefore cannot offer this mode at all. Runs consume your subscription
-quota, so they record tokens but are **not** metered in euros.
+The constraint is the architecture, not a limitation: specd never sees, stores
+or proxies a subscription credential — it shells out to a CLI that is already
+logged in, which also means a *hosted* specd cannot offer this mode at all.
+Runs consume your subscription quota, so they record tokens but are not metered
+in euros. The reply has no schema guarantee, so it is shape-checked with one
+repair attempt before giving up.
 
-Two things it does not inherit from the Messages API, both handled in code:
-there is no schema guarantee (the reply is shape-checked, with one repair
-attempt before giving up), and there is no per-call billing.
-
-**An API key** — works from anywhere, schema-enforced, metered per token:
+**An API key** — works from anywhere, schema-enforced, metered per token from a
+rate card in integer EUR cents (floats never touch money):
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-With neither, specd still runs end to end: onboarding writes the template
-scaffold (every claim marked `UNVERIFIED`), and spec generation fails with a
-clear error rather than inventing content.
-
----
+**Neither** — specd still runs end to end: onboarding writes the scaffold with
+every claim marked `UNVERIFIED`, and spec generation fails with a clear error
+rather than inventing content.
 
 ## Runbook
 
-### Prerequisites
+Day-two development — evals, migrations, working on the index, the traps —
+lives in [`knowledge/runbooks/local-dev.md`](knowledge/runbooks/local-dev.md).
+The essentials:
 
-- Node ≥ 22, pnpm `10.32.1` (pinned via `packageManager` — `corepack enable` picks it up)
-- Docker, for Postgres + pgvector (`docker-compose.yml`)
-
-### First run
-
-```bash
-cp .env.example .env
-pnpm install
-pnpm infra:up      # Postgres on :5433 (docker compose)
-pnpm db:migrate
-pnpm db:seed       # writes a fixture git repo to onboard
-pnpm dev           # API on :4000, web on :3000
-```
-
-`.env` only needs to **exist** — nothing needs sourcing into your shell first.
-`apps/api`'s server and `packages/db`'s migration runner both load the
-repo-root `.env` themselves before reading anything out of it (the same way
-Next.js already does for `apps/web`), so a plain `pnpm dev` right after
-`cp .env.example .env` works. Missing `.env` still fails loudly — see
-Troubleshooting.
-
-### Restarting
-
-`pnpm dev` runs the API (`--watch`, restarts itself on save) and the web app
-(Next.js, fast refresh) in parallel; Ctrl-C stops both. `pnpm infra:up` /
-`pnpm infra:down` control Postgres independently — leave it
-running across sessions, there's no reason to tear it down between restarts
-of `pnpm dev` itself.
-
-### Verify it's actually up
+### Verify before a PR
 
 ```bash
-curl http://localhost:4000/api/health
-open http://localhost:3000
+pnpm typecheck && pnpm test
 ```
+
+That is the whole gate — CI runs exactly the same two commands against a real
+pgvector service, then **fails the run if the Postgres-dependent suites skipped
+themselves** instead of passing (they self-skip when no database is reachable,
+which keeps a laptop without Docker green — and would otherwise make a broken
+CI database look like a pass).
 
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `DATABASE_URL is required — copy .env.example to .env` (API), or `db:migrate`'s `DATABASE_URL is not set` | No `.env` at the repo root yet | `cp .env.example .env`, then retry. This is the one thing auto-loading cannot paper over — there is nothing to load. |
-| Same error, and `.env` already exists | It's not at the repo root, or the value is empty | `grep DATABASE_URL .env` from the repo root should print a real value — the loader looks there specifically, not at the shell's `cwd`. |
-| API can't reach Postgres (connection refused) | `pnpm infra:up` was never run, or Docker isn't running | `docker ps` should list `specd-postgres`, `healthy`. Run `pnpm infra:up` if not. |
-| `EADDRINUSE` on `:3000` or `:4000` | A previous `pnpm dev` is still running elsewhere | `lsof -nP -iTCP:3000 -sTCP:LISTEN` (swap the port), stop that process, then start a new one. |
-| A schema-shaped error right after pulling new commits | New migrations landed | `pnpm db:migrate` — idempotent, applies only what's new (tracked in `_specd_migrations`). |
-| Web dev server starts 500ing everything after a `pnpm build` | `next build` and `next dev` both write `apps/web/.next`, in incompatible shapes — running the former while the latter is live corrupts it | Don't run `pnpm build` against an `apps/web` a dev server is using. If it already happened: stop the dev server, `rm -rf apps/web/.next`, `pnpm --filter @specd/web dev` again. |
+| `DATABASE_URL is required — copy .env.example to .env` | No `.env` at the repo root yet | `cp .env.example .env`, then retry. |
+| Same error, `.env` exists | Not at the repo root, or the value is empty | `grep DATABASE_URL .env` from the repo root should print a real value — the loader looks there, not at the shell's `cwd`. |
+| API can't reach Postgres | `pnpm infra:up` never ran, or Docker is down | `docker ps` should list `specd-postgres` as `healthy`. |
+| `EADDRINUSE` on `:3000`/`:4000` | A previous `pnpm dev` is still running | `lsof -nP -iTCP:3000 -sTCP:LISTEN`, stop it, retry. |
+| Schema-shaped error right after pulling | New migrations landed | `pnpm db:migrate` — idempotent. |
+| Web dev server 500s after `pnpm build` | `next build` and `next dev` share `apps/web/.next` in incompatible shapes | Stop the dev server, `rm -rf apps/web/.next`, start it again. |
+| Whole test file reports *skipped* | No database — or the suite's own `beforeAll` threw | Bring Postgres up; if it persists, suspect the suite's setup, not the database. |
 
 ### Resetting
 
-No script wipes data — `pnpm infra:down` is a plain `docker compose down`, so
-the named volume (`specd-pgdata`) survives it. For a true
-reset: `docker compose down -v`, then `pnpm infra:up && pnpm db:migrate && pnpm db:seed`.
+`pnpm infra:down` is a plain `docker compose down` — the data volume survives.
+For a true reset: `docker compose down -v`, then
+`pnpm infra:up && pnpm db:migrate && pnpm db:seed`.
 
----
+## The knowledge engine
 
-## What is here
+The part of specd that makes the specs worth trusting. Design notes live in
+[`knowledge/architecture.md`](knowledge/architecture.md) and the ADRs under
+[`knowledge/decisions/`](knowledge/README.md#decisions); the shape:
 
-| Path | What it is |
-| --- | --- |
-| `apps/api` | NestJS API — auth, projects, the pipeline, agents, knowledge index |
-| `apps/web` | Next.js — landing, wizard, dashboard, board, spec review, knowledge, runs |
-| `apps/runner` | `@specd/runner` — the self-hosted daemon that claims and executes jobs |
-| `cli` | `specd` — Go, single static binary (`pnpm cli:build`) |
-| `packages/shared` | Spec lifecycle, EARS rendering, model rate card, cost metering |
-| `packages/db` | Drizzle schema + SQL migrations (Postgres + pgvector) |
-| `packages/templates` | `AGENTS.md`, `CLAUDE.md` and the `knowledge/` scaffold — also what `/templates` renders |
+**Indexing is deterministic and atomic.** Docs are chunked on headings,
+embedded, and their links extracted with parser rules — no model call ever runs
+in the indexer. Every write of an index run lands in one transaction guarded
+two ways: a refusal to commit a run that would gut the index (an empty listing
+against a non-empty index is refused at any size), and a provenance check that
+rolls back any run dropping edges from docs it never touched. A per-doc content
+sha *plus* an extractor fingerprint decide what to re-index — change the
+chunker or the embedder and unchanged docs re-embed, because two vector spaces
+in one index is incoherence, not staleness.
 
-### Stack
+**Retrieval is three bounded stages.** RRF over pgvector + tsvector (headings
+outrank body text; one doc cannot take every slot), then a one-hop expansion
+across resolved links (edge-kind weighted, hub-gated, query-ranked, budget 4),
+then up to two **code snippets** — the actual source of symbols the seed docs
+reference, read from the repository at retrieval time, fenced in the prompt,
+and citable as `path#Class.method`.
 
-Next.js · NestJS · Postgres + pgvector · Anthropic SDK · Go CLI.
-Boring on purpose (§9) — the only interesting decisions are the VCS adapter
-split and keeping git as the source of truth for knowledge.
+**Nothing pretends.** The default embedder is a deterministic local hash — no
+second API key, works offline, and the README-level truth is that it is
+lexical: the full-text arm carries relevance until you point
+`SPECD_EMBEDDING_PROVIDER=voyage` at a real model (misconfiguring it fails
+loudly rather than degrading silently). Truncation is announced only when real
+matches were cut. A doc with no commit date reports freshness *unmeasured*,
+not fresh.
 
----
+## Evals
 
-## The invariants, and where they are enforced
+Quality is graded, not asserted — `pnpm eval`, results committed under
+[`evals/results/`](evals/README.md). Extraction is scored against **independent
+oracles** that share no assumptions with the code they grade:
 
-These are the properties the product sells. Each is enforced in code, not by
-convention, and each has a test.
+| What | Oracle | Corpus | Score |
+| --- | --- | --- | --- |
+| Symbol extraction (TS) | the TypeScript compiler | this repo, 1,102 declarations | 98.7% precision · 100% recall |
+| Symbol extraction (Go) | `go/parser` | **Go stdlib**, 7,654 files / 316k declarations | **99.5% F1** |
+| Symbol extraction (Python) | the `ast` module | **Python stdlib**, 3,830 files / 94k declarations | **99.4% F1** |
+| Retrieval | 15 labelled questions | this repo's knowledge base | 100% recall · 0.861 MRR |
 
-**Only a named human can approve.**
-`SpecsService.transition` refuses `approved` without an actor; the state machine
-refuses illegal jumps; and a database CHECK constraint rejects an approved row
-with no approver, so even a direct write cannot record an unattributed approval.
-
-**The gate cannot be routed around.**
-`specd spec pull` is refused server-side for anything unapproved — the CLI is a
-thin client (D13) and gets a 409 no matter what it asks for. CLI tokens are
-audience-scoped and rejected on every route that authors or approves.
-
-**Approval is not reversible in place.**
-Specs are append-only. `approved → draft` is refused; a v2 supersedes v1 while
-v1 keeps its recorded approval exactly as it was stamped.
-
-**A citation means someone can check it.**
-Every design claim is either cited or flagged `UNVERIFIED`. Citations are
-validated against what was actually retrieved — a plausible-looking path the
-model invented gets demoted to `UNVERIFIED`, because a citation that cannot be
-followed is worse than none: a reviewer skims past it.
-
-**The loop closes.**
-The last task of every spec files the as-built copy to `knowledge/specs/`. If
-the model omits it, it is appended.
-
-**Spend cannot run away.**
-Caps are checked before a run starts, not after it overspends. Cost is metered
-per call from the model rate card in EUR cents — integers, so spend never
-accumulates float drift.
-
-**Agents never push.**
-The build agent gets editing tools only; specd pushes what it produced, and
-only ever to the spec's own branch. The write path is that branch plus a pull
-request on hosted providers, or a branch you diff in local mode. Nothing writes
-to a default branch.
-
-**GitHub cannot be impersonated.**
-The webhook endpoint has to be unauthenticated — GitHub has no specd session —
-so every delivery is HMAC-verified over the raw bytes in constant time before
-the payload is parsed, and an unset secret rejects everything rather than
-waving it through. Deliveries are deduplicated by GitHub's delivery id, and an
-event is acted on only when its repository *and* installation match a
-registered project.
-
-**Neither can GitLab, by the mechanism GitLab actually offers.**
-GitLab does not sign the body — a webhook carries a secret token instead,
-echoed back verbatim in `X-Gitlab-Token`, compared in constant time, with the
-same fail-closed rule on an unset secret. Deliveries are deduplicated by
-GitLab's per-delivery id, and an event is acted on only when its project id
-(falling back to its namespaced path for repositories added without the
-picker) matches a registered repository.
-
-**Leaving is free.**
-Git holds the knowledge. The platform holds a derived index — embeddings,
-metadata, run history. Delete a project and nothing you would miss is gone.
-
-### Tests
-
-```bash
-pnpm test        # 274 TypeScript tests + the Go CLI suite
-```
-
-The gate, webhook and migration tests run against real Postgres and skip
-themselves if none is reachable, so the suite still works on a laptop with
-nothing running. The migration suite builds a throwaway database and applies
-every migration from zero — the path a deployment takes, and the one that never
-happens locally, where the schema arrives one migration at a time. The runner's
-git layer is likewise tested against the real `git` binary rather than a mock,
-since talking to the actual binary with the machine's actual credentials is the
-whole reason that module exists.
-Webhook signatures are tested with real HMAC and App JWTs with real RSA keys —
-a mocked signer would prove nothing about the only property that matters, which
-is that GitHub can verify what we send. GitLab's webhook trust boundary is a
-token comparison rather than a signature, and is tested the same honest way:
-real constant-time comparisons, not a stubbed-out check.
-
----
+The stdlib numbers are the ones worth quoting — large corpora nobody tuned
+against. The eval harness reports a missing toolchain as *skipped, naming
+which*, and a zero-file corpus as *"none here"* rather than a meaningless 100%.
+Fifteen labelled questions is a regression guard, not a benchmark, and
+[`evals/README.md`](evals/README.md) says so in those words.
 
 ## The CLI
 
 ```bash
-pnpm cli:build      # → ./bin/specd, run it as ./bin/specd
-pnpm cli:install    # → $(go env GOPATH)/bin/specd, and tells you if that is not on PATH
+pnpm cli:build      # → ./bin/specd
+pnpm cli:install    # → $(go env GOPATH)/bin/specd — warns if that's not on PATH
 ```
-
-`cli:install` uses `go install`, so the binary lands in your Go bin directory.
-That directory is often not on `PATH`; the script checks and prints the exact
-`export` line if it is missing. Everything below assumes `specd` is runnable —
-otherwise substitute `./bin/specd`.
 
 ```bash
-specd login                  # device flow — confirm in the browser
-specd use <project>          # set the default project for this machine
-specd projects               # list projects you can see
-specd whoami                 # who this machine is signed in as
-specd logout                 # forget the stored token
-
-specd spec pull CRM-131      # print an approved spec as markdown
-specd spec pull CRM-131 -o spec.md
-specd spec status CRM-131    # lifecycle state; exit 3 when unapproved
-specd specs list             # every spec and its state
+specd login                    # device flow — a human confirms in the browser
+specd use <project>            # default project for this machine
+specd spec pull CRM-131        # print an approved spec as markdown
+specd spec status CRM-131      # lifecycle state; exit 3 when unapproved
 specd specs list --status approved
-
-specd connect .              # register a local repo (code stays on your machine)
+specd connect .                # register a local repo (code stays on your machine)
 specd runner pair XXXXX-XXXXX  # pair this machine as a self-hosted runner
-specd runner token           # print the stored runner token (for the daemon)
-specd open CRM-131           # open the spec in the web app
+specd open CRM-131             # open the spec in the web app
 ```
 
-`specd login` needs the **web app running**, because a human confirms the code
-at `/cli-login` — a machine cannot mint its own token. The token is stored in
-your login keychain on macOS, or `0600` under your config directory elsewhere.
+Run `specd` with no arguments at a TTY and you get an interactive shell — the
+same capabilities as slash commands, arguments prompted rather than remembered
+(`/help` lists all 16). Scripts and CI keep the plain behaviour. See
+[`docs/cli-repl.md`](docs/cli-repl.md).
 
-Run `specd` with no arguments at a terminal and you get an interactive shell
-instead: the same capabilities as slash commands (`/status`, `/spec-pull`,
-`/specs`, `/runner-pair`, `/help` lists all 16), with arguments prompted rather
-than remembered. It opens only when stdin is a TTY, so scripts and CI keep
-getting the plain command behaviour. See
-[`docs/cli-repl.md`](docs/cli-repl.md) and
-[`knowledge/specs/S-104-improve-cli-app-like-claude-code-or-copilot.md`](knowledge/specs/S-104-improve-cli-app-like-claude-code-or-copilot.md).
+The CLI fetches, registers and reports. It never authors, reviews or approves —
+the server refuses those for CLI tokens regardless of what the binary asks.
 
-It fetches, registers and reports. It never authors, reviews or approves —
-those live in the app, and the server refuses them for CLI tokens regardless of
-what this binary asks for.
-
-### Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| `0` | fine |
-| `1` | something went wrong |
-| `2` | usage error |
-| `3` | the spec exists but is **not approved** |
-
-Exit `3` is deliberately distinct from `1`, so a pipeline can tell "not stamped
-yet" from "something broke":
+**Exit codes:** `0` fine · `1` error · `2` usage · `3` **exists but not
+approved** — deliberately distinct, so a pipeline can gate on approval:
 
 ```yaml
-env:
-  SPECD_API: https://specd.example.com/api
-  SPECD_TOKEN: ${{ secrets.SPECD_TOKEN }}
-  SPECD_PROJECT: aurora-crm
-
-steps:
-  - name: Require an approved spec
-    run: |
-      specd spec status "$SPEC_ID"
-      case $? in
-        0) echo "approved — building" ;;
-        3) echo "::error::$SPEC_ID is not approved yet"; exit 1 ;;
-        *) echo "::error::could not reach specd"; exit 1 ;;
-      esac
+- name: Require an approved spec
+  run: |
+    specd spec status "$SPEC_ID"
+    case $? in
+      0) echo "approved — building" ;;
+      3) echo "::error::$SPEC_ID is not approved yet"; exit 1 ;;
+      *) echo "::error::could not reach specd"; exit 1 ;;
+    esac
 ```
-
-### Environment
 
 | Variable | Purpose |
 | --- | --- |
 | `SPECD_API` | API base URL (default `http://localhost:4000/api`) |
 | `SPECD_PROJECT` | default project slug, overriding `specd use` |
-| `SPECD_TOKEN` | token to use instead of the stored one — for CI |
-| `SPECD_WEB` | web app origin; normally learned at login, used by `specd open` |
-| `SPECD_RUNNER_TOKEN` | runner token to use instead of the paired one |
+| `SPECD_TOKEN` | token override — for CI |
+| `SPECD_WEB` | web origin, used by `specd open` |
+| `SPECD_RUNNER_TOKEN` | runner token override |
 
 ## Self-hosted runners
 
-`specd runner pair <code>` pairs a machine to a project — a runner token
-lands in its own keychain slot, separate from a signed-in user's own CLI
-token, and the command verifies outbound connectivity to the API before
-saying so. Generate a pairing code from the project's Settings page.
-
-Once paired, start the daemon that polls for and executes work — `apps/runner`,
-published as `@specd/runner`:
+Pair a machine (`specd runner pair <code>` — code from the project's Settings),
+then start the daemon:
 
 ```bash
 SPECD_RUNNER_TOKEN=$(specd runner token) SPECD_API=http://localhost:4000/api \
   pnpm --filter @specd/runner start
 ```
 
-It claims `spec`, `onboard` and `build` jobs (`POST /runners/jobs/claim`),
-drives the machine's own local Claude Code, and reports back. It never touches
-the database or the knowledge index — the server does that on either side.
-Dispatch happens automatically when a project's AI mode is
-`subscription_runner` and a runner is paired; with no runner paired, the
-synchronous path runs unchanged.
+It claims `spec`, `onboard` and `build` jobs, drives the machine's own local
+Claude Code, and reports back. It never touches the database or the knowledge
+index — the server does that on either side. A job whose runner stops
+heartbeating becomes claimable again after its lease (180s; builds 900s), and
+after three reclaims it is failed as repeatedly abandoned rather than bouncing
+forever.
 
 **A dispatched build clones and pushes with the runner machine's own git
-credentials.** specd sends no VCS token — the runner needs `git` on PATH and
-push access to the repository as itself, which is checked before the first
-model call rather than discovered at the end. That is the same trust story as
-subscription mode, one noun changed: your machine, your auth. Local-provider
-repositories are never dispatched, since their path means nothing on another
-machine. Full detail and the SSH setup one-liner:
-[`docs/runners.md`](docs/runners.md),
-[`knowledge/decisions/0009-build-dispatch-runner-git-credentials.md`](knowledge/decisions/0009-build-dispatch-runner-git-credentials.md).
+credentials** — specd sends no VCS token, and push access is checked before the
+first model call rather than discovered at the end. Details:
+[`docs/runners.md`](docs/runners.md).
 
 ## The Build station
 
-An approved spec can be handed to the hosted runner (§8 stage 5, mode (a)):
+An approved spec can be built from the spec drawer (or
+`POST /projects/:slug/board/specs/:specId/build`). Three properties are
+enforced rather than hoped for:
 
-```
-POST /projects/:slug/board/specs/:specId/build     # or "▶ Build it" in the spec drawer
-```
-
-It implements the tasks in order, one commit each, and leaves a branch for you
-to review. Three properties are enforced rather than hoped for:
-
-- **The gate is re-checked at the point of use.** A build is the first moment
-  agent output reaches code, so "is this approved?" is asked again — an
-  unapproved spec gets the same 409 the CLI gets.
+- **The gate is re-checked at the point of use** — an unapproved spec gets the
+  same 409 the CLI gets, at the moment agent output would first reach code.
 - **The agent gets editing tools only — never a shell.** specd runs the repo's
-  own verify command itself, so nothing a model emits becomes a shell command.
-- **It never touches your working tree.** Local builds run in a throwaway git
-  worktree on `spec/<id>-<slug>`; GitHub and GitLab builds run in a shallow
-  clone in a scratch directory. The branch survives, the workspace does not —
-  an interrupted build cannot leave you on an unexpected branch.
+  own verify command itself.
+- **It never touches your working tree.** Local builds use a throwaway git
+  worktree; hosted builds a shallow clone in a scratch directory. The branch
+  survives; the workspace does not.
 
-The as-built spec is written by specd, not the model — it is a verbatim record
-of what was approved, and asking a model to reproduce it would invite drift in
-the one document meant to be exact.
+The as-built spec is written by specd, not the model — a verbatim record of
+what was approved. Verify results distinguish **failed** (your tests ran and
+did not pass) from **could not run** (toolchain missing) — different problems,
+different reviewers.
 
-Builds run for minutes, so the request returns a `runId` immediately and the
-work streams to the run log. Verify results distinguish **failed** (your tests
-ran and did not pass) from **could not run** (the toolchain or dependencies are
-missing) — those mean very different things to a reviewer.
+## Integrations
 
-On GitHub or GitLab the branch is pushed and a PR or MR opened, described with
-what was approved, by whom, and whether verify actually ran. In local mode the
-branch is simply left in your repository. Hosted builds need the Claude Code
-CLI either way.
-
-## GitHub
-
-specd talks to GitHub as an **App**, not as a user with a token. An App's
-credential mints repository-scoped tokens that expire within the hour and reach
-only the repositories someone explicitly granted; a PAT carries its creator's
-full authority over everything they can see, forever.
-
-Register it in one click with the API running:
-
-```
-open http://localhost:4000/api/github/app/register     # add ?org=your-org for an org
-```
-
-It asks for `contents:write`, `pull_requests:write` and `metadata:read`. That is
-the whole list — no workflows, no packages, no org administration. **specd never
-pushes to your default branch.** Every change an agent makes arrives as a branch
-and a PR, and stops there until you merge it.
-
-Full walkthrough, including webhook forwarding for local dev:
+**GitHub — as an App, not a PAT.** Repository-scoped tokens that expire within
+the hour, three permissions (`contents:write`, `pull_requests:write`,
+`metadata:read`), registered in one click with the API running:
+`open http://localhost:4000/api/github/app/register`. Webhook deliveries are
+HMAC-verified over raw bytes in constant time before parsing; an **unset secret
+rejects everything** rather than waving it through; every delivery is recorded
+with what specd decided — including the ones it ignored. Walkthrough:
 [`docs/github-app.md`](docs/github-app.md).
 
-### Merging is adopting
+**Merging is adopting.** The merge *is* the signal — setup branch merged →
+adoption recorded and `knowledge/` indexed; `spec/…` branch merged → spec
+marked delivered and re-indexed; anything touching `knowledge/` on the default
+branch → re-indexed. Closing a PR without merging changes nothing, on purpose.
 
-Once the webhook is delivering, the merge *is* the signal — there is no button
-to press afterwards:
+**GitLab** — gitlab.com and self-managed, connected with an access token
+(GitLab has nothing App-shaped). Same adapter interface, same branch-and-MR
+write path, same fail-closed webhook rule using the mechanism GitLab actually
+offers (token echo, constant-time compare). Walkthrough:
+[`docs/gitlab.md`](docs/gitlab.md).
 
-| What merged | What specd does |
-|---|---|
-| The setup branch | Records adoption, indexes `knowledge/` |
-| A `spec/…` branch | Marks the spec **delivered**, re-indexes so the as-built spec grounds the next one |
-| Anything touching `knowledge/` on the default branch | Re-indexes |
+**Jira** — connect, import issues, backlink comments and status mirroring work
+from the wizard; sync is **one-way** (see [status](#project-status)).
+Walkthrough: [`docs/jira.md`](docs/jira.md).
 
-Closing a PR without merging is a rejection and changes nothing. That
-asymmetry is deliberate: adoption should require the same act as any other
-change to your codebase.
+## The invariants, and where they are enforced
 
-The webhook endpoint is unauthenticated by necessity — GitHub has no specd
-session — so its signature check is the only thing guarding it. Every delivery
-is HMAC-verified over the raw bytes in constant time before the payload is
-parsed, deliveries are deduplicated by GitHub's delivery id so a retry cannot
-re-run an index, and an event is acted on only if its repository *and*
-installation match a registered project. **An unset `GITHUB_WEBHOOK_SECRET`
-rejects everything** — it never means "skip the check", so a forgotten variable
-cannot become an open write endpoint.
+Each is enforced in code, not by convention, and each has a test.
 
-Every delivery is recorded with what specd decided and why, including the ones
-it ignored:
+- **Only a named human can approve.** The state machine refuses `approved`
+  without an actor, and a database CHECK constraint rejects an approved row
+  with no approver — a direct write cannot record an unattributed approval.
+- **The gate cannot be routed around.** `specd spec pull` is refused
+  server-side for anything unapproved; CLI tokens are audience-scoped and
+  rejected on every route that authors or approves.
+- **Approval is append-only.** `approved → draft` is refused; v2 supersedes v1
+  while v1 keeps its stamp exactly as recorded.
+- **A citation means someone can check it.** Validated against what was
+  actually retrieved; invented paths are demoted to `UNVERIFIED`, because a
+  citation that cannot be followed is worse than none.
+- **The loop closes.** The last task of every spec files the as-built copy; if
+  the model omits it, it is appended.
+- **Spend cannot run away.** Caps are checked before a run starts. Money is
+  integer EUR cents.
+- **Agents never push.** Editing tools only, the spec's own branch only,
+  never a default branch.
+- **Webhooks cannot be impersonated.** GitHub: HMAC over raw bytes, constant
+  time, before parsing. GitLab: token echo, constant time. Both fail **closed**
+  on an unset secret, dedupe by delivery id, and act only for a registered
+  repository.
+- **Leaving is free.** Git holds the knowledge; the platform holds a derived
+  index. Delete a project and nothing you would miss is gone.
 
+## Repository map
+
+| Path | What it is |
+| --- | --- |
+| `apps/api` | NestJS API — auth, projects, pipeline, agents, the knowledge engine |
+| `apps/web` | Next.js — landing, wizard, dashboard, board, spec review, knowledge, runs |
+| `apps/runner` | The self-hosted daemon that claims and executes jobs |
+| `cli` | `specd` — Go, single static binary |
+| `packages/shared` | Spec lifecycle, EARS rendering, model rate card, cost metering |
+| `packages/db` | Drizzle schema + plain-SQL migrations (Postgres + pgvector) |
+| `packages/templates` | `AGENTS.md`, `CLAUDE.md` and the `knowledge/` scaffold |
+| `evals` | Quality grading against independent oracles — see [Evals](#evals) |
+| `knowledge/` | specd's own knowledge base — the product eats its own food |
+
+**Stack:** Next.js · NestJS · Postgres + pgvector · Anthropic SDK · Go CLI.
+Boring on purpose — Postgres is the only runtime service, and
+[`knowledge/decisions/0008-remove-unused-queue.md`](knowledge/decisions/0008-remove-unused-queue.md)
+is the decision that keeps it that way.
+
+specd develops specd: this repository's own `knowledge/` is a live instance of
+the product's knowledge base — ADRs, runbooks, as-built specs, and the research
+that shaped the engine. Start at
+[`knowledge/README.md`](knowledge/README.md).
+
+## Project status
+
+Honest, because the wizard must not lie and neither should the README:
+
+- **Working today, local-first:** the full Connect → Learn loop, the knowledge
+  engine described above, GitHub App and GitLab integrations, the CLI, the
+  runner with lease-based reclaim, CI.
+- **Not built yet:** a deployment story
+  ([`knowledge/runbooks/deploy.md`](knowledge/runbooks/deploy.md) is the
+  honest inventory); Jira **inbound** sync (moving an issue in Jira does not
+  move the spec, and the adapter has not run against a live Atlassian site);
+  gitlab.com OAuth (token paste only); Stripe billing (spend is metered and
+  capped, not billed); runner concurrency (one job at a time per runner).
+- **A known ceiling, stated:** the default embedder is lexical, so both
+  retrieval arms measure similar signals until you configure a real embedding
+  provider. Everything around it is tuned; the ceiling needs a key or a model.
+
+## Development
+
+```bash
+pnpm typecheck && pnpm test     # the gate — CI runs exactly this
+pnpm eval                       # quality scores (needs DATABASE_URL)
+pnpm --filter @specd/api loop   # headless end-to-end over real HTTP
 ```
-GET /github/projects/:projectId/deliveries
-```
 
-"The webhook arrived and specd chose not to act" and "the webhook never
-arrived" are different problems, and this says which one you have.
+Tests that need Postgres run against the real thing and skip themselves when
+none is reachable; CI fails if they skipped. Webhook signatures are tested with
+real HMAC, App JWTs with real RSA keys, the runner's git layer against the real
+`git` binary, and migrations from zero against a throwaway database — the path
+a deployment takes and the one that never happens locally.
 
-## GitLab
+Working agreements for agents (and the humans reviewing them) are in
+[`AGENTS.md`](AGENTS.md); contribution flow in
+[`CONTRIBUTING.md`](CONTRIBUTING.md); vulnerability reporting in
+[`SECURITY.md`](SECURITY.md).
 
-gitlab.com and self-managed, connected with a personal or project access
-token rather than an App — GitLab has nothing App-shaped to install. The rest
-of the pipeline does not know the difference: the same `VcsAdapter` interface,
-the same branch-and-merge-request write path, the same hosted build station.
+## Acknowledgments
 
-Registering a repository's webhook is a per-project API call rather than a
-one-time App setup, so it can fail on a token below Maintainer — that failure
-degrades the repository to local mode's fallback (the **"I merged it"**
-button) instead of blocking the add. Full walkthrough, including the token
-scope you need and how to connect a project today (there is no browser flow
-yet): [`docs/gitlab.md`](docs/gitlab.md).
+The knowledge engine's design was sharpened against two open-source projects,
+each analysed in depth before a line was written —
+[Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify) and
+[vitali87/code-graph-rag](https://github.com/vitali87/code-graph-rag). What was
+adopted, and what was deliberately not, is recorded as point-in-time research
+in [`knowledge/research/`](knowledge/README.md#research). The original design
+document is [`SPEC-PLATFORM-PLAN.html`](SPEC-PLATFORM-PLAN.html).
 
-## Knowledge and retrieval
+## License
 
-`knowledge/` lives in your repos. specd indexes merged docs into pgvector plus a
-Postgres full-text index, and retrieves with **Reciprocal Rank Fusion** over
-both — RRF needs only each side's ordering, so a weak embedder cannot drag down
-a strong lexical match.
-
-The default embedder is a deterministic local hash — no second API key, works
-offline, and the lexical half carries relevance. Point
-`SPECD_EMBEDDING_PROVIDER=voyage` at a real model and the dense half improves
-without a single query changing.
-
-Knowledge **health** is deliberately simple and explainable: staleness, unfilled
-stubs and remaining `UNVERIFIED` markers, with the reasons listed. A score
-nobody can reason about gets ignored.
-
----
-
-## What is not built yet
-
-Stated plainly, because the plan phases these and the UI should not imply
-otherwise:
-
-- **Jira: inbound sync.** Connecting, importing issues, backlink comments and
-  status mirroring all work from the setup wizard — but the sync is one-way.
-  Moving an issue in Jira does not move the spec. Registering a Jira webhook
-  needs site admin, so that also needs a polling fallback; neither is built,
-  and nor is a UI for the lifecycle → status map (it is set over the API).
-  The adapter is tested against the documented REST contract with a stubbed
-  transport and **has not been run against a live Atlassian site**.
-  See [`docs/jira.md`](docs/jira.md).
-- **gitlab.com OAuth** — the wizard connects a GitLab project with a pasted
-  personal/project access token (validated live) rather than an OAuth button;
-  self-managed instances need a token regardless, since an OAuth app would
-  have to be registered per instance. A gitlab.com app narrowing this to a
-  click is optional wiring on top of the adapter, not built yet.
-- **Runner concurrency and job leases** — a runner claims one job at a time,
-  and a job whose runner dies mid-run stays `running` with nothing to reclaim
-  it. See `docs/runners.md`.
-- **Spend billing** — spend is metered and capped; Stripe is not wired (P3).
-
----
-
-## Configuration
-
-See `.env.example`. The two that matter in any non-local environment:
-
-- `JWT_SECRET` — session signing.
-- `VAULT_MASTER_KEY` — 32 bytes, base64. Wraps every stored credential with
-  envelope encryption; ciphertext is bound to its project and kind, so a row
-  copied between projects is useless rather than portable.
-  Generate with `openssl rand -base64 32`.
-
-Run logs are secret-scrubbed on the way in, not trusted to be clean on the way
-out.
+[MIT](LICENSE) © 2026 Junghwa Theodore Park

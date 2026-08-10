@@ -31,7 +31,7 @@ Workspace packages are scoped `@specd/*` (`@specd/api`, `@specd/web`, `@specd/db
 
 - Vitest is the root devDependency; per-package `test` scripts are run recursively. UNVERIFIED — no `vitest.config` was seen; confirm which packages actually define a `test` script and whether any use a different runner.
 - Go tests for the CLI run under `cli:test` and are gated by `go vet` first.
-- README: 183 tests; the `loop` run under `subscription_runner` reports "22 passed, 0 skipped".
+- The README states the suite size (465 TypeScript tests plus the Go CLI suite) and that the headless `loop` labels model-dependent steps as skipped rather than passing them.
 - **Tests that need Postgres skip themselves when none is reachable** (gate + webhook tests) — the suite must stay green on a machine with no infra. Preserve that behaviour when adding integration tests.
 - README states webhook signatures are tested with real HMAC and App JWTs with real RSA keys, deliberately not mocked. Follow that precedent for signing/verification code.
 

@@ -41,6 +41,7 @@ import { BuildAgent } from './agents/build.agent.js';
 import { WorkspaceService } from './vcs/workspace.js';
 import { PipelineService } from './agents/pipeline.service.js';
 import { IndexQueueService } from './agents/index-queue.service.js';
+import { WebhookRetentionService } from './vcs/webhook-retention.service.js';
 
 import { CliController } from './cli/cli.controller.js';
 
@@ -93,6 +94,7 @@ import { RunnersController } from './runners/runners.controller.js';
     WorkspaceService,
     PipelineService,
     IndexQueueService,
+    WebhookRetentionService,
     RunnersService,
     RunnerJobsService,
     { provide: APP_GUARD, useClass: AuthGuard },

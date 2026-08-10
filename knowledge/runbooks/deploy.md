@@ -95,7 +95,10 @@ Two different things live in Postgres and only one of them is precious.
   because git is the source of truth and the index never outlives it
   ([[0001-adopt-spec-driven]]).
 - **Precious:** everything else. Projects, specs and their approval stamps,
-  runs and their logs, encrypted credentials. Specs are append-only and carry
+  runs and their logs, encrypted credentials. One caveat with a clock on it:
+  webhook delivery records are the audit trail for "why did specd act", and
+  they are pruned after `SPECD_WEBHOOK_RETENTION_DAYS` (default 30) — a backup
+  older than the window is the only place a pruned delivery still exists. Specs are append-only and carry
   the audit trail of who approved what; losing them loses the record the whole
   product exists to keep.
 

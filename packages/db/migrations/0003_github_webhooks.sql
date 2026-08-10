@@ -8,7 +8,11 @@
 -- handled it.
 --
 -- Rows are kept because they are the audit trail for "why did specd do that at
--- 03:00" (§10), and pruned by age rather than never.
+-- 03:00" (§10), and pruned by age rather than never — implemented by
+-- WebhookRetentionService (S-103): strictly older than
+-- SPECD_WEBHOOK_RETENTION_DAYS (default 30) is deleted in batches, daily and
+-- at startup, count logged. received_at is indexed below for exactly that
+-- cutoff scan.
 
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   -- The X-GitHub-Delivery uuid. Not defaulted: it must come from GitHub.

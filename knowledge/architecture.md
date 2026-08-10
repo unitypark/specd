@@ -71,6 +71,25 @@ UNVERIFIED — the DB CHECK constraint should be visible in `packages/db/migrati
 
 UNVERIFIED — no schema file was read. `packages/db/src` holds a Drizzle schema and `packages/db/migrations` has 3 SQL migrations; entities implied by the README are projects, users/actors, specs (versioned, append-only), runs, knowledge/embedding index, and CLI tokens. Read `packages/db/src` before assuming any table or column.
 
+## Knowledge graph vocabulary
+
+<!-- generated:graph-vocabulary — edit graph-schema.ts, not this -->
+
+Deterministically extracted from doc text at index time — no model call is
+made during extraction, because a hallucinated edge poisons retrieval
+invisibly. Weight orders one-hop expansion; it never mixes with RRF scores.
+
+| Kind | Weight | Written as | Meaning |
+| --- | --- | --- | --- |
+| `citation` | 1.0 | per knowledge/architecture.md#auth | An explicit grounding claim — the strongest signal a doc gives about another. |
+| `wikilink` | 0.9 | [[0004-runner-job-dispatch]] · [[S-104]] | A deliberate cross-reference by stem, resolved against doc names and spec ids. |
+| `mdlink` | 0.6 | [text](../decisions/0011-specd-develops-specd.md) | An ordinary markdown link. Intentional, but often navigational rather than evidential. |
+| `pathref` | 0.4 | `decisions/0008-remove-unused-queue.md`, or the same path bare in prose | A mention of a doc by path. Real, and the weakest of the four. |
+
+Resolution states: `resolved`, `unresolved`, `dangling_anchor`. Producer tiers: `deterministic`.
+
+<!-- /generated:graph-vocabulary -->
+
 ## Trust boundaries (as described)
 
 - CLI is a thin client ("D13"): fetches, registers, reports; never authors, reviews or approves.

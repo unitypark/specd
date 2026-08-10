@@ -176,8 +176,12 @@ down rather than rediscovered:
   never created.~~ Created 2026-08-10 as
   `knowledge_doc_links_pending_idx`, partial on `resolution_state <> 'resolved'`
   — the rows every one of those queries is looking for are the minority.
-- Expansion provenance carries a readable `viaEdge` label, not the edge id the
-  requirement asks for, so a chunk cannot be joined back to the row that
-  pulled it in.
+- ~~Expansion provenance carries a readable `viaEdge` label, not the edge id
+  the requirement asks for.~~ Met 2026-08-10: expanded chunks carry
+  `viaEdgeId` alongside the label, and the run log prints it, so provenance
+  joins back to the row instead of being parsed out of a sentence. Expanded
+  chunks also carry a real discounted score (seed score × edge weight × 0.5)
+  rather than zero; ordering is unchanged, since expansion is appended and
+  never displaces an RRF pick.
 - The doc *list* API returns no links or backlinks; only the single-doc
   endpoint does, and nothing in the web app calls it yet.

@@ -168,7 +168,12 @@ export class SpecAgent {
     for (const added of graphAdded) {
       // WHY a chunk arrived is part of its provenance — say it where the
       // person watching the run can see it.
-      await run.log(`  graph expansion added ${added.path} (${added.viaEdge ?? 'linked'})`);
+      // The edge id makes this line traceable: two docs can be linked more
+      // than once, and only the id says which of those edges fired.
+      await run.log(
+        `  graph expansion added ${added.path} (${added.viaEdge ?? 'linked'}` +
+          `${added.viaEdgeId ? `, edge ${added.viaEdgeId}` : ''}, score ${added.score.toFixed(4)})`,
+      );
     }
     if (retrieval.truncatedCount > 0) {
       await run.log(

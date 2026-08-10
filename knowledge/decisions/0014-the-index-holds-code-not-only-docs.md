@@ -65,7 +65,51 @@ references against it as a `coderef` edge kind.
 - The GitHub tree API truncates on very large repositories. Nothing detects
   that yet; a truncated listing would report live files as missing, which is
   the one way this signal could cry wolf at scale.
-- Symbols are the obvious next layer, and the plan they came from is explicit
-  that the symbol layer is worth roughly a tenth of what a call graph costs
-  (per knowledge/research/code-graph-rag-engine-analysis.md#10-fit-assessment).
-  Spec grounding needs the former.
+- Symbols were the obvious next layer and landed the same day; see the update
+  below.
+
+
+## Update — 2026-08-10: symbols
+
+`kind` is no longer only `file`. Declarations are indexed in the same table and
+a `symbolref` — `` `RunnerJobsService.claim()` `` — resolves against them.
+
+**Extraction is declarative and line-based, not a parser.** That is the tier
+the benchmarked engine uses for languages it has no grammar for, and it buys
+top-level declarations in TypeScript, Go and Python for a few patterns and no
+new dependency. The alternative was promoting a 20 MB compiler from
+devDependency to runtime dependency to find `export class`, which is not a
+trade [[0008-remove-unused-queue]] would recognise. A real parser per language
+is the upgrade path, and the record it produces is shaped so that swapping one
+in changes the producer and nothing downstream.
+
+**A member whose container we indexed, and which is not there, is a finding.**
+This is the rule that makes the kind worth having. `Parent.member` where
+`Parent` is a declaration we know and `member` is not: it was ours, and it is
+gone. Where the container is unknown too, the reference was never ours to check
+and is dropped rather than reported — the same out-of-scope rule paths get.
+
+Measured on this repository, both of the references that fail to resolve are
+real:
+
+- `Config.redisUrl` — removed with the queue in [[0008-remove-unused-queue]].
+- `PipelineService.reindex` — renamed to `enqueueReindex` by
+  [[0012-index-runs-queued-and-woken-by-listen-notify]].
+
+Two ADRs describing changes this repository made, still referenced by name in
+docs that were never updated. Neither was findable before today.
+
+**Scope is the whole tree, referenced files first.** Parsing only the files
+docs already name resolved 2 of 18 references, because most symbols live in
+files a doc discusses without spelling out a path; parsing everything resolves
+16. The order matters more than the cap: when the 200-file cap bites it drops
+the files least likely to be cited, and says in the run log how many it
+skipped.
+
+Two costs, both real. A hosted repository pays one HTTP GET per parsed file
+per index run, which is bounded but not cheap — parsing only what changed since
+the last run is the fix, and needs the per-file content identity the
+`blob_sha` column is reserved for. And an ambiguous qualified name, the same
+`Parent.member` declared in two parsed files, resolves to neither: 56 of 1,027
+symbols here. Guessing which one an author meant is how a citation stops being
+checkable.

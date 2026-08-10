@@ -28,6 +28,7 @@ import { EmbeddingService } from './embeddings.js';
 import { CHUNKER_VERSION, chunkMarkdown, headingAnchor } from './chunker.js';
 import { extractLinks } from './link-extract.js';
 import { couplingFrom, type HistoryCommit } from './history.js';
+import { SYMBOL_EXTENSIONS, extractSymbols, specForPath } from './symbols.js';
 import {
   EDGE_WEIGHT,
   LINK_KINDS,
@@ -60,6 +61,14 @@ const DRIFT_COMMITS = 10;
 const COUPLING_WINDOW_DAYS = 365;
 /** Coupled areas kept per doc. Beyond a handful it stops being a signal. */
 const COUPLING_PER_DOC = 5;
+
+/**
+ * Files parsed for symbols per run. Symbol extraction is demand-driven — only
+ * files the docs actually reference — so this cap is a backstop rather than
+ * the usual limit, and the run log says when it bites. Reading every source
+ * file would mean one HTTP GET per file on a hosted repo.
+ */
+const SYMBOL_FILE_CAP = 200;
 
 /**
  * Bump when link-extraction rules change (S-102). A doc whose content sha is
@@ -249,6 +258,69 @@ export class KnowledgeService {
       }
     }
 
+    // Symbols, for the files the docs point at. Reading happens here, outside
+    // the transaction, because on a hosted repo it is one HTTP GET per file.
+    const referenced = new Set<string>();
+    for (const doc of [...changed, ...relink]) {
+      for (const link of extractLinks(doc.content)) {
+        if (link.kind === 'coderef') referenced.add(link.rawTarget);
+      }
+    }
+    // Docs that did not change this run still reference code; their edges are
+    // already stored, so ask the table rather than re-reading every doc.
+    const storedRefs = await this.handle.sql<{ raw_target: string }[]>`
+      SELECT DISTINCT l.raw_target
+      FROM knowledge_doc_links l
+      JOIN knowledge_docs kd ON kd.id = l.source_doc_id
+      WHERE kd.repository_id = ${repo.id} AND l.kind = 'coderef'
+    `;
+    for (const row of storedRefs) referenced.add(row.raw_target);
+
+    const codeSet = new Set(codePaths);
+    const parseable = [...referenced]
+      .map((raw) => {
+        const cleaned = raw.replace(/^\.\//, '');
+        if (codeSet.has(cleaned)) return cleaned;
+        const suffix = codePaths.filter((p) => p.endsWith(`/${cleaned}`));
+        return suffix.length === 1 ? suffix[0]! : null;
+      })
+      .filter((p): p is string => p !== null && specForPath(p) !== null);
+
+    // Referenced files first, then the rest of the tree. Parsing only what the
+    // docs already name resolved 2 of 18 symbol references on this repository:
+    // most symbols live in files a doc discusses without spelling out a path.
+    // Ordering by reference means the cap, when it bites, drops the files
+    // least likely to be cited rather than an arbitrary slice.
+    const priority = new Set(parseable);
+    const candidates = [
+      ...parseable,
+      ...codePaths.filter((p) => !priority.has(p) && specForPath(p) !== null),
+    ];
+    const toParse = [...new Set(candidates)].slice(0, SYMBOL_FILE_CAP);
+    if (candidates.length > toParse.length) {
+      // No silent truncation: a symbol that resolves for one doc and not
+      // another because of an invisible cap is worse than no symbols.
+      await log(
+        `  symbol extraction capped at ${SYMBOL_FILE_CAP} file(s); ` +
+          `${new Set(candidates).size - toParse.length} source file(s) not parsed`,
+      );
+    }
+
+    const symbolRows: { path: string; qualifiedName: string; kind: string; line: number }[] = [];
+    if (toParse.length > 0) {
+      const sources = await adapter.readFiles(target, toParse).catch(() => []);
+      for (const file of sources) {
+        for (const sym of extractSymbols(file.path, file.content)) {
+          symbolRows.push({
+            path: file.path,
+            qualifiedName: sym.qualifiedName,
+            kind: sym.kind,
+            line: sym.line,
+          });
+        }
+      }
+    }
+
     if (restamped > 0) {
       await log(
         `  ${restamped} unchanged doc(s) re-embedded: chunker/embedder is now ${fingerprint}`,
@@ -288,10 +360,49 @@ export class KnowledgeService {
           FROM unnest(${codePaths}::text[]) AS p
         `;
       }
+      // Symbols share the table with files; a duplicate qualified name across
+      // two parsed files is dropped rather than resolved arbitrarily, which is
+      // the same rule the path resolver uses for ambiguous basenames.
+      const bySymbol = new Map<string, { path: string; kind: string; line: number }>();
+      const ambiguous = new Set<string>();
+      for (const row of symbolRows) {
+        if (bySymbol.has(row.qualifiedName)) ambiguous.add(row.qualifiedName);
+        else bySymbol.set(row.qualifiedName, row);
+      }
+      for (const name of ambiguous) bySymbol.delete(name);
+
+      if (bySymbol.size > 0) {
+        const names = [...bySymbol.keys()];
+        await tx.sql`
+          INSERT INTO code_nodes (project_id, repository_id, kind, path, qualified_name, start_line)
+          SELECT ${repo.projectId}, ${repo.id}, k, p, q, l
+          FROM unnest(
+            ${names.map((n) => bySymbol.get(n)!.kind)}::text[],
+            ${names.map((n) => bySymbol.get(n)!.path)}::text[],
+            ${names}::text[],
+            ${names.map((n) => bySymbol.get(n)!.line)}::int[]
+          ) AS t(k, p, q, l)
+          ON CONFLICT (repository_id, kind, qualified_name) DO NOTHING
+        `;
+      }
+
       const code: ResolvableCode[] = await tx.db
         .select({ id: codeNodes.id, path: codeNodes.path })
         .from(codeNodes)
-        .where(eq(codeNodes.repositoryId, repo.id));
+        .where(and(eq(codeNodes.repositoryId, repo.id), eq(codeNodes.kind, 'file')));
+
+      const symbolRowsStored = await tx.db
+        .select({ id: codeNodes.id, qualifiedName: codeNodes.qualifiedName })
+        .from(codeNodes)
+        .where(and(eq(codeNodes.repositoryId, repo.id), ne(codeNodes.kind, 'file')));
+      const symbols = new Map(symbolRowsStored.map((r) => [r.qualifiedName, r.id]));
+      // Container names, so `Config.redisUrl` can be told from `Foo.bar`: if
+      // the parent is a declaration we indexed and the member is not, the
+      // member was ours and is gone. That is a finding. If the parent is
+      // unknown too, the whole thing was never ours and is silence.
+      const symbolParents = new Set(
+        symbolRowsStored.map((r) => r.qualifiedName.split('.')[0]!),
+      );
       // First segment of every path in the repo. A coderef whose first segment
       // is not one of these was never ours — a Go module path, an npm
       // specifier — and calling it broken is the false alarm S-102's v2
@@ -307,7 +418,7 @@ export class KnowledgeService {
         .where(eq(knowledgeDocs.projectId, repo.projectId));
       const anchors = anchorLookup(tx);
 
-      const scope = { code, ownTopLevel };
+      const scope = { code, ownTopLevel, symbols, symbolParents };
       for (const doc of changed) {
         await writeChunks(tx, doc.docId!, repo.projectId, doc);
         await writeLinks(
@@ -406,6 +517,7 @@ export class KnowledgeService {
           // just rewritten; re-resolving it here against docs would only ever
           // fail and would overwrite a correct verdict.
           ne(knowledgeDocLinks.kind, 'coderef'),
+          ne(knowledgeDocLinks.kind, 'symbolref'),
         ),
       );
     if (pending.length === 0) return;
@@ -1017,13 +1129,13 @@ export class KnowledgeService {
       SELECT
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId} AND resolution_state = 'unresolved'
-            AND kind <> 'coderef')::int AS broken,
+            AND kind NOT IN ('coderef', 'symbolref'))::int AS broken,
         -- Docs pointing at source files that are not there any more. Its own
         -- number: a dead link between docs and a doc describing code that was
         -- deleted are different repairs.
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId} AND resolution_state = 'unresolved'
-            AND kind = 'coderef')::int AS broken_code,
+            AND kind IN ('coderef', 'symbolref'))::int AS broken_code,
         (SELECT count(*) FROM knowledge_doc_links
           WHERE project_id = ${projectId} AND resolution_state = 'dangling_anchor')::int AS dangling,
         (SELECT count(*) FROM knowledge_doc_links
@@ -1121,8 +1233,8 @@ export class KnowledgeService {
       notes.push({
         icon: '🧩',
         text:
-          `${brokenCodeRefs} reference${brokenCodeRefs === 1 ? '' : 's'} to source files that no ` +
-          `longer exist — the doc is describing code that moved or was deleted.`,
+          `${brokenCodeRefs} reference${brokenCodeRefs === 1 ? '' : 's'} to code that is no longer ` +
+          `there — the doc is describing a file or a symbol that moved or was deleted.`,
       });
     }
     if (undeclaredEdges > 0) {
@@ -1292,7 +1404,12 @@ async function writeLinks(
   docs: ResolvableDoc[],
   anchors: AnchorLookup,
   /** The file tree a `coderef` resolves against, and what counts as ours. */
-  scope: { code: ResolvableCode[]; ownTopLevel: Set<string> },
+  scope: {
+    code: ResolvableCode[];
+    ownTopLevel: Set<string>;
+    symbols: Map<string, string>;
+    symbolParents: Set<string>;
+  },
   /** Research records document other people's code; see the coderef branch. */
   kind: KnowledgeDocKind,
 ): Promise<void> {
@@ -1310,6 +1427,26 @@ async function writeLinks(
 
   const rows: (typeof knowledgeDocLinks.$inferInsert)[] = [];
   for (const link of extracted) {
+    if (link.kind === 'symbolref') {
+      const id = scope.symbols.get(link.rawTarget);
+      // A member whose container we indexed, and which is not there: it was
+      // ours and it is gone. Both of this repository's own cases are real —
+      // `Config.redisUrl` went with the queue, `PipelineService.reindex` was
+      // renamed. Where the container is unknown too, the reference was never
+      // ours to check and is dropped rather than reported.
+      if (!id && !scope.symbolParents.has(link.rawTarget.split('.')[0] ?? '')) continue;
+      rows.push({
+        projectId,
+        sourceDocId: docId,
+        kind: link.kind,
+        site: link.site,
+        rawTarget: link.rawTarget,
+        resolvedCodeId: id ?? null,
+        resolutionState: id ? 'resolved' : 'unresolved',
+      });
+      continue;
+    }
+
     if (link.kind === 'coderef') {
       // A research record's paths point into the system it describes, not into
       // this repository — resolving them would report someone else's file tree

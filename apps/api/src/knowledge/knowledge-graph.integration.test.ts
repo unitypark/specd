@@ -626,7 +626,7 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
 
     const health = await service.health(projectId);
     const text = (health.notes as { text: string }[]).map((n) => n.text).join(' | ');
-    expect(text).toMatch(/source files that no longer exist/);
+    expect(text).toMatch(/code that is no longer there/);
 
     // Deleting the file it pointed at is what makes a live reference break.
     files.delete('apps/api/src/live.ts');
@@ -637,6 +637,62 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     ).toBe('unresolved');
 
     files.delete('knowledge/codeuser.md');
+    await service.indexRepository(repo);
+  });
+
+  it('resolves a doc reference to a symbol inside the code it points at', async () => {
+    files.set(
+      'apps/api/src/pay/charge.ts',
+      [
+        'export class ChargeService {',
+        '  async capture(id: string) {',
+        '    return id;',
+        '  }',
+        '}',
+        'export function refund() {}',
+      ].join('\n'),
+    );
+    files.set(
+      'knowledge/payments.md',
+      [
+        '# Payments',
+        '',
+        '## Flow',
+        '',
+        'Capture happens in `apps/api/src/pay/charge.ts` via `ChargeService.capture()`.',
+        'The old `ChargeService.settle()` is gone.',
+        'Unrelated: `SomeVendorSdk.connect()` is not ours at all.',
+        'And `UNVERIFIED` is a marker, not code.',
+      ].join('\n'),
+    );
+    await service.indexRepository(repo);
+
+    const doc = await docByPath('knowledge/payments.md');
+    const { outbound } = await service.docLinks(projectId, doc!.id);
+    const symbols = outbound.filter((l) => l.kind === 'symbolref');
+
+    expect(symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rawTarget: 'ChargeService.capture',
+          state: 'resolved',
+          targetPath: 'apps/api/src/pay/charge.ts',
+        }),
+        // The container is indexed and this member is not, so it was ours and
+        // it is gone — a finding, not noise. Both of this repository's real
+        // cases look exactly like this: Config.redisUrl went with the queue,
+        // PipelineService.reindex was renamed.
+        expect.objectContaining({ rawTarget: 'ChargeService.settle', state: 'unresolved' }),
+      ]),
+    );
+
+    // A container we never indexed means the whole reference was never ours
+    // to check. Silence, not a broken-link warning.
+    expect(symbols.some((l) => l.rawTarget.startsWith('SomeVendorSdk'))).toBe(false);
+    expect(symbols.some((l) => l.rawTarget === 'UNVERIFIED')).toBe(false);
+
+    files.delete('knowledge/payments.md');
+    files.delete('apps/api/src/pay/charge.ts');
     await service.indexRepository(repo);
   });
 

@@ -13,7 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
+    "@anthropic-ai/sdk": "^0.116.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
@@ -21,8 +21,8 @@
     "@specd/shared": "workspace:*",
     "@specd/templates": "workspace:*",
     "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.1",
-    "drizzle-orm": "^0.38.3",
+    "class-validator": "^0.15.1",
+    "drizzle-orm": "^0.45.2",
     "jose": "^5.9.6",
     "postgres": "^3.4.5",
     "reflect-metadata": "^0.2.2",
@@ -34,7 +34,7 @@
     "@swc/core": "^1.15.47",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.11",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },

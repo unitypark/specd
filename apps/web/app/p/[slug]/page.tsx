@@ -143,7 +143,7 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
       {tab === 'board' && <BoardView slug={slug} onChange={reload} />}
       {tab === 'knowledge' && <KnowledgeView slug={slug} />}
       {tab === 'agents' && <AgentsView slug={slug} />}
-      {tab === 'repositories' && <ReposView slug={slug} onChange={reload} />}
+      {tab === 'repositories' && <ReposView slug={slug} projectId={project.id} onChange={reload} />}
       {tab === 'settings' && <SettingsView slug={slug} project={project} onChange={reload} />}
     </AppShell>
   );

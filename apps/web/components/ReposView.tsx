@@ -39,7 +39,21 @@ function hasWebhook(r: Repo, vcsConnectionStatus: string | undefined): boolean {
   return r.provider === 'gitlab' && r.webhookStatus === 'registered';
 }
 
-export function ReposView({ slug, onChange }: { slug: string; onChange: () => void }) {
+interface RemoteRepo {
+  id: string | number;
+  fullName: string;
+  defaultBranch: string;
+}
+
+export function ReposView({
+  slug,
+  projectId,
+  onChange,
+}: {
+  slug: string;
+  projectId: string;
+  onChange: () => void;
+}) {
   // null = not loaded yet — a failed load must not render as "no repositories".
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [vcsConnectionStatus, setVcsConnectionStatus] = useState<string | undefined>(undefined);
@@ -47,6 +61,16 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<Repo | null>(null);
+  const [vcsProvider, setVcsProvider] = useState<string | null>(null);
+
+  // Add-repository panel — the other half of Remove. Which form it shows
+  // follows the project's VCS connection.
+  const [adding, setAdding] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [addPath, setAddPath] = useState('');
+  const [addCheck, setAddCheck] = useState<{ ok: boolean; reason?: string } | null>(null);
+  const [remote, setRemote] = useState<RemoteRepo[] | null>(null);
+  const [remoteSearch, setRemoteSearch] = useState('');
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -57,11 +81,87 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
       );
     // The webhook column degrades gracefully without this — no error surface.
     get<Connection[]>(`/projects/${slug}/connections`)
-      .then((cs) => setVcsConnectionStatus(cs.find((c) => c.kind === 'vcs')?.status))
+      .then((cs) => {
+        const vcs = cs.find((c) => c.kind === 'vcs');
+        setVcsConnectionStatus(vcs?.status);
+        setVcsProvider(vcs?.provider ?? null);
+      })
       .catch(() => undefined);
   }, [slug]);
 
   useEffect(load, [load]);
+
+  async function openAdd() {
+    setAdding(true);
+    setError(null);
+    setAddCheck(null);
+    if (vcsProvider === 'github' || vcsProvider === 'gitlab') {
+      setRemote(null);
+      try {
+        const res = await get<{ repositories: RemoteRepo[] }>(
+          `/${vcsProvider}/projects/${projectId}/repositories`,
+        );
+        setRemote(res.repositories);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not list repositories');
+        setAdding(false);
+      }
+    }
+  }
+
+  async function searchRemote() {
+    if (vcsProvider !== 'gitlab') return;
+    try {
+      const qs = remoteSearch ? `?search=${encodeURIComponent(remoteSearch)}` : '';
+      const res = await get<{ repositories: RemoteRepo[] }>(
+        `/gitlab/projects/${projectId}/repositories${qs}`,
+      );
+      setRemote(res.repositories);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Search failed');
+    }
+  }
+
+  async function checkAddPath() {
+    if (!addPath) return;
+    try {
+      const res = await get<{ ok: boolean; reason?: string }>(
+        `/projects/${slug}/inspect-path?path=${encodeURIComponent(addPath)}`,
+      );
+      setAddCheck(res);
+      if (res.ok && !addName) {
+        setAddName(addPath.replace(/\/+$/, '').split('/').pop() ?? 'repo');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Path check failed');
+    }
+  }
+
+  const addLocal = () =>
+    act('add', async () => {
+      await post(`/projects/${slug}/repositories`, {
+        provider: 'local',
+        name: addName,
+        localPath: addPath,
+        isPrimary: (repos ?? []).length === 0,
+      });
+      setAddName('');
+      setAddPath('');
+      setAddCheck(null);
+      setAdding(false);
+    });
+
+  const addRemote = (r: RemoteRepo) =>
+    act('add', async () => {
+      await post(`/projects/${slug}/repositories`, {
+        provider: vcsProvider,
+        name: r.fullName,
+        externalId: r.id,
+        defaultBranch: r.defaultBranch,
+        isPrimary: (repos ?? []).length === 0,
+      });
+      setAdding(false);
+    });
 
   async function act(id: string, fn: () => Promise<unknown>) {
     setBusy(id);
@@ -80,6 +180,93 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
   return (
     <div>
       {error && <div className="err">{error}</div>}
+
+      <div className="toolbar">
+        <button
+          type="button"
+          className="btn sm"
+          disabled={vcsProvider === null}
+          onClick={() => (adding ? setAdding(false) : void openAdd())}
+        >
+          {adding ? 'Close' : '+ Add repository'}
+        </button>
+      </div>
+
+      {adding && vcsProvider === 'local' && (
+        <div className="card addpanel">
+          <div className="field">
+            <label htmlFor="ar-path">Absolute path</label>
+            <input
+              id="ar-path"
+              value={addPath}
+              onChange={(e) => setAddPath(e.target.value)}
+              onBlur={checkAddPath}
+              placeholder="/Users/you/dev/repo"
+            />
+            {addCheck && !addCheck.ok && (
+              <span className="hint">✗ {addCheck.reason ?? 'not a git repository'}</span>
+            )}
+            {addCheck?.ok && <span className="hint">✓ git repository</span>}
+          </div>
+          <div className="field">
+            <label htmlFor="ar-name">Name</label>
+            <input id="ar-name" value={addName} onChange={(e) => setAddName(e.target.value)} />
+          </div>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy === 'add' || !addPath || !addName || addCheck?.ok !== true}
+            onClick={addLocal}
+          >
+            {busy === 'add' && <span className="spinner" />} Add repository
+          </button>
+        </div>
+      )}
+
+      {adding && (vcsProvider === 'github' || vcsProvider === 'gitlab') && (
+        <div className="card addpanel">
+          {vcsProvider === 'gitlab' && (
+            <div className="inline">
+              <input
+                value={remoteSearch}
+                onChange={(e) => setRemoteSearch(e.target.value)}
+                placeholder="Search repositories…"
+              />
+              <button type="button" className="btn sm" onClick={() => void searchRemote()}>
+                Search
+              </button>
+            </div>
+          )}
+          {remote === null && (
+            <div className="empty">
+              <span className="spinner" /> Listing repositories…
+            </div>
+          )}
+          {remote !== null && remote.length === 0 && (
+            <div className="empty">Nothing visible to this connection.</div>
+          )}
+          {remote !== null && remote.length > 0 && (
+            <ul className="remotelist">
+              {remote
+                .filter((r) => !(repos ?? []).some((have) => have.name === r.fullName))
+                .map((r) => (
+                  <li key={String(r.id)}>
+                    <span className="mono">{r.fullName}</span>
+                    <span className="flexs" />
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={busy === 'add'}
+                      onClick={() => void addRemote(r)}
+                    >
+                      Add
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <table>
         <thead>
@@ -289,6 +476,50 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
         }
         .foot b {
           color: var(--ink-2);
+        }
+        .toolbar {
+          margin-bottom: 0.8rem;
+        }
+        .addpanel {
+          margin-bottom: 1rem;
+        }
+        .inline {
+          display: flex;
+          gap: 0.5rem;
+          margin-bottom: 0.8rem;
+        }
+        .inline input {
+          flex: 1;
+          font: 400 0.958rem/1 var(--sans);
+          padding: 0.45rem 0.6rem;
+          border-radius: 6px;
+          border: 1px solid var(--line-2);
+          background: var(--bg-2);
+          color: var(--ink);
+        }
+        .remotelist {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          overflow: hidden;
+          max-height: 16rem;
+          overflow-y: auto;
+        }
+        .remotelist li {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          padding: 0.5rem 0.8rem;
+          border-bottom: 1px solid var(--line);
+          font-size: 0.9rem;
+        }
+        .remotelist li:last-child {
+          border-bottom: none;
+        }
+        .flexs {
+          flex: 1;
         }
       `}</style>
     </div>

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { clearSession, getToken, getUser, type SessionUser } from '@/lib/api';
+import { Logo } from './Logo';
 
 export function AppShell({
   children,
@@ -58,6 +59,8 @@ export function AppShell({
     <div className="shell">
       <header className="top">
         <Link href="/projects" className="applogo">
+          {/* currentColor: the mark inherits .applogo's ink, no tinting. */}
+          <Logo size={20} />
           spec<i>d</i>
         </Link>
         {crumb && <span className="crumb">{crumb}</span>}
@@ -105,6 +108,13 @@ export function AppShell({
         }
         .flex {
           flex: 1;
+        }
+        /* Scoped here rather than widening the global .applogo — the login
+           page uses that class without a mark and keeps its plain layout. */
+        .shell :global(.applogo) {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.45rem;
         }
         .shell :global(.sitelink) {
           font: 500 0.845rem/1 var(--mono);

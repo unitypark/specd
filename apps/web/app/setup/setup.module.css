@@ -28,6 +28,25 @@
   color: var(--ink-3);
   border-bottom: 1px solid var(--line);
 }
+/* A visited step is a real link back — same layout, hand cursor, ink on hover. */
+.stepbtn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: -0.6rem -0.85rem;
+  padding: 0.6rem 0.85rem;
+  flex: 1;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.stepbtn:hover {
+  color: var(--ink);
+  background: var(--bg-2);
+}
 .step:last-child {
   border-bottom: none;
 }

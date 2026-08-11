@@ -13,6 +13,8 @@ export function ConfirmDialog({
   body,
   confirmLabel,
   requireText,
+  altLabel,
+  onAlt,
   busy,
   error,
   onConfirm,
@@ -23,6 +25,9 @@ export function ConfirmDialog({
   confirmLabel: string;
   /** When set, the confirm button unlocks only once this exact text is typed. */
   requireText?: string;
+  /** Optional middle path (e.g. "keep draft & leave") — plain, not danger. */
+  altLabel?: string;
+  onAlt?: () => void;
   busy?: boolean;
   error?: string | null;
   onConfirm: () => void;
@@ -65,6 +70,11 @@ export function ConfirmDialog({
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>
             Cancel
           </button>
+          {altLabel && onAlt && (
+            <button type="button" className="btn" onClick={onAlt} disabled={busy}>
+              {altLabel}
+            </button>
+          )}
           <button type="button" className="btn danger" disabled={busy || locked} onClick={onConfirm}>
             {busy && <span className="spinner" />} {confirmLabel}
           </button>

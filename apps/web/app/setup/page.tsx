@@ -1,10 +1,12 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { get, post } from '@/lib/api';
+import { del, get, patch, post } from '@/lib/api';
+import { deriveResumeStep, type ResumeConnection } from '@/lib/setup-resume';
 import { AppShell } from '@/components/AppShell';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Pipeline } from '@/components/Pipeline';
 import styles from './setup.module.css';
 
@@ -74,11 +76,33 @@ interface OnboardResult {
   queued?: boolean;
 }
 
-export default function SetupWizard() {
+export default function SetupPage() {
+  return (
+    // useSearchParams needs a Suspense boundary for prerendering.
+    <Suspense fallback={null}>
+      <SetupWizard />
+    </Suspense>
+  );
+}
+
+function SetupWizard() {
   const router = useRouter();
-  const [step, setStep] = useState(1);
+  const search = useSearchParams();
+  const resumeSlug = search.get('resume');
+  // 0 renders no step while a draft loads; a fresh wizard starts at 1.
+  const [step, setStep] = useState(resumeSlug ? 0 : 1);
+  const [maxStep, setMaxStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [discardBusy, setDiscardBusy] = useState(false);
+
+  /** Forward moves record how far the wizard has reached — the rail lets you revisit anything up to there. */
+  function goTo(n: number) {
+    setStep(n);
+    setMaxStep((m) => Math.max(m, n));
+  }
 
   // step 1
   const [name, setName] = useState('');
@@ -155,21 +179,96 @@ export default function SetupWizard() {
     setError(err instanceof Error ? err.message : String(err));
   }
 
+  // Resume a draft: connections are the durable trace of progress, so they
+  // decide the step; everything else re-seeds the form state.
+  useEffect(() => {
+    if (!resumeSlug) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [summary, conns, repoList] = await Promise.all([
+          get<{ id: string; slug: string; name: string; description: string | null; spendCapCents: number }>(
+            `/projects/${resumeSlug}`,
+          ),
+          get<ResumeConnection[]>(`/projects/${resumeSlug}/connections`),
+          get<Repo[]>(`/projects/${resumeSlug}/repositories`),
+        ]);
+        if (cancelled) return;
+        setProject({ id: summary.id, slug: summary.slug, name: summary.name });
+        setName(summary.name);
+        setDescription(summary.description ?? '');
+        setCapEuros(String(Math.round(summary.spendCapCents / 100)));
+        setRepos(repoList);
+        const vcsConn = conns.find((c) => c.kind === 'vcs');
+        if (vcsConn) {
+          setVcs(vcsConn.provider as 'github' | 'gitlab' | 'local');
+        } else if (repoList.some((r) => r.localPath)) {
+          // Local mode adds repos before its connection exists.
+          setVcs('local');
+        }
+        const resumed = deriveResumeStep(conns);
+        setStep(resumed);
+        setMaxStep(resumed);
+      } catch (err) {
+        if (!cancelled) {
+          fail(err);
+          setStep(1);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeSlug]);
+
+  // Reaching Done is what completes setup — from that moment the dashboard
+  // stops calling this a draft. One-way; the server keeps the first stamp.
+  useEffect(() => {
+    if (step !== 6 || !project) return;
+    patch(`/projects/${project.slug}`, { setupComplete: true }).catch(() => undefined);
+  }, [step, project]);
+
   async function createProject() {
     setBusy(true);
     setError(null);
     try {
-      const created = await post<Project & { slug: string }>('/projects', {
-        name,
-        description: description || undefined,
-        spendCapCents: Math.round(Number(capEuros || '100') * 100),
-      });
-      setProject(created);
-      setStep(2);
+      if (project) {
+        // Coming back to step 1 edits the draft in place — it must not mint
+        // a second project.
+        await patch(`/projects/${project.slug}`, {
+          name,
+          description: description.trim() ? description : null,
+          spendCapCents: Math.round(Number(capEuros || '100') * 100),
+        });
+        setProject({ ...project, name });
+      } else {
+        const created = await post<Project & { slug: string }>('/projects', {
+          name,
+          description: description || undefined,
+          spendCapCents: Math.round(Number(capEuros || '100') * 100),
+          draft: true,
+        });
+        setProject(created);
+      }
+      goTo(2);
     } catch (err) {
       fail(err);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function discardProject() {
+    if (!project) return;
+    setDiscardBusy(true);
+    setCancelError(null);
+    try {
+      await del(`/projects/${project.slug}`);
+      router.push('/projects');
+    } catch (err) {
+      setCancelError(err instanceof Error ? err.message : 'Failed to discard');
+      setDiscardBusy(false);
     }
   }
 
@@ -322,14 +421,14 @@ export default function SetupWizard() {
     // validated — advancing here would just re-store the same connection
     // under a busy spinner for nothing.
     if (vcs === 'gitlab' || vcs === 'github') {
-      setStep(3);
+      goTo(3);
       return;
     }
     setBusy(true);
     setError(null);
     try {
       await post(`/projects/${project.slug}/connections/vcs`, { provider: vcs });
-      setStep(3);
+      goTo(3);
     } catch (err) {
       fail(err);
     } finally {
@@ -348,7 +447,7 @@ export default function SetupWizard() {
         { mode: aiMode, apiKey: apiKey || undefined, model },
       );
       setKeyCheck(res);
-      if (res.ok) setStep(4);
+      if (res.ok) goTo(4);
     } catch (err) {
       fail(err);
     } finally {
@@ -418,7 +517,7 @@ export default function SetupWizard() {
       } else {
         await post(`/projects/${project.slug}/connections/tracker`, { provider: tracker });
       }
-      setStep(5);
+      goTo(5);
     } catch (err) {
       fail(err);
     } finally {
@@ -486,31 +585,59 @@ export default function SetupWizard() {
 
   return (
     <AppShell
-      crumb="New project setup"
-      pills={<span className="pill">step {step}/6</span>}
+      crumb={resumeSlug ? 'Resume project setup' : 'New project setup'}
+      pills={step > 0 ? <span className="pill">step {step}/6</span> : undefined}
       actions={
-        <Link href="/projects" className="btn sm">
-          Cancel
-        </Link>
+        project ? (
+          <button type="button" className="btn sm" onClick={() => setCancelOpen(true)}>
+            Cancel
+          </button>
+        ) : (
+          // Nothing exists yet — leaving needs no ceremony.
+          <Link href="/projects" className="btn sm">
+            Cancel
+          </Link>
+        )
       }
     >
       <div className={styles.grid}>
         <ol className={styles.steps}>
-          {STEPS.map((label, i) => (
-            <li
-              key={label}
-              className={`${styles.step} ${i + 1 === step ? styles.on : ''} ${
-                i + 1 < step ? styles.done : ''
-              }`}
-            >
-              <span className={styles.n}>{i + 1 < step ? '✓' : i + 1}</span>
-              {label}
-            </li>
-          ))}
+          {STEPS.map((label, i) => {
+            const n = i + 1;
+            // Any step the wizard has reached is revisitable; jumping ahead
+            // of the line is not — forward is earned by each step's Continue.
+            const navigable = n <= maxStep && n !== step;
+            return (
+              <li
+                key={label}
+                className={`${styles.step} ${n === step ? styles.on : ''} ${
+                  n < step ? styles.done : ''
+                }`}
+              >
+                {navigable ? (
+                  <button type="button" className={styles.stepbtn} onClick={() => setStep(n)}>
+                    <span className={styles.n}>{n < step ? '✓' : n}</span>
+                    {label}
+                  </button>
+                ) : (
+                  <>
+                    <span className={styles.n}>{n < step ? '✓' : n}</span>
+                    {label}
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ol>
 
         <div className={styles.panel}>
           {error && <div className="err">{error}</div>}
+
+          {step === 0 && (
+            <div className="empty">
+              <span className="spinner" /> Loading your draft…
+            </div>
+          )}
 
           {/* ─── 1 · project ─────────────────────────────────────────────── */}
           {step === 1 && (
@@ -552,7 +679,7 @@ export default function SetupWizard() {
                   disabled={!name.trim() || busy}
                   onClick={createProject}
                 >
-                  {busy ? <span className="spinner" /> : 'Continue →'}
+                  {busy ? <span className="spinner" /> : project ? 'Save & continue →' : 'Continue →'}
                 </button>
               </div>
             </>
@@ -1182,7 +1309,10 @@ export default function SetupWizard() {
                     </div>
                   ))}
                   <div className={styles.nav}>
-                    <button type="button" className="btn primary" onClick={() => setStep(6)}>
+                    <button type="button" className="btn" onClick={() => setStep(4)}>
+                      ← Back
+                    </button>
+                    <button type="button" className="btn primary" onClick={() => goTo(6)}>
                       Continue →
                     </button>
                   </div>
@@ -1229,6 +1359,25 @@ export default function SetupWizard() {
         </p>
         <Pipeline />
       </div>
+
+      {cancelOpen && project && (
+        <ConfirmDialog
+          title="Leave setup?"
+          body={
+            <>
+              <b>{project.name}</b> stays as a draft — the dashboard offers to resume it exactly
+              where you stopped — or discard it now and nothing is kept.
+            </>
+          }
+          confirmLabel="Discard project"
+          altLabel="Keep draft & leave"
+          onAlt={() => router.push('/projects')}
+          busy={discardBusy}
+          error={cancelError}
+          onConfirm={discardProject}
+          onCancel={() => setCancelOpen(false)}
+        />
+      )}
     </AppShell>
   );
 }

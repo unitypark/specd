@@ -1,35 +1,46 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { get } from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
+import { del, get } from '@/lib/api';
 import { AppShell } from '@/components/AppShell';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import type { ProjectSummary } from '@/lib/types';
 import styles from './projects.module.css';
-
-interface ProjectSummary {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  repoCount: number;
-  vcsProvider: string | null;
-  trackerKind: string;
-  specsInReview: number;
-  specsBuilding: number;
-  spendCents: number;
-  spendCapCents: number;
-  knowledgeHealth: number;
-}
 
 export default function DashboardPage() {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState<ProjectSummary | null>(null);
+  const [discardBusy, setDiscardBusy] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     get<ProjectSummary[]>('/projects')
       .then(setProjects)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'));
   }, []);
+
+  useEffect(load, [load]);
+
+  async function discard(p: ProjectSummary) {
+    setDiscardBusy(true);
+    setDiscardError(null);
+    try {
+      await del(`/projects/${p.slug}`);
+      setConfirmDiscard(null);
+      load();
+    } catch (err) {
+      setDiscardError(err instanceof Error ? err.message : 'Failed to discard');
+    } finally {
+      setDiscardBusy(false);
+    }
+  }
+
+  // A draft is a wizard that never finished — not a project yet. It gets a
+  // resume/discard row, never a project card pretending to be real.
+  const drafts = projects?.filter((p) => !p.setupComplete) ?? [];
+  const live = projects?.filter((p) => p.setupComplete) ?? [];
 
   return (
     // No action in the shell: "New project" lives on the group it creates into,
@@ -38,7 +49,7 @@ export default function DashboardPage() {
       {error && <div className="err">{error}</div>}
       {!projects && !error && <div className="empty">Loading…</div>}
 
-      {projects && projects.length === 0 && (
+      {projects && live.length === 0 && drafts.length === 0 && (
         <div className={`${styles.firstrun} card`}>
           <h2>Nothing here yet.</h2>
           <p>
@@ -51,11 +62,47 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {projects && projects.length > 0 && (
+      {drafts.length > 0 && (
+        <div className={styles.group}>
+          <div className={styles.grouphead}>
+            <h2>Setup in progress</h2>
+            <span className={styles.count}>{drafts.length}</span>
+          </div>
+          <ul className={styles.drafts}>
+            {drafts.map((p) => (
+              <li key={p.id}>
+                <div>
+                  <b>{p.name}</b>
+                  <span className={styles.draftmeta}>
+                    {p.repoCount} repo{p.repoCount === 1 ? '' : 's'}
+                    {p.vcsProvider ? ` · ${p.vcsProvider}` : ''} · setup never finished
+                  </span>
+                </div>
+                <span className={styles.flex} />
+                <Link href={`/setup?resume=${p.slug}`} className="btn sm primary">
+                  Resume setup →
+                </Link>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => {
+                    setDiscardError(null);
+                    setConfirmDiscard(p);
+                  }}
+                >
+                  Discard
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {projects && live.length > 0 && (
         <div className={styles.group}>
           <div className={styles.grouphead}>
             <h2>Your projects</h2>
-            <span className={styles.count}>{projects.length}</span>
+            <span className={styles.count}>{live.length}</span>
             <span className={styles.flex} />
             <Link href="/setup" className="btn primary">
               + New project
@@ -63,7 +110,7 @@ export default function DashboardPage() {
           </div>
 
           <div className={styles.grid}>
-            {projects.map((p) => {
+            {live.map((p) => {
               const spendPct = p.spendCapCents
                 ? Math.min(100, (p.spendCents / p.spendCapCents) * 100)
                 : 0;
@@ -109,6 +156,35 @@ export default function DashboardPage() {
             })}
           </div>
         </div>
+      )}
+
+      {projects && live.length === 0 && drafts.length > 0 && (
+        <div className={styles.group}>
+          <div className={styles.grouphead}>
+            <span className={styles.flex} />
+            <Link href="/setup" className="btn primary">
+              + New project
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {confirmDiscard && (
+        <ConfirmDialog
+          title={`Discard "${confirmDiscard.name}"?`}
+          body={
+            <>
+              Deletes the unfinished draft and anything attached so far — connections, repositories
+              and any onboarding output on the specd side. Your repositories themselves are
+              untouched.
+            </>
+          }
+          confirmLabel="Discard draft"
+          busy={discardBusy}
+          error={discardError}
+          onConfirm={() => discard(confirmDiscard)}
+          onCancel={() => setConfirmDiscard(null)}
+        />
       )}
     </AppShell>
   );

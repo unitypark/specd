@@ -156,17 +156,29 @@ export class GitHubAppService {
       default_events: ['push', 'pull_request'],
     };
 
-    // GitHub refuses a webhook URL it cannot reach from the public internet,
-    // so a localhost deployment registers without one and adds it later. The
-    // alternative — failing registration outright — would make the App
-    // unregisterable from a laptop, which is where it gets set up.
-    if (isPubliclyReachable(webhookUrl)) {
-      manifest.hook_attributes = { url: webhookUrl, active: true };
-    }
+    // Two GitHub rules meet here and only one arrangement satisfies both:
+    // `hook_attributes.url` is required (leave the object out and the whole
+    // manifest comes back "Hook url cannot be blank / Hook is invalid"), and
+    // the URL must be reachable from the public internet. A localhost
+    // deployment therefore registers with delivery switched off against a
+    // placeholder, rather than being unregisterable from the laptop it is
+    // being set up on. Nothing is ever sent to the placeholder; the operator
+    // swaps it for a real URL when they have one.
+    manifest.hook_attributes = isPubliclyReachable(webhookUrl)
+      ? { url: webhookUrl, active: true }
+      : { url: PLACEHOLDER_WEBHOOK_URL, active: false };
 
     return manifest;
   }
 }
+
+/**
+ * Stands in for a webhook URL GitHub cannot deliver to. `example.com` is
+ * reserved for exactly this (RFC 2606), so it is a real, public host that will
+ * never receive anything — and the path says, in the App's own settings page,
+ * what needs fixing. Paired with `active: false`, so nothing is ever sent.
+ */
+export const PLACEHOLDER_WEBHOOK_URL = 'https://example.com/specd-webhook-not-configured';
 
 /**
  * Could GitHub reach this URL? Loopback, private ranges and made-up TLDs

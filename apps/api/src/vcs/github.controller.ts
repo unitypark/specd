@@ -21,7 +21,11 @@ import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { TokenClaims } from '../auth/auth.service.js';
 import { ConnectionsService } from '../projects/connections.service.js';
 import { ProjectsService } from '../projects/projects.service.js';
-import { GitHubAppService, isPubliclyReachable } from './github-app.service.js';
+import {
+  GitHubAppService,
+  isPubliclyReachable,
+  PLACEHOLDER_WEBHOOK_URL,
+} from './github-app.service.js';
 import { GitHubWebhookService } from './github-webhook.service.js';
 import { GitHubAdapter } from './github.adapter.js';
 import { VcsService } from './vcs.service.js';
@@ -143,12 +147,14 @@ export class GitHubController {
     const noWebhook = !isPubliclyReachable(webhookUrl);
     const warning = noWebhook
       ? `<p style="background:#fff5e6;border-left:3px solid #e8a33d;padding:.75rem 1rem">
-           <strong>Registering without a webhook.</strong> GitHub cannot deliver to
+           <strong>Registering with the webhook switched off.</strong> GitHub cannot deliver to
            <code>${escapeHtml(webhookUrl)}</code> — it is not reachable from the public internet, and
-           GitHub rejects a manifest that says otherwise. The App will work for branches and PRs;
-           merges will not be detected until you give it a public URL. Point
-           <code>API_PUBLIC_URL</code> at a tunnel and re-register, or add the webhook URL later in
-           the App's settings. See <code>docs/github-app.md</code>.
+           GitHub rejects a manifest that says otherwise. The App is registered with delivery
+           disabled, pointing at <code>${escapeHtml(PLACEHOLDER_WEBHOOK_URL)}</code>. It will work
+           for branches and PRs; merges will not be detected until the webhook points somewhere
+           GitHub can reach. Point <code>API_PUBLIC_URL</code> at a tunnel and re-register, or set
+           the URL later under the App's <em>Settings → Webhook</em> and tick <em>Active</em>. See
+           <code>docs/github-app.md</code>.
          </p>`
       : '';
 
@@ -199,13 +205,18 @@ export class GitHubController {
       html_url: string;
     };
 
-    // Registering without a webhook (a localhost deployment) means GitHub has
-    // no secret to hand back. Printing `undefined` into someone's .env would
-    // be worse than useless: an unset secret rejects every delivery, and they
-    // would be hunting a value that was never real.
+    // Printing `undefined` into someone's .env would be worse than useless: an
+    // unset secret rejects every delivery, and they would be hunting a value
+    // that was never real.
     const secretLine = app.webhook_secret
       ? `GITHUB_WEBHOOK_SECRET=${app.webhook_secret}`
-      : '# GITHUB_WEBHOOK_SECRET=  ← no webhook was configured; see the note below';
+      : '# GITHUB_WEBHOOK_SECRET=  ← none returned; generate one under the App’s Settings → Webhook';
+
+    // The same judgement the manifest made, made again from the same config:
+    // if GitHub could not reach us, the App was registered with its webhook
+    // switched off and that has to be said here too — a secret in the box above
+    // does not mean deliveries are coming.
+    const webhookLive = isPubliclyReachable(`${this.config.apiPublicUrl}/api/github/webhook`);
 
     res.type('html').send(`<!doctype html>
 <meta charset="utf-8">
@@ -220,13 +231,16 @@ ${secretLine}
 GITHUB_APP_PRIVATE_KEY="${(app.pem ?? '').replace(/\n/g, '\\n')}"`,
   )}</pre>
   ${
-    app.webhook_secret
+    webhookLive
       ? ''
       : `<p style="background:#fff5e6;border-left:3px solid #e8a33d;padding:.75rem 1rem">
-           <strong>No webhook was configured</strong>, because GitHub could not reach this API.
-           Branches and PRs work; merges will not be detected. When you have a public URL, add it
-           under the App's <em>Settings → Webhook</em>, generate a secret there, and put that secret
-           in <code>GITHUB_WEBHOOK_SECRET</code>.
+           <strong>The webhook is switched off</strong>, because GitHub could not reach
+           <code>${escapeHtml(`${this.config.apiPublicUrl}/api/github/webhook`)}</code>. It points at
+           <code>${escapeHtml(PLACEHOLDER_WEBHOOK_URL)}</code> and delivers nothing. Branches and PRs
+           work; merges will not be detected. When this API has a public URL, set it under the App's
+           <em>Settings → Webhook</em> and tick <em>Active</em>${
+             app.webhook_secret ? ' — the secret above stays valid' : ''
+           }. See <code>docs/github-app.md</code>.
          </p>`
   }
   <p>Then <a href="${escapeHtml(app.html_url)}/installations/new">install it on your repositories</a>.</p>

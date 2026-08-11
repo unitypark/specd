@@ -35,7 +35,9 @@ the next spec starts better than the last.
 </div>
 
 > **Status: pre-1.0, local-first.** specd runs end to end as a development
-> platform on your machine — 470 TypeScript tests plus a Go suite, CI-gated
+<!-- Keep this a floor, not an exact count — exact counts rot within days.
+     Bump when `pnpm test` crosses the next hundred (539 when last raised). -->
+> platform on your machine — 500+ TypeScript tests plus a Go suite, CI-gated
 > against real Postgres. Nothing deploys it as a service yet, and
 > [`knowledge/runbooks/deploy.md`](knowledge/runbooks/deploy.md) says exactly
 > what a first deployment would need rather than pretending one exists.

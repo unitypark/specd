@@ -64,6 +64,11 @@ export function AppShell({
         {pills}
         <span className="flex" />
         {actions}
+        {/* The wordmark is in-app home; this is the way OUT of the app. The
+            dashboard is otherwise a dead end for reaching the site itself. */}
+        <Link href="/" className="sitelink" title="specd.dev — the landing page">
+          specd.dev
+        </Link>
         <button
           type="button"
           className="avatar"
@@ -100,6 +105,17 @@ export function AppShell({
         }
         .flex {
           flex: 1;
+        }
+        .shell :global(.sitelink) {
+          font: 500 0.845rem/1 var(--mono);
+          color: var(--ink-3);
+          text-decoration: none;
+          padding: 0.3rem 0.45rem;
+          border-radius: 6px;
+        }
+        .shell :global(.sitelink):hover {
+          color: var(--ink);
+          background: var(--bg-2);
         }
         .avatar {
           width: 1.8rem;

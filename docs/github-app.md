@@ -53,13 +53,17 @@ http://localhost:4000/api/github/app/register
 Add `?org=your-org` to create it under an organization instead of your personal
 account.
 
-**GitHub will not accept a webhook URL it cannot reach.** If `API_PUBLIC_URL`
-points at localhost or a private address, specd registers the App *without* a
-webhook and says so on the page — branches and PRs work, merges are not
-detected. To get webhooks from the start, set up a tunnel first (below), point
-`API_PUBLIC_URL` at it, restart, and then register. You can also add the URL
-later under the App's Settings → Webhook. The page hands GitHub a manifest with the permissions above and
-redirects back with the credentials, which are shown **once**:
+**GitHub will not accept a webhook URL it cannot reach — and will not accept a
+manifest with no webhook URL at all** (that one fails with *"Hook url cannot be
+blank / Hook is invalid"*, and nothing gets registered). So if `API_PUBLIC_URL`
+points at localhost or a private address, specd registers the App with its
+webhook **switched off**, aimed at a placeholder, and says so on the page —
+branches and PRs work, merges are not detected. To get webhooks from the start,
+set up a tunnel first (below), point `API_PUBLIC_URL` at it, restart, and then
+register. Otherwise fix it later under the App's Settings → Webhook: set the URL
+to `<your API>/api/github/webhook` and tick **Active**. The page hands GitHub a
+manifest with the permissions above and redirects back with the credentials,
+which are shown **once**:
 
 ```
 GITHUB_APP_ID=123456

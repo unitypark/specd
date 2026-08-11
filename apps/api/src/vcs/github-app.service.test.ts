@@ -1,7 +1,11 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createLocalJWKSet, decodeJwt, decodeProtectedHeader, exportJWK, jwtVerify } from 'jose';
-import { GitHubAppService, isPubliclyReachable } from './github-app.service.js';
+import {
+  GitHubAppService,
+  isPubliclyReachable,
+  PLACEHOLDER_WEBHOOK_URL,
+} from './github-app.service.js';
 import type { Config } from '../config.js';
 
 /**
@@ -149,16 +153,39 @@ describe('manifest', () => {
     });
   });
 
-  it('omits the webhook entirely when GitHub could not reach it', () => {
-    // GitHub refuses a manifest whose hook url is not publicly reachable, so a
-    // localhost deployment must register without one — otherwise the App
-    // cannot be registered from a laptop, which is where it gets set up.
+  it('switches the webhook off, rather than omitting it, when GitHub could not reach it', () => {
+    // GitHub refuses a hook url it cannot reach — and it refuses a manifest
+    // with no hook url at all ("Hook url cannot be blank / Hook is invalid"),
+    // which rejects the whole registration. A localhost deployment therefore
+    // registers with delivery disabled against a placeholder, so the App can
+    // still be registered from a laptop, which is where it gets set up.
     const local = service().manifest(
       'http://localhost:4000',
       'http://localhost:4000/api/github/webhook',
     );
-    expect(local.hook_attributes).toBeUndefined();
+    expect(local.hook_attributes).toEqual({ url: PLACEHOLDER_WEBHOOK_URL, active: false });
     expect(local.default_permissions).toBeDefined();
+  });
+
+  it('never hands GitHub a hook url it rejects', () => {
+    // Both halves of the rule, over every shape the deployment URL comes in:
+    // present and non-blank, and itself deliverable.
+    for (const base of [
+      'https://specd.example.com',
+      'http://localhost:4000',
+      'http://127.0.0.1:4000',
+      'http://specd.local',
+      'not a url',
+    ]) {
+      const hook = service().manifest(base, `${base}/api/github/webhook`).hook_attributes as {
+        url: string;
+        active: boolean;
+      };
+      expect(hook?.url, `${base} must produce a hook url`).toBeTruthy();
+      expect(isPubliclyReachable(hook.url), `${base} must produce a reachable hook url`).toBe(true);
+      // Delivery is only claimed where it can actually happen.
+      expect(hook.active).toBe(isPubliclyReachable(`${base}/api/github/webhook`));
+    }
   });
 
   it('is private by default', () => {

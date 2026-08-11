@@ -48,3 +48,11 @@ if (typeof window !== 'undefined' && !window.localStorage) {
     writable: true,
   });
 }
+
+/**
+ * Tell React it is inside a test. Without it, `act()` warns that the
+ * environment does not support it and stops guaranteeing that effects have
+ * flushed by the time an assertion runs — which is the only reason component
+ * tests here can read the DOM straight after rendering.
+ */
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

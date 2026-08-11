@@ -21,6 +21,17 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Fired on the window whenever the stored session appears or disappears.
+ * Views subscribe to it so they all agree about who is signed in: a nav still
+ * offering SIGN IN to someone who just signed in is how people sign in twice.
+ */
+export const SESSION_EVENT = 'specd:session';
+
+function announceSessionChange(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_EVENT));
+}
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return window.localStorage.getItem(TOKEN_KEY);
@@ -29,17 +40,26 @@ export function getToken(): string | null {
 export function getUser(): SessionUser | null {
   if (typeof window === 'undefined') return null;
   const raw = window.localStorage.getItem(USER_KEY);
-  return raw ? (JSON.parse(raw) as SessionUser) : null;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as SessionUser;
+  } catch {
+    // A truncated or hand-edited value is not a session. Throwing would take
+    // down every page that only wanted to know whether to show a sign-in link.
+    return null;
+  }
 }
 
 export function setSession(token: string, user: SessionUser): void {
   window.localStorage.setItem(TOKEN_KEY, token);
   window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+  announceSessionChange();
 }
 
 export function clearSession(): void {
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
+  announceSessionChange();
 }
 
 export async function api<T = unknown>(
@@ -59,6 +79,12 @@ export async function api<T = unknown>(
   const text = await res.text();
 
   if (!res.ok) {
+    // A 401 on a request that carried a token means that token is no longer
+    // good — expired, revoked, or signed with a secret that has since rotated.
+    // Keeping it is how "you are signed in" and "everything fails" coexist,
+    // so it goes, and the event sends whoever is watching back to sign in.
+    if (res.status === 401 && token) clearSession();
+
     let message = text;
     let code: string | undefined;
     try {

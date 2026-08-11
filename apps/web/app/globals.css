@@ -464,6 +464,27 @@ code,
   text-align: center;
 }
 
+/* Skeleton shimmer for first paint. Content-shaped placeholders beat a
+   centered "Loading…": the page keeps its layout while it waits, so nothing
+   jumps when the data lands. */
+.skeleton {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--panel-2) 25%, var(--bg-2) 50%, var(--panel-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
 .err {
   color: var(--danger);
   font: 500 0.92rem/1.6 var(--sans);

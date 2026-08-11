@@ -99,6 +99,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
   // ─── drag between states ──────────────────────────────────────────────────
   const [dragging, setDragging] = useState<Card | null>(null);
   const [hoverCol, setHoverCol] = useState<string | null>(null);
+  const [movingId, setMovingId] = useState<string | null>(null);
 
   async function moveCard(card: Card, toColumn: string) {
     const check = dropCheck(card, toColumn);
@@ -111,15 +112,20 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
 
     setError(null);
     // Optimistic: the card lands where it was dropped, and snaps back if the
-    // server disagrees. A board that waits for a round-trip feels broken.
+    // server disagrees. A board that waits for a round-trip feels broken —
+    // but the card dims until the server confirms, so a slow transition is
+    // visibly still in flight rather than silently settled.
     const previous = cards;
     setCards((cs) => cs.map((c) => (c.id === card.id ? { ...c, columnKey: toColumn } : c)));
+    setMovingId(card.id);
     try {
       await post(`/projects/${slug}/board/specs/${card.spec.id}/transition`, { to });
       await load();
     } catch (err) {
       setCards(previous);
       setError(err instanceof Error ? err.message : 'Could not move that card.');
+    } finally {
+      setMovingId(null);
     }
   }
 
@@ -267,8 +273,20 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
               })
             }
           >
-            Create ticket
+            {busy === 'ticket' && <span className="spinner" />} Create ticket
           </button>
+        </div>
+      )}
+
+      {columns.length === 0 && !error && (
+        <div className={styles.board} aria-hidden>
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i}>
+              <span className="skeleton" style={{ height: '0.9rem', width: '55%', marginBottom: '0.7rem' }} />
+              <span className="skeleton" style={{ height: '3.4rem', marginBottom: '0.5rem' }} />
+              {i < 2 && <span className="skeleton" style={{ height: '3.4rem' }} />}
+            </div>
+          ))}
         </div>
       )}
 
@@ -312,6 +330,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                   key={card.id}
                   type="button"
                   className={`${styles.card} ${dragging?.id === card.id ? styles.dragging : ''}`}
+                  style={movingId === card.id ? { opacity: 0.55, cursor: 'progress' } : undefined}
                   draggable={Boolean(card.spec)}
                   onDragStart={(e) => {
                     setDragging(card);
@@ -357,7 +376,15 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
         <>
           <button type="button" className={styles.scrim} onClick={() => setOpen(null)} aria-label="Close" />
           <aside className={styles.drawer}>
-            {!detail && <div className="empty">Loading…</div>}
+            {!detail && (
+              <div style={{ padding: '1rem' }} aria-hidden>
+                <span className="skeleton" style={{ height: '0.8rem', width: '18%', display: 'block', marginBottom: '0.6rem' }} />
+                <span className="skeleton" style={{ height: '1.2rem', width: '70%', display: 'block', marginBottom: '0.8rem' }} />
+                <span className="skeleton" style={{ height: '0.85rem', width: '95%', display: 'block', marginBottom: '0.45rem' }} />
+                <span className="skeleton" style={{ height: '0.85rem', width: '88%', display: 'block', marginBottom: '0.45rem' }} />
+                <span className="skeleton" style={{ height: '0.85rem', width: '60%', display: 'block' }} />
+              </div>
+            )}
 
             {detail && (
               <>
@@ -709,7 +736,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                         )
                       }
                     >
-                      Submit for review →
+                      {busy === 'review' && <span className="spinner" />} Submit for review →
                     </button>
                   )}
 
@@ -723,7 +750,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                           act('revise', () => post(`/projects/${slug}/board/specs/${spec.id}/revise`))
                         }
                       >
-                        Request agent revision
+                        {busy === 'revise' && <span className="spinner" />} Request agent revision
                       </button>
                       {spec.status === 'in_review' && (
                         /* The gate. This button is the only path to `approved`,
@@ -787,7 +814,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                           )
                         }
                       >
-                        Mark as building
+                        {busy === 'building' && <span className="spinner" />} Mark as building
                       </button>
                     </>
                   )}
@@ -805,7 +832,7 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                         )
                       }
                     >
-                      Mark delivered
+                      {busy === 'delivered' && <span className="spinner" />} Mark delivered
                     </button>
                   )}
                 </div>

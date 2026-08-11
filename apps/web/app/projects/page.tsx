@@ -47,7 +47,16 @@ export default function DashboardPage() {
     // not in the chrome. One button, where the thing it makes will appear.
     <AppShell crumb={<b>Projects</b>}>
       {error && <div className="err">{error}</div>}
-      {!projects && !error && <div className="empty">Loading…</div>}
+      {!projects && !error && (
+        <div aria-hidden>
+          <span className="skeleton" style={{ height: '1.3rem', width: '22%', marginBottom: '1rem' }} />
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="skeleton" style={{ height: '11rem', flex: '1 1 16rem' }} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {projects && live.length === 0 && drafts.length === 0 && (
         <div className={`${styles.firstrun} card`}>

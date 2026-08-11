@@ -40,14 +40,22 @@ function hasWebhook(r: Repo, vcsConnectionStatus: string | undefined): boolean {
 }
 
 export function ReposView({ slug, onChange }: { slug: string; onChange: () => void }) {
-  const [repos, setRepos] = useState<Repo[]>([]);
+  // null = not loaded yet — a failed load must not render as "no repositories".
+  const [repos, setRepos] = useState<Repo[] | null>(null);
   const [vcsConnectionStatus, setVcsConnectionStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<Repo | null>(null);
 
   const load = useCallback(() => {
-    get<Repo[]>(`/projects/${slug}/repositories`).then(setRepos).catch(() => undefined);
+    setLoadError(null);
+    get<Repo[]>(`/projects/${slug}/repositories`)
+      .then(setRepos)
+      .catch((err: unknown) =>
+        setLoadError(err instanceof Error ? err.message : 'Failed to load repositories'),
+      );
+    // The webhook column degrades gracefully without this — no error surface.
     get<Connection[]>(`/projects/${slug}/connections`)
       .then((cs) => setVcsConnectionStatus(cs.find((c) => c.kind === 'vcs')?.status))
       .catch(() => undefined);
@@ -84,7 +92,18 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
           </tr>
         </thead>
         <tbody>
-          {repos.map((r) => (
+          {repos === null &&
+            !loadError &&
+            [0, 1].map((i) => (
+              <tr key={i} aria-hidden>
+                {[0, 1, 2, 3, 4].map((j) => (
+                  <td key={j}>
+                    <span className="skeleton" style={{ height: '0.9rem' }} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          {(repos ?? []).map((r) => (
             <tr key={r.id}>
               <td>
                 <span className="mono">{r.name}</span>{' '}
@@ -134,31 +153,35 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                   <button
                     type="button"
                     className="btn sm"
-                    disabled={busy === r.id}
+                    disabled={busy?.startsWith(r.id) ?? false}
                     onClick={() =>
-                      act(r.id, () => post(`/projects/${slug}/repositories/${r.id}/setup-merged`))
+                      act(`${r.id}:merged`, () =>
+                        post(`/projects/${slug}/repositories/${r.id}/setup-merged`),
+                      )
                     }
                     title="No webhook for this repository — tell specd once you have merged the setup branch"
                   >
-                    I merged it
+                    {busy === `${r.id}:merged` && <span className="spinner" />} I merged it
                   </button>
                 )}
                 {!r.isPrimary && (
                   <button
                     type="button"
                     className="btn sm"
-                    disabled={busy === r.id}
+                    disabled={busy?.startsWith(r.id) ?? false}
                     onClick={() =>
-                      act(r.id, () => post(`/projects/${slug}/repositories/${r.id}/primary`))
+                      act(`${r.id}:primary`, () =>
+                        post(`/projects/${slug}/repositories/${r.id}/primary`),
+                      )
                     }
                   >
-                    Make primary
+                    {busy === `${r.id}:primary` && <span className="spinner" />} Make primary
                   </button>
                 )}
                 <button
                   type="button"
                   className="btn sm danger"
-                  disabled={busy === r.id}
+                  disabled={busy?.startsWith(r.id) ?? false}
                   onClick={() => {
                     setError(null);
                     setConfirmRemove(r);
@@ -172,7 +195,17 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
         </tbody>
       </table>
 
-      {repos.length === 0 && <div className="empty">No repositories connected yet.</div>}
+      {loadError && (
+        <div className="err">
+          {loadError}{' '}
+          <button type="button" className="btn sm" onClick={load}>
+            Retry
+          </button>
+        </div>
+      )}
+      {repos !== null && repos.length === 0 && (
+        <div className="empty">No repositories connected yet.</div>
+      )}
 
       <p className="foot">
         The <b>primary</b> repository is where cross-repo specs file their as-built copy. specd
@@ -197,10 +230,10 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
             </>
           }
           confirmLabel="Remove repository"
-          busy={busy === confirmRemove.id}
+          busy={busy === `${confirmRemove.id}:remove`}
           error={error}
           onConfirm={() =>
-            act(confirmRemove.id, async () => {
+            act(`${confirmRemove.id}:remove`, async () => {
               await del(`/projects/${slug}/repositories/${confirmRemove.id}`);
               setConfirmRemove(null);
             })

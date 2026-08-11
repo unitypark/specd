@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { LocalGitAdapter } from './local-git.adapter.js';
+import { hostedCompareUrl, LocalGitAdapter } from './local-git.adapter.js';
 import type { Config } from '../config.js';
 import type { RepoTarget } from './vcs.types.js';
 
@@ -82,5 +82,72 @@ describe('LocalGitAdapter against a real repository', () => {
 
     const after = (await adapter.listFilesWithSha(target, 'src/'))[0]!;
     expect(after.sha).not.toBe(before.sha);
+  });
+});
+
+describe('hostedCompareUrl', () => {
+  const url = (remote: string) => hostedCompareUrl(remote, 'main', 'specd/setup');
+
+  it('addresses github over ssh and https, with the open-PR form expanded', () => {
+    expect(url('git@github.com:owner/repo.git')).toBe(
+      'https://github.com/owner/repo/compare/main...specd/setup?expand=1',
+    );
+    expect(url('https://github.com/owner/repo')).toBe(
+      'https://github.com/owner/repo/compare/main...specd/setup?expand=1',
+    );
+  });
+
+  it('addresses gitlab.com, nested groups included, in gitlab compare form', () => {
+    expect(url('git@gitlab.com:group/sub/repo.git')).toBe(
+      'https://gitlab.com/group/sub/repo/-/compare/main...specd/setup',
+    );
+  });
+
+  it('refuses to guess what software a self-managed host runs', () => {
+    // A wrong guess is a broken link handed to someone mid-review.
+    expect(url('https://ghe.example.com/owner/repo.git')).toBeNull();
+    expect(url('git@git.internal:team/repo.git')).toBeNull();
+  });
+
+  it('tolerates trailing slashes and .git alike', () => {
+    expect(url('https://gitlab.com/group/repo/')).toBe(
+      'https://gitlab.com/group/repo/-/compare/main...specd/setup',
+    );
+  });
+});
+
+describe('propose review hint against a real repository', () => {
+  let dir = '';
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: dir, encoding: 'utf8' as const });
+  const adapter = new LocalGitAdapter({ localRepoRoot: null } as Config);
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'specd-hint-'));
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t.dev');
+    git('config', 'user.name', 'T');
+    writeFileSync(join(dir, 'README.md'), '# x\n');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+  });
+
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('points at the PR path when origin is a known host, in the same hint', async () => {
+    git('remote', 'add', 'origin', 'git@github.com:owner/repo.git');
+    const target: RepoTarget = { name: 'hint', localPath: dir };
+    const change = await adapter.propose(target, {
+      branch: 'specd/setup',
+      title: 'setup',
+      body: 'body',
+      files: [{ path: 'knowledge/README.md', content: '# k\n' }],
+    });
+    expect(change.url).toBeNull();
+    expect(change.reviewHint).toContain('git diff main..specd/setup');
+    expect(change.reviewHint).toContain('git push -u origin specd/setup');
+    expect(change.reviewHint).toContain(
+      'https://github.com/owner/repo/compare/main...specd/setup?expand=1',
+    );
   });
 });

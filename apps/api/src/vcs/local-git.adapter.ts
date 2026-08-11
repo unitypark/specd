@@ -184,12 +184,28 @@ export class LocalGitAdapter implements VcsAdapter {
         '--author': 'specd <bot@specd.dev>',
       });
 
+      // Local mode cannot open a PR — there may be no host at all. But when
+      // `origin` points at one, the one-command path to a reviewable PR is
+      // worth spelling out: repos cloned from GitHub and connected in local
+      // mode are the common case, and "review as a PR" should not require
+      // knowing the compare-URL format by heart.
+      const remoteUrl = await git
+        .remote(['get-url', 'origin'])
+        .then((r) => (r || '').trim())
+        .catch(() => '');
+      const compare = remoteUrl
+        ? hostedCompareUrl(remoteUrl, startingBranch, change.branch)
+        : null;
+
       return {
         branch: change.branch,
         url: null,
         reviewHint:
           `Committed to branch \`${change.branch}\` in ${root}. Review it with ` +
-          `\`git diff ${startingBranch}..${change.branch}\`, then merge when you are happy.`,
+          `\`git diff ${startingBranch}..${change.branch}\`, then merge when you are happy.` +
+          (compare
+            ? ` Prefer a pull request? Push and open one: \`git push -u origin ${change.branch}\` → ${compare}`
+            : ''),
         filesWritten: change.files.length,
       };
     } finally {
@@ -314,4 +330,22 @@ async function sameDirectory(a: string, b: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * A compare URL for a branch, when `origin` points at a host we can address.
+ * Only github.com and gitlab.com are recognized: a self-managed host's
+ * software cannot be inferred from its URL, and a wrong guess would hand
+ * someone a broken link mid-review. GitHub gets `?expand=1` so the link
+ * lands on the open-PR form, not just the diff.
+ */
+export function hostedCompareUrl(remoteUrl: string, base: string, branch: string): string | null {
+  const m = remoteUrl
+    .trim()
+    .match(/^(?:git@|ssh:\/\/git@|https?:\/\/)(github\.com|gitlab\.com)[:/](.+?)(?:\.git)?\/?$/);
+  if (!m) return null;
+  const [, host, path] = m;
+  return host === 'github.com'
+    ? `https://github.com/${path}/compare/${base}...${branch}?expand=1`
+    : `https://gitlab.com/${path}/-/compare/${base}...${branch}`;
 }

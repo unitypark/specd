@@ -52,7 +52,7 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
 
   if (error) {
     return (
-      <AppShell crumb="Project">
+      <AppShell crumb="Project" wide>
         <div className="err">{error}</div>
       </AppShell>
     );
@@ -60,7 +60,7 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
 
   if (!project) {
     return (
-      <AppShell crumb="Project">
+      <AppShell crumb="Project" wide>
         <div aria-hidden style={{ maxWidth: '52rem' }}>
           <span className="skeleton" style={{ height: '1.4rem', width: '30%', marginBottom: '1rem' }} />
           <span className="skeleton" style={{ height: '2.4rem', width: '60%', marginBottom: '1.2rem' }} />
@@ -80,6 +80,7 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
 
   return (
     <AppShell
+      wide
       crumb={
         <>
           <a href="/projects">Projects</a> / <b>{project.name}</b>

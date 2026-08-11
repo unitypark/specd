@@ -10,9 +10,17 @@ export interface BoardCard {
   key: string;
   title: string;
   columnKey: string;
+  /** Rank within the column — what a drag-to-reorder writes. */
+  position: number;
   source: string;
   externalUrl: string | null;
   assignee: string | null;
+  /**
+   * Last time anything about the ticket moved. The board reads it as age: a
+   * card that has sat in review for three weeks is the thing a stand-up needs
+   * to see, and a board that cannot show it is a list with columns.
+   */
+  updatedAt: string;
   spec: {
     id: string;
     version: number;
@@ -62,9 +70,11 @@ export class BoardService {
       key: ticket.key,
       title: ticket.title,
       columnKey: ticket.columnKey,
+      position: ticket.position,
       source: ticket.source,
       externalUrl: ticket.externalUrl,
       assignee: ticket.assignee,
+      updatedAt: ticket.updatedAt.toISOString(),
       spec: spec
         ? {
             id: spec.id,
@@ -96,11 +106,58 @@ export class BoardService {
         body: input.body ?? '',
         assignee: input.assignee ?? null,
         columnKey: 'backlog',
+        position: await this.nextPosition(input.projectId, 'backlog'),
       })
       .returning();
 
     if (!row) throw new Error('failed to create ticket');
     return row;
+  }
+
+  /**
+   * Rewrite the rank of one column from the order the client is showing.
+   *
+   * Within a lane, order is priority — the one piece of board state the
+   * lifecycle does not already decide for you, and the reason `position`
+   * exists. The contract is deliberately total: the named tickets take ranks
+   * 0..n-1 and everything else in the lane keeps its relative order behind
+   * them. A ticket someone else added between this client's last load and its
+   * drop therefore lands at the bottom instead of failing the request — a
+   * board that refuses a drag because a colleague was typing is worse than one
+   * that puts a brand-new ticket one row lower than expected.
+   *
+   * `updatedAt` is deliberately not touched. The board reads that field as
+   * "when did this work last move", and dragging a card up the backlog is not
+   * work moving — bumping it would make every reprioritised card look freshly
+   * worked on, which is exactly the lie the age marker exists to catch.
+   */
+  async reorder(projectId: string, columnKey: string, ticketIds: string[]): Promise<void> {
+    const rows = await this.db
+      .select({ id: tickets.id })
+      .from(tickets)
+      .where(and(eq(tickets.projectId, projectId), eq(tickets.columnKey, columnKey)))
+      .orderBy(tickets.position, tickets.createdAt);
+
+    const inColumn = new Set(rows.map((r) => r.id));
+    const named = ticketIds.filter((id) => inColumn.has(id));
+    const rest = rows.map((r) => r.id).filter((id) => !named.includes(id));
+    const ordered = [...named, ...rest];
+    if (ordered.length === 0) return;
+
+    await this.db.transaction(async (tx) => {
+      for (const [index, id] of ordered.entries()) {
+        await tx.update(tickets).set({ position: index }).where(eq(tickets.id, id));
+      }
+    });
+  }
+
+  /** One past the last rank in a column, so a new ticket lands at the bottom. */
+  private async nextPosition(projectId: string, columnKey: string): Promise<number> {
+    const [row] = await this.db
+      .select({ max: sql<number | null>`max(${tickets.position})` })
+      .from(tickets)
+      .where(and(eq(tickets.projectId, projectId), eq(tickets.columnKey, columnKey)));
+    return (row?.max ?? -1) + 1;
   }
 
   /**
@@ -145,6 +202,9 @@ export class BoardService {
         externalKey: issue.key,
         externalUrl: issue.url,
         columnKey: 'backlog',
+        // Imports queue behind whatever the team has already ranked, rather
+        // than landing on top of a prioritised backlog.
+        position: await this.nextPosition(input.projectId, 'backlog'),
       });
       imported += 1;
     }

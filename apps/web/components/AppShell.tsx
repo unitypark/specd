@@ -12,11 +12,21 @@ export function AppShell({
   crumb,
   pills,
   actions,
+  wide = false,
 }: {
   children: React.ReactNode;
   crumb?: React.ReactNode;
   pills?: React.ReactNode;
   actions?: React.ReactNode;
+  /**
+   * Widen the content column. 76rem is a reading measure and is right for
+   * every page that is mostly prose, forms or a single table; it is wrong for
+   * a six-lane board, which needs the room to give each lane a card's worth of
+   * width. Set per page rather than per tab, so a page's own furniture — its
+   * tab strip above all — keeps one width instead of jumping as you move
+   * between tabs.
+   */
+  wide?: boolean;
 }) {
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -105,7 +115,7 @@ export function AppShell({
           {initials}
         </button>
       </header>
-      <div className="body">{children}</div>
+      <div className={`body ${wide ? 'wide' : ''}`}>{children}</div>
 
       <style jsx>{`
         .shell {
@@ -166,6 +176,9 @@ export function AppShell({
           max-width: 76rem;
           margin: 0 auto;
           padding: 1.4rem 1.2rem 4rem;
+        }
+        .body.wide {
+          max-width: 112rem;
         }
       `}</style>
     </div>

@@ -23,11 +23,14 @@
   border-bottom-color: var(--accent);
 }
 
+/* The page runs wide for the board's sake; four stat tiles stretched across
+   all of it become billboards. Held at the measure they had before. */
 .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 0.8rem;
   margin-bottom: 1.2rem;
+  max-width: 72rem;
 }
 .kpi {
   border: 1px solid var(--line);

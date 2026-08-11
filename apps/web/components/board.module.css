@@ -1,121 +1,680 @@
+/*
+ * The board is one box, not a toolbar with some columns loose underneath it.
+ *
+ * Everything the board owns — the toolbar, the lanes, the legend — shares this
+ * element's edges, so there is exactly one left edge and one right edge on the
+ * screen, and they line up with the page's own column above. An earlier pass
+ * had the lanes break full-bleed out of that column to buy width; it bought
+ * width and lost the alignment, and a board that starts 400px left of its own
+ * toolbar reads as a layout bug before it reads as a wide board.
+ *
+ * It is also the element that owns the height. Sized against the viewport
+ * rather than against its contents, so the lanes reach the bottom of the
+ * screen and scroll internally — an empty board no longer draws six short
+ * stubs above a screenful of nothing. The subtraction is the shell's chrome:
+ * top bar, body padding, the project tabs.
+ */
 .wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  /*
+   * Capped by the viewport, not stretched to it. `height` made an empty board
+   * six storeys of nothing — the box was as tall on a project with no tickets
+   * as on one with forty. With `max-height` the lanes size to their contents
+   * and the box grows with them, until it reaches the fold and the lanes start
+   * scrolling inside instead. The subtraction is the shell's chrome above (top
+   * bar, body padding, project tabs) plus its 4rem page padding below, so the
+   * cap lands at the fold rather than pushing the window into a scroll.
+   */
+  max-height: calc(100vh - 12rem);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
 }
 
+/* Board-level failures belong inside the box that caused them. */
+.wrap > :global(.err) {
+  flex: none;
+  margin: 0.8rem 0.85rem 0;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.grow {
+  flex: 1;
+}
+
+/* ─── toolbar ─────────────────────────────────────────────────────────────── */
+
+/* Sections carry their own padding rather than the box carrying one set, so
+   the hairlines under the toolbar and over the legend run the full width of
+   the box instead of stopping short of its corners. */
 .toolbar {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  margin-bottom: 0.9rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--line);
 }
-.hint {
-  font: 500 0.998rem/1.5 var(--mono);
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  /* --field is a near-white that disappears against the box's white ground;
+     the input has to read as a well you can type into. */
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 0 0.5rem;
+  min-width: 14rem;
   color: var(--ink-3);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.search:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--emphasis-soft);
+}
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--ink);
+  font: 400 0.98rem/1 var(--sans);
+  padding: 0.5rem 0;
+}
+/* The native affordance is a tiny grey ✕ that fights the hint key beside it. */
+.search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+.kbdhint {
+  font: 600 0.8rem/1 var(--mono);
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+}
+.search:focus-within .kbdhint {
+  visibility: hidden;
+}
+
+/* Segmented control — one facet, one answer. Two independent toggles would
+   leave "flagged AND stuck" reading as an empty board rather than as a
+   question nobody asked. */
+.seg {
+  display: flex;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.segoff,
+.segon {
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  font: 600 0.9rem/1 var(--sans);
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.seg .segoff + .segoff,
+.seg .segoff + .segon,
+.seg .segon + .segoff {
+  border-left: 1px solid var(--line);
+}
+.segoff:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.segon {
+  background: var(--emphasis);
+  color: #fff;
+  box-shadow: 0 1px 6px -1px rgba(0, 0, 0, 0.35);
+}
+
+.menu {
+  position: relative;
+}
+/* The assignee menu is a lone segmented-style button, so it needs its own
+   frame — inside .seg the shared border does that job. */
+.menu > .segoff,
+.menu > .segon {
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+}
+.menu > .segon {
+  border-color: transparent;
+}
+.menupanel {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 30;
+  min-width: 13rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.35);
+  padding: 0.3rem;
+}
+.menurow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.45rem;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.98rem;
+  color: var(--ink-2);
+}
+.menurow:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+.menurow > span:first-of-type {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menucount {
+  font: 600 0.87rem/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.you {
+  font: 600 0.8rem/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.menuempty {
+  margin: 0;
+  padding: 0.6rem 0.5rem;
+  font-size: 0.94rem;
+  color: var(--ink-3);
+}
+.menuclear {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--line);
+  margin-top: 0.25rem;
+  background: none;
+  color: var(--ink-2);
+  font: 600 0.9rem/1 var(--sans);
+  padding: 0.5rem;
+  cursor: pointer;
+}
+.menuclear:hover {
+  color: var(--ink);
+}
+
+.showing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font: 500 0.92rem/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.clear,
+.dismiss {
+  background: none;
+  border: none;
+  color: var(--ink);
+  font: 600 0.9rem/1 var(--sans);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+  padding: 0;
+}
+.dismiss {
+  margin-left: 0.6rem;
+  color: var(--danger);
 }
 
 .compose {
-  max-width: 34rem;
-  margin-bottom: 1rem;
+  flex: none;
+  max-width: 44rem;
+  margin: 0.85rem 0.85rem 0;
 }
+.composerow {
+  display: flex;
+  gap: 0.8rem;
+  margin-bottom: 0.9rem;
+}
+
+/* ─── the board ───────────────────────────────────────────────────────────── */
 
 .board {
-  display: grid;
-  /* Six fixed lanes (D5) that fill whatever width the page gives them —
-     `minmax(0, 1fr)` has no floor to overflow past, so the board never forces
-     a horizontal scrollbar on a normal desktop viewport. Only genuinely
-     narrow viewports (below) fall back to fixed columns you scroll across,
-     since six lanes cannot be squeezed to fit a phone width and stay legible. */
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0;
+  /* `1 1 auto`, deliberately not `flex: 1`. The shorthand's `0` basis would
+     hide the lanes' own height from the box, which — now that the box is
+     sized by its contents — would collapse it to a toolbar above a legend.
+     Basis `auto` lets the lanes set the height and still shrink at the cap. */
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0.55rem;
+  padding: 0.85rem;
   overflow-x: auto;
-  padding-bottom: 0.5rem;
-}
-@media (max-width: 760px) {
-  .board {
-    grid-template-columns: repeat(6, 11rem);
-  }
 }
 
-/* A rule between states, so the six lanes read as lanes rather than as one
-   field of cards. On the column rather than in the gap, so it runs the full
-   height of the tallest column automatically. */
 .col {
-  padding: 0 0.75rem;
-  min-width: 0;
-}
-.col + .col {
-  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  /* Lanes split the box evenly, and stop shrinking just before a card stops
+     being legible: six at this floor fit the page column exactly. Narrower
+     than that the board scrolls sideways, which is what every real board does
+     rather than squeezing six columns onto a phone — and collapsing a lane
+     you are not working in (below) buys the width back on any screen. */
+  flex: 1 1 0;
+  min-width: 11.25rem;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  transition: background 0.15s, box-shadow 0.15s, border-color 0.15s;
 }
 
-.col h5 {
-  font: 600 0.958rem/1 var(--mono);
-  letter-spacing: 0.08em;
+/* The gate. `approved` is the one lane a drag can never reach, and the one
+   act this product exists to make deliberate — it carries the same HUMAN mark
+   the station diagram uses, for the same reason. */
+.gate {
+  border-color: var(--line-2);
+  box-shadow: inset 0 0 0 1px var(--emphasis-soft);
+}
+
+.colhead {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+.colhead h5 {
+  font: 600 0.93rem/1 var(--mono);
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--ink-2);
-  /* Room under the header — the cards were nearly touching it. */
-  margin: 0 0 1.15rem;
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-/* The count reads as a tag on the header, not as a number floated to the far
-   edge where it belonged to nothing. */
+.stn {
+  font: 700 0.8rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  flex: none;
+}
+.human {
+  font: 800 0.72rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  color: #fff;
+  background: var(--emphasis);
+  border-radius: 3px;
+  padding: 0.25em 0.35em;
+  flex: none;
+}
+
 .count {
-  font: 700 0.978rem/1 var(--mono);
+  font: 700 0.88rem/1 var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--ink-2);
-  background: var(--panel-2);
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 0.24em 0.55em;
+  padding: 0.24em 0.5em;
   min-width: 1.7em;
   text-align: center;
+  flex: none;
 }
 .count.zero {
   color: var(--ink-3);
   opacity: 0.55;
 }
-.colempty {
+
+/* Lane actions stay out of the way until you are in the lane. Six headers,
+   each with a name, a count and two controls, is more furniture than a
+   ~11rem lane can carry at rest — and these are the two least urgent things
+   on the screen. Revealed on focus as well as hover, so the keyboard still
+   reaches them. */
+.headbtn {
+  border: none;
+  background: none;
   color: var(--ink-3);
-  font-size: 1.058rem;
-  text-align: center;
-  padding: 1rem 0;
+  font: 600 0.95rem/1 var(--mono);
+  padding: 0.2rem 0.28rem;
+  border-radius: 4px;
+  cursor: pointer;
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.col:hover .headbtn,
+.headbtn:focus-visible {
+  opacity: 1;
+}
+.headbtn:hover {
+  background: var(--panel);
+  color: var(--ink);
 }
 
-.card {
-  display: block;
+.laneBody {
+  /* The lane scrolls, not the page: the header has to stay put while you look
+     down a column, which is the whole reason a board beats a list. The floor
+     keeps an empty lane a lane rather than a sliver under its own header. */
+  flex: 1 1 auto;
+  min-height: 6.5rem;
+  overflow-y: auto;
+  padding: 0.55rem 0.5rem 0.3rem;
+  scrollbar-width: thin;
+}
+
+.colempty {
+  margin: 0.4rem 0.2rem;
+  color: var(--ink-3);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+/* Collapsed lanes buy their width back for the lanes you are working in. */
+.collapsed {
+  display: flex;
+  flex: 0 0 2.6rem;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.expand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
   width: 100%;
-  text-align: left;
+  padding: 0.7rem 0;
+  border: none;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  border-radius: 9px;
+}
+.expand:hover {
+  background: var(--panel-2);
+}
+.vertical {
+  writing-mode: vertical-rl;
+  font: 600 0.9rem/1 var(--mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ─── cards ───────────────────────────────────────────────────────────────── */
+
+.card {
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 0.8rem 0.9rem;
-  margin-bottom: 0.6rem;
+  border-radius: 8px;
+  padding: 0.5rem 0.55rem 0.45rem;
+  margin-bottom: 0.45rem;
   cursor: grab;
-  color: inherit;
-  transition: border-color 0.15s, background 0.15s, backdrop-filter 0.15s, box-shadow 0.2s;
+  /* A drag that selects the title text instead of picking up the card reads
+     as the board being broken. */
+  user-select: none;
+  -webkit-user-select: none;
+  transition: border-color 0.15s, box-shadow 0.2s, transform 0.15s, opacity 0.15s;
 }
 .card:hover {
-  border-color: var(--glass-border);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-refract);
-  backdrop-filter: var(--glass-refract);
-  box-shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.2);
+  border-color: var(--line-2);
+  box-shadow: 0 8px 20px -12px rgba(0, 0, 0, 0.45);
+  transform: translateY(-1px);
 }
-.cid {
-  font: 700 1.028rem/1 var(--mono);
-  color: var(--ink-3);
+.card:active {
+  cursor: grabbing;
+}
+.card:focus-within {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.card:not([draggable='true']) {
+  cursor: pointer;
+}
+.dragging {
+  opacity: 0.35;
+}
+/* Dimmed until the server confirms, so a slow transition is visibly still in
+   flight rather than silently settled. */
+.moving {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* One rail, one meaning. Magenta is only ever "nobody has checked this";
+   amber is only ever "something is off" — here, stopped and waiting on a
+   person. A card that is both wears the amber, because being stopped is the
+   more actionable of the two. */
+.railFlagged::before,
+.railStuck::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+}
+.railFlagged::before {
+  background: var(--unverified);
+}
+.railStuck::before {
+  background: var(--warn);
+}
+
+.chead {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   margin-bottom: 0.3rem;
 }
-.ctitle {
-  font-size: 1.08rem;
-  line-height: 1.45;
-  margin-bottom: 0.6rem;
+.ckey {
+  font: 700 0.87rem/1 var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
 }
+.csource {
+  position: relative;
+  z-index: 1;
+  font: 600 0.8rem/1 var(--mono);
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.18em 0.3em;
+  text-decoration: none;
+}
+a.csource:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+  text-decoration: none;
+}
+.cgrow {
+  flex: 1;
+}
+
+/*
+ * Above the title's stretched hit area (below), so its tooltip still answers
+ * "who has this?" on hover. Costs a thumbnail-sized dead spot on a card you
+ * can still click anywhere else — the trade the other way round would be a
+ * tooltip that never appears.
+ */
+.avatar {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 50%;
+  flex: none;
+  font: 700 0.78rem/1 var(--mono);
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--line);
+}
+.t0 {
+  background: rgba(0, 0, 0, 0.05);
+}
+.t1 {
+  background: rgba(0, 0, 0, 0.1);
+}
+.t2 {
+  background: rgba(0, 0, 0, 0.16);
+}
+.t3 {
+  background: rgba(0, 0, 0, 0.22);
+}
+.unassigned {
+  background: none;
+  border-style: dashed;
+  color: var(--ink-3);
+}
+
+.ctitle {
+  margin: 0 0 0.45rem;
+}
+.copen {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink);
+  font: 500 0.97rem/1.4 var(--sans);
+}
+/* Stretched over the whole card, so clicking anywhere opens the spec while
+   the Jira link above it stays a real link. The ring lives on the card
+   (`:focus-within`), not on this box, or keyboard focus would draw a rectangle
+   around three lines of title. */
+.copen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.copen:focus-visible {
+  outline: none;
+}
+
 .cfoot {
   display: flex;
+  align-items: center;
   gap: 0.3rem;
   flex-wrap: wrap;
+}
+.cmeta {
+  font: 600 0.83rem/1 var(--mono);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.cage {
+  position: relative;
+  z-index: 1;
+  font: 600 0.83rem/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.cage.stale {
+  color: var(--warn);
+}
+
+/* The card's footer chips are smaller than the global pill, which is sized
+   for page furniture rather than for a 14rem lane. */
+.cfoot :global(.pill) {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.38rem;
+}
+
+/* ─── drag feedback ───────────────────────────────────────────────────────── */
+
+/* The lane you are over says whether the drop will be accepted before you let
+   go — a refusal after the fact reads as a bug. */
+.dropOk {
+  background: var(--panel-2);
+  border-color: var(--line-2);
+  box-shadow: inset 0 0 0 1px var(--emphasis-dim);
+}
+.dropNo {
+  background: var(--unverified-soft);
+  border-color: var(--unverified-line);
+}
+
+/* Where the card will land, at the size it will land at. A lane that merely
+   tints tells you the drop is allowed; this tells you where in the queue it
+   is going, which is the half that matters once a lane holds more than three
+   cards. */
+.placeholder {
+  height: 4.2rem;
+  margin-bottom: 0.45rem;
+  border: 1px dashed var(--line-2);
+  border-radius: 8px;
+  background: var(--emphasis-soft);
+}
+
+.legend {
+  flex: none;
+  margin: 0;
+  padding: 0.55rem 0.85rem 0.6rem;
+  border-top: 1px solid var(--line);
+  font: 500 0.87rem/1.7 var(--mono);
+  color: var(--ink-3);
+}
+.legend kbd {
+  font: 600 0.85rem/1 var(--mono);
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0.15em 0.3em;
+  color: var(--ink-2);
+}
+.saving {
+  color: var(--ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .col {
+    transition: none;
+  }
+  .card:hover {
+    transform: none;
+  }
 }
 
 /* ─── drawer ──────────────────────────────────────────────────────────────── */
@@ -140,6 +699,9 @@
   display: flex;
   flex-direction: column;
 }
+.drawer:focus {
+  outline: none;
+}
 
 .dhead {
   padding: 1rem 1.2rem 0.8rem;
@@ -147,11 +709,20 @@
 }
 .did {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 0.6rem;
   font: 700 0.978rem/1 var(--mono);
   color: var(--ink-3);
   margin-bottom: 0.4rem;
+}
+.dsource {
+  font: 600 0.87rem/1 var(--mono);
+  color: var(--ink-3);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-2);
+}
+.dsource:hover {
+  color: var(--ink);
 }
 .close {
   background: none;
@@ -208,7 +779,7 @@
   flex: 1;
   overflow-y: auto;
   padding: 1rem 1.2rem;
-  font-size: 1.0rem;
+  font-size: 1rem;
   line-height: 1.7;
   color: var(--ink-2);
 }
@@ -373,35 +944,4 @@
   padding: 0.9rem 1.2rem;
   border-top: 1px solid var(--line);
   background: var(--panel);
-}
-
-/* ─── drag between states ─────────────────────────────────────────────────── */
-
-.card:active {
-  cursor: grabbing;
-}
-.dragging {
-  opacity: 0.4;
-  border-color: var(--accent);
-}
-
-/* The lane you are over says whether the drop will be accepted before you let
-   go — a refusal after the fact reads as a bug. */
-.dropOk {
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-dim);
-  border-radius: 10px;
-}
-.dropNo {
-  background: var(--unverified-soft);
-  box-shadow: inset 0 0 0 1px var(--unverified-line);
-  border-radius: 10px;
-}
-.col {
-  transition: background 0.15s, box-shadow 0.15s;
-}
-
-/* A card with no spec cannot move, so it should not offer to. */
-.card:not([draggable='true']) {
-  cursor: pointer;
 }

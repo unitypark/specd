@@ -6,15 +6,7 @@ import { API_BASE, del, get, patch, post } from '@/lib/api';
 import type { ProjectSummary } from '@/lib/types';
 import { ConfirmDialog } from './ConfirmDialog';
 
-interface Connection {
-  id: string;
-  kind: string;
-  provider: string;
-  label: string | null;
-  status: string;
-  hasSecret: boolean;
-  lastValidatedAt: string | null;
-}
+import { ConnectionCards, type Connection } from './ConnectionCards';
 
 interface RunnerSummary {
   id: string;
@@ -24,12 +16,6 @@ interface RunnerSummary {
   pairedAt: string | null;
   lastSeenAt: string | null;
 }
-
-const KIND_LABEL: Record<string, { icon: string; title: string }> = {
-  vcs: { icon: '🐙', title: 'Code' },
-  ai: { icon: '🔑', title: 'AI provider' },
-  tracker: { icon: '📋', title: 'Tracker' },
-};
 
 function relativeTime(iso: string): string {
   const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
@@ -232,24 +218,17 @@ export function SettingsView({
           <span className="skeleton" style={{ height: '0.85rem', width: '70%' }} />
         </div>
       )}
-      {(connections ?? []).map((c) => {
-        const meta = KIND_LABEL[c.kind] ?? { icon: '🔌', title: c.kind };
-        return (
-          <div key={c.id} className="card row">
-            <span className="ic">{meta.icon}</span>
-            <div>
-              <h5>{meta.title}</h5>
-              <p>
-                {c.provider}
-                {c.label ? ` · ${c.label}` : ''}
-                {c.hasSecret ? ' · credential stored (encrypted)' : ''}
-              </p>
-            </div>
-            <span className="flex" />
-            <span className="pill on">{c.status}</span>
-          </div>
-        );
-      })}
+      {connections !== null && (
+        <ConnectionCards
+          slug={slug}
+          projectId={project.id}
+          connections={connections}
+          onChange={() => {
+            load();
+            onChange();
+          }}
+        />
+      )}
 
       <div className="card">
         <h5>Self-hosted runners</h5>

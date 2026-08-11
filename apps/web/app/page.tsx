@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AuthLink } from '@/components/AuthLink';
 import { LandingNav } from '@/components/LandingNav';
 import { Linework } from '@/components/Linework';
 import { CompoundingLoop } from '@/components/CompoundingLoop';
@@ -82,9 +83,11 @@ export default function Preview() {
               <Link href="/setup" className={landing.cta}>
                 Start your setup
               </Link>
-              <Link href="/login" className={landing.ghost}>
-                Sign in
-              </Link>
+              <AuthLink
+                className={landing.ghost}
+                signInLabel="Sign in"
+                dashboardLabel="Go to your projects"
+              />
             </div>
             <p className={landing.trust}>
               one fixed pipeline · your git stays the source of truth · agents open PRs, never push

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { AuthLink } from './AuthLink';
 import { Logo } from './Logo';
 import styles from '../app/landing.module.css';
 
@@ -135,9 +136,9 @@ export function LandingNav() {
 
       <div className={styles.actions}>
       <span className={styles.rev}>V0.1</span>
-      <Link href="/login" className={styles.navlink}>
-        SIGN IN
-      </Link>
+      {/* SIGN IN for a visitor; for someone already signed in, the way back
+          into the app — the prompt they do not need becomes the link they do. */}
+      <AuthLink className={styles.navlink} signInLabel="SIGN IN" dashboardLabel="DASHBOARD" />
       <Link href="/setup" className={styles.cta}>
         Start your setup
       </Link>

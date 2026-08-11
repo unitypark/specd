@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, clearSession, getToken, getUser, setSession, streamRun } from './api.js';
+import {
+  ApiError,
+  SESSION_EVENT,
+  api,
+  clearSession,
+  getToken,
+  getUser,
+  setSession,
+  streamRun,
+} from './api.js';
 
 /**
  * Every view in the app talks to the server through this module, so its edges
@@ -53,6 +62,28 @@ describe('session', () => {
 
     clearSession();
     expect(getToken()).toBeNull();
+    expect(getUser()).toBeNull();
+  });
+
+  it('announces every change so views do not disagree about who is signed in', () => {
+    // A nav still offering SIGN IN to someone who just signed in is how people
+    // sign in twice; the event is what keeps every mounted view in step.
+    const seen: string[] = [];
+    const listen = () => seen.push(getToken() ? 'in' : 'out');
+    window.addEventListener(SESSION_EVENT, listen);
+    try {
+      setSession('tok-1', { id: 'u1', email: 'a@b.test', name: 'Theo' });
+      clearSession();
+    } finally {
+      window.removeEventListener(SESSION_EVENT, listen);
+    }
+    expect(seen).toEqual(['in', 'out']);
+  });
+
+  it('reports a corrupt user record as no user rather than throwing', () => {
+    // Every page calls this to decide whether to show a sign-in link. A
+    // half-written value must not take the page down with it.
+    window.localStorage.setItem('specd.user', '{ half-written');
     expect(getUser()).toBeNull();
   });
 
@@ -126,6 +157,39 @@ describe('api()', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).message).toBe('Spec is not approved');
     expect((err as ApiError).status).toBe(409);
+  });
+
+  it('drops a session the server has just rejected', async () => {
+    // A 401 on a request that carried a token means the token is dead. Keeping
+    // it leaves the app claiming a session it cannot use — "signed in" and
+    // "everything fails" at the same time.
+    setSession('tok-stale', { id: 'u1', email: 'a@b.test', name: 'Theo' });
+    mockFetch({ ok: false, status: 401, body: JSON.stringify({ message: 'Invalid or expired token' }) });
+
+    await expect(api('/projects')).rejects.toBeInstanceOf(ApiError);
+    expect(getToken()).toBeNull();
+    expect(getUser()).toBeNull();
+  });
+
+  it('keeps the session when the refusal was about permission, not identity', async () => {
+    // A 403 says who you are is known and not allowed here. Signing someone
+    // out of a project they cannot see would lose them the ones they can.
+    setSession('tok-good', { id: 'u1', email: 'a@b.test', name: 'Theo' });
+    mockFetch({ ok: false, status: 403, body: JSON.stringify({ message: 'Not a member' }) });
+
+    await expect(api('/projects/other')).rejects.toBeInstanceOf(ApiError);
+    expect(getToken()).toBe('tok-good');
+  });
+
+  it('has nothing to drop when a 401 answers the sign-in form itself', async () => {
+    // Wrong password is a 401 as well, sent without a token. Nothing to clear,
+    // and no crash on the way to reporting it.
+    mockFetch({ ok: false, status: 401, body: JSON.stringify({ message: 'Invalid email or password' }) });
+
+    await expect(api('/auth/login', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+      message: 'Invalid email or password',
+    });
+    expect(getToken()).toBeNull();
   });
 
   it('shows a non-JSON error body as-is rather than swallowing it', async () => {

@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { clearSession, getToken, getUser, type SessionUser } from '@/lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { SESSION_EVENT, clearSession, type SessionUser } from '@/lib/api';
+import { getSession } from '@/lib/session';
 import { Logo } from './Logo';
 
 export function AppShell({
@@ -20,14 +21,32 @@ export function AppShell({
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [ready, setReady] = useState(false);
+  // Leaving on purpose and being thrown out are different journeys: one should
+  // not come back to where it was, the other should.
+  const leaving = useRef(false);
 
   useEffect(() => {
-    if (!getToken()) {
-      router.replace('/login');
-      return;
-    }
-    setUser(getUser());
-    setReady(true);
+    const sync = () => {
+      const session = getSession();
+      if (session) {
+        setUser(session.user);
+        setReady(true);
+        return;
+      }
+
+      // Every way of losing the session ends here — none, expired, or a 401
+      // that cleared it mid-visit — so the app has one exit rather than three.
+      const here = window.location.pathname + window.location.search;
+      router.replace(
+        leaving.current || here === '/projects'
+          ? '/login'
+          : `/login?next=${encodeURIComponent(here)}`,
+      );
+    };
+
+    sync();
+    window.addEventListener(SESSION_EVENT, sync);
+    return () => window.removeEventListener(SESSION_EVENT, sync);
   }, [router]);
 
   if (!ready) {
@@ -77,8 +96,10 @@ export function AppShell({
           className="avatar"
           title={`${user?.name} — sign out`}
           onClick={() => {
+            leaving.current = true;
+            // Clearing announces itself; the effect above does the navigating,
+            // so there is one place that decides where a sessionless app goes.
             clearSession();
-            router.push('/login');
           }}
         >
           {initials}

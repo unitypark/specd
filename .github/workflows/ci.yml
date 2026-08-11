@@ -61,7 +61,7 @@ jobs:
       VAULT_MASTER_KEY: ZGV2LW9ubHktdmF1bHQta2V5LWNoYW5nZS1tZS0zMmI=
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
 
@@ -144,7 +144,7 @@ jobs:
       VAULT_MASTER_KEY: ZGV2LW9ubHktdmF1bHQta2V5LWNoYW5nZS1tZS0zMmI=
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
 

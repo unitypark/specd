@@ -37,7 +37,15 @@ pnpm typecheck && pnpm test
 That is the whole gate, and it is what `knowledge/conventions.md` commits to.
 There is no lint step; the compiler and the tests are it. CI runs the same two
 commands on every push and pull request, so a green local run should mean a
-green CI run — with one deliberate difference, below.
+green CI run — with one deliberate difference, below. For changes under
+`apps/web`, also run `pnpm build`: Next surfaces a class of errors only at
+build time, and CI's verify job builds too.
+
+Building while `pnpm dev` is running is safe: `next build` writes to
+`.next-build`, not the dev server's `.next` (see `next.config.mjs`). They used
+to share a directory, and every build mid-session replaced the chunks the dev
+server was serving — the recurring `Cannot find module './NNN.js'` 500 until
+restart.
 
 ### The trap: green does not always mean run
 

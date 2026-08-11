@@ -8,8 +8,19 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
-import { SPEC_STATUSES, type SpecStatus } from '@specd/shared';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
+import { BOARD_COLUMNS, SPEC_STATUSES, type SpecStatus } from '@specd/shared';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { TokenClaims } from '../auth/auth.service.js';
 import { ProjectsService } from '../projects/projects.service.js';
@@ -32,6 +43,11 @@ class UpdateTicketDto {
 
 class TransitionDto {
   @IsIn(SPEC_STATUSES) to!: SpecStatus;
+}
+
+class ReorderDto {
+  @IsIn(BOARD_COLUMNS.map((c) => c.key)) columnKey!: string;
+  @IsArray() @ArrayMaxSize(1_000) @IsUUID('4', { each: true }) ticketIds!: string[];
 }
 
 class CommentDto {
@@ -78,6 +94,26 @@ export class BoardController {
       body: dto.body,
       assignee: dto.assignee ?? null,
     });
+  }
+
+  /**
+   * Rank a lane. Separate from `PATCH tickets/:id` on purpose: reordering is a
+   * statement about a whole column, not about one ticket, and expressing it as
+   * n patches would let a dropped request leave the lane half-ranked.
+   *
+   * Scoped like `transition`, not like ticket editing: one drag is a move plus
+   * a rank, and a reviewer who is allowed the move but refused the rank would
+   * watch half their gesture fail with a 403.
+   */
+  @Post('reorder')
+  async reorder(
+    @Param('slug') slug: string,
+    @Body() dto: ReorderDto,
+    @CurrentUser() user: TokenClaims,
+  ) {
+    const project = await this.scope(slug, user);
+    await this.board.reorder(project.id, dto.columnKey, dto.ticketIds);
+    return { ok: true };
   }
 
   @Get('tickets/:ticketId')

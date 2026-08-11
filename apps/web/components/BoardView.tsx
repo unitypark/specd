@@ -1,93 +1,71 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { BUILDABLE_STATUSES, type SpecStatus } from '@specd/shared';
-import { del, get, patch, post } from '@/lib/api';
-import { COLUMN_STATUS, dropCheck } from '@/lib/board';
-import { ConfirmDialog } from './ConfirmDialog';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { get, post } from '@/lib/api';
+import { useSession } from '@/lib/session';
+import {
+  COLUMN_EMPTY,
+  NO_FILTERS,
+  UNASSIGNED,
+  assigneeOptions,
+  filtersActive,
+  insertionIndex,
+  lane,
+  matchesFilters,
+  neighbourColumn,
+  placeInColumn,
+  planDrop,
+  type BoardCard,
+  type BoardFilters,
+} from '@/lib/board';
+import { BoardCardView } from './BoardCard';
+import { SpecDrawer } from './SpecDrawer';
 import styles from './board.module.css';
-
-interface Card {
-  id: string;
-  key: string;
-  title: string;
-  columnKey: string;
-  spec: {
-    id: string;
-    version: number;
-    status: string;
-    citationCount: number;
-    unverifiedCount: number;
-    approvedBy: string | null;
-  } | null;
-}
 
 interface Column {
   key: string;
   name: string;
 }
 
-interface SpecContent {
-  requirements: { story: string; criteria: { keyword: string; trigger: string; response: string }[] }[];
-  design: { text: string; citation?: string; unverified?: string; verdict?: string }[];
-  tasks: { id: string; title: string; size: string; repo?: string; asBuilt?: boolean }[];
-  outOfScope?: string[];
-  openQuestions?: string[];
-}
+/**
+ * How often an idle board re-reads itself. A board is a shared surface — the
+ * runner finishes a build, a colleague approves a spec — and one that only
+ * updates when *you* touch it is a screenshot. Suspended while anything is in
+ * flight, so a refresh can never overwrite a drag or a half-typed ticket.
+ */
+const REFRESH_MS = 20_000;
 
-interface SpecView {
-  id: string;
-  ticketId: string;
-  ticketKey: string;
-  title: string;
-  version: number;
-  status: string;
-  content: SpecContent;
-  citationCount: number;
-  unverifiedCount: number;
-  approvedBy: string | null;
-  approvedAt: string | null;
-}
-
-interface Comment {
-  id: string;
-  section: string;
-  itemIndex: number | null;
-  authorName: string;
-  body: string;
-  createdAt: string;
-}
-
-interface TicketDetail {
-  ticket: { id: string; key: string; title: string; body: string };
-  spec: SpecView | null;
-  versions: { id: string; version: number; status: string }[];
-  comments: Comment[];
-}
+const FILTER_LOCKED_REORDER =
+  'Clear the filters to reorder — ranking a lane you can only partly see would move cards that are hidden.';
 
 export function BoardView({ slug, onChange }: { slug: string; onChange: () => void }) {
   const [columns, setColumns] = useState<Column[]>([]);
-  const [cards, setCards] = useState<Card[]>([]);
+  const [cards, setCards] = useState<BoardCard[]>([]);
   const [open, setOpen] = useState<string | null>(null);
-  const [detail, setDetail] = useState<TicketDetail | null>(null);
-  const [tab, setTab] = useState<'req' | 'des' | 'tas'>('req');
-  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
+
+  const [filters, setFilters] = useState<BoardFilters>(NO_FILTERS);
+  const [collapsed, setCollapsed] = useState<string[]>([]);
+
   const [composing, setComposing] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newBody, setNewBody] = useState('');
-  const [waitingForRunner, setWaitingForRunner] = useState(false);
-  const [commentOpen, setCommentOpen] = useState<number | null>(null);
-  const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
-  const [editing, setEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState('');
-  const [editBody, setEditBody] = useState('');
-  const [confirmDeleteTicket, setConfirmDeleteTicket] = useState(false);
-  const [deleteBusy, setDeleteBusy] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [newAssignee, setNewAssignee] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const [dragging, setDragging] = useState<BoardCard | null>(null);
+  const [dropAt, setDropAt] = useState<{ column: string; index: number } | null>(null);
+  const [movingId, setMovingId] = useState<string | null>(null);
+
+  const session = useSession();
+  const searchBox = useRef<HTMLInputElement>(null);
+  const cardRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  /** Set before a keyboard move, so focus follows the card into its new lane. */
+  const refocus = useRef<string | null>(null);
 
   const load = useCallback(async () => {
-    const board = await get<{ columns: Column[]; cards: Card[] }>(`/projects/${slug}/board`);
+    const board = await get<{ columns: Column[]; cards: BoardCard[] }>(`/projects/${slug}/board`);
     setColumns(board.columns);
     setCards(board.cards);
   }, [slug]);
@@ -96,767 +74,625 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
     load().catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed'));
   }, [load]);
 
-  // ─── drag between states ──────────────────────────────────────────────────
-  const [dragging, setDragging] = useState<Card | null>(null);
-  const [hoverCol, setHoverCol] = useState<string | null>(null);
-  const [movingId, setMovingId] = useState<string | null>(null);
+  /**
+   * Handed to the drawer, so it can tell the board something changed. Stable
+   * on purpose: the drawer polls on an interval keyed to this callback, and a
+   * fresh closure every render would reset that interval before it ever fired.
+   */
+  const reloadAll = useCallback(async () => {
+    await load();
+    onChange();
+  }, [load, onChange]);
 
-  async function moveCard(card: Card, toColumn: string) {
-    const check = dropCheck(card, toColumn);
-    if (!check.ok) {
-      setError(check.reason ?? 'That move is not allowed.');
-      return;
-    }
-    const to = COLUMN_STATUS[toColumn];
-    if (!to || !card.spec || card.spec.status === to) return;
+  // ─── background refresh ───────────────────────────────────────────────────
+  const idle = useRef(true);
+  useEffect(() => {
+    idle.current = !dragging && !movingId && !open && !composing;
+  }, [dragging, movingId, open, composing]);
 
-    setError(null);
-    // Optimistic: the card lands where it was dropped, and snaps back if the
-    // server disagrees. A board that waits for a round-trip feels broken —
-    // but the card dims until the server confirms, so a slow transition is
-    // visibly still in flight rather than silently settled.
-    const previous = cards;
-    setCards((cs) => cs.map((c) => (c.id === card.id ? { ...c, columnKey: toColumn } : c)));
-    setMovingId(card.id);
-    try {
-      await post(`/projects/${slug}/board/specs/${card.spec.id}/transition`, { to });
-      await load();
-    } catch (err) {
-      setCards(previous);
-      setError(err instanceof Error ? err.message : 'Could not move that card.');
-    } finally {
-      setMovingId(null);
-    }
-  }
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.hidden || !idle.current) return;
+      // A failed background refresh leaves the board exactly as it was. The
+      // error banner belongs to actions the user took, not to a poll they
+      // never asked for.
+      load().catch(() => undefined);
+    }, REFRESH_MS);
+    return () => clearInterval(id);
+  }, [load]);
 
-  const openCard = useCallback(
-    async (ticketId: string) => {
-      setOpen(ticketId);
-      setTab('req');
-      setDetail(null);
-      setWaitingForRunner(false);
-      setCommentOpen(null);
-      setCommentDrafts({});
-      setEditing(false);
-      setConfirmDeleteTicket(false);
-      const d = await get<TicketDetail>(`/projects/${slug}/board/tickets/${ticketId}`);
-      setDetail(d);
+  useEffect(() => {
+    const id = refocus.current;
+    if (!id) return;
+    refocus.current = null;
+    cardRefs.current.get(id)?.focus();
+  }, [cards]);
+
+  // ─── the board's one shortcut ─────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || open) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable]')) return;
+      e.preventDefault();
+      searchBox.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  // ─── derived ──────────────────────────────────────────────────────────────
+  const columnKeys = useMemo(() => columns.map((c) => c.key), [columns]);
+  const columnName = useCallback(
+    (key: string) => columns.find((c) => c.key === key)?.name ?? key,
+    [columns],
+  );
+  const visible = useMemo(() => cards.filter((c) => matchesFilters(c, filters)), [cards, filters]);
+  const people = useMemo(() => assigneeOptions(cards), [cards]);
+  const assigneeNames = useMemo(
+    () => people.filter((p) => p.value !== UNASSIGNED).map((p) => p.value),
+    [people],
+  );
+  const filtered = filtersActive(filters);
+  /**
+   * Ranking is off while a filter hides cards. The lane the server is asked to
+   * rank is the whole lane, so sending the handful you can currently see would
+   * quietly sweep everything filtered out to the bottom — a board that
+   * reorders work you cannot see is worse than one that will not reorder.
+   */
+  const rankable = !filtered;
+
+  // ─── moving a card ────────────────────────────────────────────────────────
+  const applyMove = useCallback(
+    async (card: BoardCard, toColumn: string, index: number) => {
+      const plan = planDrop(card, toColumn);
+      if (plan.kind === 'refuse') {
+        setError(plan.reason);
+        return;
+      }
+      if (plan.kind === 'rank' && !rankable) {
+        setError(FILTER_LOCKED_REORDER);
+        return;
+      }
+
+      setError(null);
+      // Optimistic: the card lands where it was dropped, and snaps back if the
+      // server disagrees. A board that waits for a round-trip feels broken —
+      // but the card dims until the server confirms, so a slow transition is
+      // visibly still in flight rather than silently settled.
+      const previous = cards;
+      const next = placeInColumn(cards, card.id, toColumn, index);
+      const order = lane(next, toColumn);
+      setCards(next);
+      setMovingId(card.id);
+
+      try {
+        if (plan.kind === 'move') {
+          await post(`/projects/${slug}/board/specs/${plan.specId}/transition`, { to: plan.to });
+        }
+        if (rankable) {
+          await post(`/projects/${slug}/board/reorder`, {
+            columnKey: toColumn,
+            ticketIds: order.map((c) => c.id),
+          });
+        }
+        await load();
+        if (plan.kind === 'move') onChange();
+
+        const rank = order.findIndex((c) => c.id === card.id) + 1;
+        setNotice(
+          plan.kind === 'move'
+            ? `${card.key} moved to ${columnName(toColumn)}${rankable ? `, position ${rank} of ${order.length}` : ''}.`
+            : `${card.key} is now ${rank} of ${order.length} in ${columnName(toColumn)}.`,
+        );
+      } catch (err) {
+        setCards(previous);
+        setError(err instanceof Error ? err.message : 'Could not move that card.');
+      } finally {
+        setMovingId(null);
+      }
     },
-    [slug],
+    [cards, columnName, load, onChange, rankable, slug],
   );
 
-  // Re-fetches the open ticket's detail without touching which tab is
-  // showing — unlike openCard, which is for landing on a *different* ticket
-  // and rightly resets to Requirements. act() uses this so that, say,
-  // commenting on a Design item does not knock the drawer back to the
-  // Requirements tab right after.
-  const refreshOpenCard = useCallback(async () => {
-    if (!open) return;
-    const d = await get<TicketDetail>(`/projects/${slug}/board/tickets/${open}`);
-    setDetail(d);
-  }, [open, slug]);
-
-  // A spec dispatched to a paired runner (§9) has no synchronous result — the
-  // runner polls, executes, and reports back on its own schedule. Poll the
-  // ticket ourselves until its spec shows up, rather than leaving the drawer
-  // stuck on the "Generate spec" button with no feedback (and no guard
-  // against a confused second click queuing a duplicate job).
-  useEffect(() => {
-    if (!waitingForRunner || !open) return;
-    const id = setInterval(async () => {
-      try {
-        const d = await get<TicketDetail>(`/projects/${slug}/board/tickets/${open}`);
-        setDetail(d);
-        if (d.spec) {
-          setWaitingForRunner(false);
-          await load();
-          onChange();
-        }
-      } catch {
-        // Transient — the next tick tries again.
+  const moveLane = useCallback(
+    (card: BoardCard, direction: -1 | 1) => {
+      const next = neighbourColumn(columnKeys, card, direction);
+      if (!next) {
+        setNotice(`${card.key} is already in the ${direction < 0 ? 'first' : 'last'} lane.`);
+        return;
       }
-    }, 4000);
-    return () => clearInterval(id);
-  }, [waitingForRunner, open, slug, load, onChange]);
+      if (next.reason) {
+        setError(next.reason);
+        return;
+      }
+      refocus.current = card.id;
+      void applyMove(card, next.key, lane(cards, next.key).length);
+    },
+    [applyMove, cards, columnKeys],
+  );
 
-  async function act(label: string, fn: () => Promise<unknown>) {
-    setBusy(label);
-    setError(null);
-    try {
-      await fn();
-      await load();
-      await refreshOpenCard();
-      onChange();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
-    } finally {
-      setBusy(null);
-    }
-  }
+  const moveRank = useCallback(
+    (card: BoardCard, direction: -1 | 1) => {
+      const ids = lane(cards, card.columnKey).map((c) => c.id);
+      const to = ids.indexOf(card.id) + direction;
+      if (to < 0 || to >= ids.length) {
+        setNotice(
+          `${card.key} is already ${direction < 0 ? 'first' : 'last'} in ${columnName(card.columnKey)}.`,
+        );
+        return;
+      }
+      refocus.current = card.id;
+      void applyMove(card, card.columnKey, to);
+    },
+    [applyMove, cards, columnName],
+  );
 
-  const spec = detail?.spec ?? null;
-  const commentable = Boolean(spec && !BUILDABLE_STATUSES.includes(spec.status as SpecStatus));
-  // Mirrors the server's refusal (`ticket_has_delivered_work`): a ticket
-  // whose spec reached the gate is audit trail, not clutter.
-  const ticketGated = Boolean(spec && BUILDABLE_STATUSES.includes(spec.status as SpecStatus));
-
-  async function deleteTicket() {
-    if (!open) return;
-    setDeleteBusy(true);
-    setDeleteError(null);
-    try {
-      await del(`/projects/${slug}/board/tickets/${open}`);
-      setConfirmDeleteTicket(false);
-      setOpen(null);
-      await load();
-      onChange();
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Failed to delete the ticket');
-    } finally {
-      setDeleteBusy(false);
-    }
-  }
-
-  async function submitComment(itemIndex: number) {
-    const body = (commentDrafts[itemIndex] ?? '').trim();
-    if (!body || !spec) return;
-    await act('comment', async () => {
-      await post(`/projects/${slug}/board/specs/${spec.id}/comments`, {
-        section: 'design',
-        itemIndex,
-        body,
+  // ─── drag ─────────────────────────────────────────────────────────────────
+  function laneDropIndex(laneEl: HTMLElement, clientY: number, draggingId: string): number {
+    const midpoints = [...laneEl.querySelectorAll<HTMLElement>('[data-card]')]
+      .filter((el) => el.dataset.card !== draggingId)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.top + rect.height / 2;
       });
-      setCommentDrafts((d) => ({ ...d, [itemIndex]: '' }));
-      setCommentOpen(null);
-    });
+    return insertionIndex(midpoints, clientY);
   }
 
   return (
     <div className={styles.wrap}>
-      {error && <div className="err">{error}</div>}
+      {error && (
+        <div className="err" role="alert">
+          {error}
+          <button type="button" className={styles.dismiss} onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      <p aria-live="polite" className={styles.sr}>
+        {notice}
+      </p>
 
+      {/* ─── toolbar ─────────────────────────────────────────────────────── */}
       <div className={styles.toolbar}>
-        <button type="button" className="btn sm" onClick={() => setComposing(!composing)}>
+        <div className={styles.search}>
+          <span aria-hidden>⌕</span>
+          <input
+            ref={searchBox}
+            type="search"
+            value={filters.query}
+            placeholder="Search key, title or assignee"
+            aria-label="Search the board"
+            onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setFilters((f) => ({ ...f, query: '' }));
+            }}
+          />
+          <kbd className={styles.kbdhint} aria-hidden>
+            /
+          </kbd>
+        </div>
+
+        <AssigneeFilter
+          options={people}
+          selected={filters.assignees}
+          me={session.user?.name ?? null}
+          onChange={(assignees) => setFilters((f) => ({ ...f, assignees }))}
+        />
+
+        <div className={styles.seg} role="group" aria-label="Filter by what needs attention">
+          {(
+            [
+              ['any', 'All'],
+              ['flagged', 'Flagged'],
+              ['needs-work', 'Needs work'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={filters.attention === value ? styles.segon : styles.segoff}
+              aria-pressed={filters.attention === value}
+              title={
+                value === 'flagged'
+                  ? 'Specs carrying claims nobody has checked'
+                  : value === 'needs-work'
+                    ? 'Blocked, or a reviewer asked for changes'
+                    : 'Everything on the board'
+              }
+              onClick={() => setFilters((f) => ({ ...f, attention: value }))}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <span className={styles.grow} />
+
+        {filtered && (
+          <span className={styles.showing}>
+            {visible.length} of {cards.length}
+            <button type="button" className={styles.clear} onClick={() => setFilters(NO_FILTERS)}>
+              Clear
+            </button>
+          </span>
+        )}
+
+        <button
+          type="button"
+          className="btn primary sm"
+          aria-expanded={composing}
+          onClick={() => setComposing((c) => !c)}
+        >
           + New ticket
         </button>
-        <span className={styles.hint}>
-          Generating a spec is a deliberate click on a ticket — never automatic.
-        </span>
       </div>
 
       {composing && (
         <div className={`card ${styles.compose}`}>
-          <div className="field">
-            <label htmlFor="tt">Title</label>
-            <input id="tt" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus />
+          <div className={styles.composerow}>
+            <div className="field" style={{ flex: 2, marginBottom: 0 }}>
+              <label htmlFor="tt">Title</label>
+              <input id="tt" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus />
+            </div>
+            <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+              <label htmlFor="ta">Assignee</label>
+              <input
+                id="ta"
+                list="specd-board-assignees"
+                value={newAssignee}
+                onChange={(e) => setNewAssignee(e.target.value)}
+                placeholder="Nobody"
+              />
+              <datalist id="specd-board-assignees">
+                {assigneeNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </div>
           </div>
           <div className="field">
             <label htmlFor="tb">The business ask, in plain language</label>
             <textarea
               id="tb"
-              rows={4}
+              rows={3}
               value={newBody}
               onChange={(e) => setNewBody(e.target.value)}
               placeholder="Sales ops wants to pull contact lists into Excel for the quarterly campaign. The filters set in the app should apply."
             />
           </div>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={!newTitle.trim() || busy === 'ticket'}
-            onClick={() =>
-              act('ticket', async () => {
-                await post(`/projects/${slug}/board/tickets`, { title: newTitle, body: newBody });
-                setNewTitle('');
-                setNewBody('');
-                setComposing(false);
-              })
-            }
-          >
-            {busy === 'ticket' && <span className="spinner" />} Create ticket
-          </button>
-        </div>
-      )}
-
-      {columns.length === 0 && !error && (
-        <div className={styles.board} aria-hidden>
-          {Array.from({ length: 4 }, (_, i) => (
-            <div key={i}>
-              <span className="skeleton" style={{ height: '0.9rem', width: '55%', marginBottom: '0.7rem' }} />
-              <span className="skeleton" style={{ height: '3.4rem', marginBottom: '0.5rem' }} />
-              {i < 2 && <span className="skeleton" style={{ height: '3.4rem' }} />}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className={styles.board}>
-        {columns.map((col) => {
-          const colCards = cards.filter((c) => c.columnKey === col.key);
-          return (
-            <div
-              key={col.key}
-              className={`${styles.col} ${
-                hoverCol === col.key
-                  ? dragging && dropCheck(dragging, col.key).ok
-                    ? styles.dropOk
-                    : styles.dropNo
-                  : ''
-              }`}
-              onDragOver={(e) => {
-                if (!dragging) return;
-                // preventDefault is what marks this a valid drop target; without
-                // it the browser refuses the drop and shows a "no entry" cursor.
-                e.preventDefault();
-                e.dataTransfer.dropEffect = dropCheck(dragging, col.key).ok ? 'move' : 'none';
-                setHoverCol(col.key);
-              }}
-              onDragLeave={() => setHoverCol((h) => (h === col.key ? null : h))}
-              onDrop={(e) => {
-                e.preventDefault();
-                setHoverCol(null);
-                if (dragging) void moveCard(dragging, col.key);
-                setDragging(null);
+          <div className={styles.dactions}>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!newTitle.trim() || creating}
+              onClick={async () => {
+                setCreating(true);
+                setError(null);
+                try {
+                  await post(`/projects/${slug}/board/tickets`, {
+                    title: newTitle.trim(),
+                    body: newBody,
+                    assignee: newAssignee.trim(),
+                  });
+                  setNewTitle('');
+                  setNewBody('');
+                  setNewAssignee('');
+                  setComposing(false);
+                  await load();
+                  onChange();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Could not create that ticket.');
+                } finally {
+                  setCreating(false);
+                }
               }}
             >
-              <h5>
-                {col.name}
-                <span className={`${styles.count} ${colCards.length === 0 ? styles.zero : ''}`}>
-                  {colCards.length}
-                </span>
-              </h5>
-              {colCards.map((card) => (
-                <button
-                  key={card.id}
-                  type="button"
-                  className={`${styles.card} ${dragging?.id === card.id ? styles.dragging : ''}`}
-                  style={movingId === card.id ? { opacity: 0.55, cursor: 'progress' } : undefined}
-                  draggable={Boolean(card.spec)}
-                  onDragStart={(e) => {
-                    setDragging(card);
-                    e.dataTransfer.effectAllowed = 'move';
-                    // Firefox will not begin a drag unless the event carries data.
-                    e.dataTransfer.setData('text/plain', card.id);
-                  }}
-                  onDragEnd={() => {
-                    setDragging(null);
-                    setHoverCol(null);
-                  }}
-                  onClick={() => openCard(card.id)}
-                >
-                  <div className={styles.cid}>{card.key}</div>
-                  <div className={styles.ctitle}>{card.title}</div>
-                  <div className={styles.cfoot}>
-                    {card.spec ? (
-                      <>
-                        <span className={`pill ${card.spec.status === 'approved' ? 'on' : ''}`}>
-                          spec v{card.spec.version}
-                        </span>
-                        {card.spec.unverifiedCount > 0 && (
-                          <span className="pill unverified">{card.spec.unverifiedCount} UNVERIFIED</span>
-                        )}
-                        {card.spec.approvedBy && (
-                          <span className="pill on">✓ {card.spec.approvedBy}</span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="pill">ticket</span>
-                    )}
-                  </div>
-                </button>
-              ))}
-              {colCards.length === 0 && <div className={styles.colempty}>—</div>}
+              {creating && <span className="spinner" />} Create ticket
+            </button>
+            <button type="button" className="btn" onClick={() => setComposing(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── the board ───────────────────────────────────────────────────── */}
+      <div className={styles.board}>
+        {/* Placeholder lanes live in the same row as the real ones rather than
+            in a board of their own — two `flex: 1` boards side by side would
+            each take half the height, and the empty one would show as a gap
+            under the skeleton. */}
+        {columns.length === 0 &&
+          Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className={styles.col} style={{ padding: '0.65rem 0.55rem' }} aria-hidden>
+              <span className="skeleton" style={{ height: '0.9rem', width: '55%', marginBottom: '1.1rem' }} />
+              <span className="skeleton" style={{ height: '5rem', marginBottom: '0.5rem' }} />
+              {i < 3 && <span className="skeleton" style={{ height: '5rem' }} />}
             </div>
+          ))}
+
+        {columns.map((col, colIndex) => {
+          const isCollapsed = collapsed.includes(col.key);
+          const all = lane(cards, col.key);
+          const shown = lane(visible, col.key);
+          const isGate = col.key === 'approved';
+
+          if (isCollapsed) {
+            return (
+              <section key={col.key} className={styles.collapsed}>
+                <button
+                  type="button"
+                  className={styles.expand}
+                  title={`Expand ${col.name}`}
+                  onClick={() => setCollapsed((c) => c.filter((k) => k !== col.key))}
+                >
+                  <span className={styles.count}>{shown.length}</span>
+                  <span className={styles.vertical}>{col.name}</span>
+                </button>
+              </section>
+            );
+          }
+
+          const plan = dragging ? planDrop(dragging, col.key) : null;
+          const welcome = plan ? plan.kind !== 'refuse' : false;
+          // No placeholder while a filter is on: the drop will not rank
+          // anything, so drawing a slot would promise a position the board is
+          // about to ignore.
+          const showPlaceholder = Boolean(
+            dragging && dropAt?.column === col.key && welcome && rankable,
+          );
+
+          return (
+            <section
+              key={col.key}
+              className={`${styles.col} ${isGate ? styles.gate : ''} ${
+                dragging && dropAt?.column === col.key ? (welcome ? styles.dropOk : styles.dropNo) : ''
+              }`}
+              aria-label={`${col.name}, ${shown.length} card${shown.length === 1 ? '' : 's'}`}
+            >
+              <header className={styles.colhead}>
+                <span className={styles.stn}>{String(colIndex + 1).padStart(2, '0')}</span>
+                <h5>{col.name}</h5>
+                {isGate && (
+                  <span
+                    className={styles.human}
+                    title="Only a signed-in person can move a spec into this lane."
+                  >
+                    HUMAN
+                  </span>
+                )}
+                <span className={styles.grow} />
+                <span className={`${styles.count} ${shown.length === 0 ? styles.zero : ''}`}>
+                  {filtered && shown.length !== all.length
+                    ? `${shown.length}/${all.length}`
+                    : shown.length}
+                </span>
+                {col.key === 'backlog' && (
+                  <button
+                    type="button"
+                    className={styles.headbtn}
+                    title="New ticket"
+                    aria-label="New ticket"
+                    onClick={() => setComposing(true)}
+                  >
+                    +
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.headbtn}
+                  title={`Collapse ${col.name}`}
+                  aria-label={`Collapse ${col.name}`}
+                  onClick={() => setCollapsed((c) => [...c, col.key])}
+                >
+                  {/* Guillemet, not ⟨: the mathematical angle bracket has no
+                      glyph in JetBrains Mono and fell back to something that
+                      read as a stray opening parenthesis. */}
+                  «
+                </button>
+              </header>
+
+              <div
+                className={styles.laneBody}
+                onDragOver={(e) => {
+                  if (!dragging || !welcome) return;
+                  // preventDefault is what marks this a valid drop target;
+                  // without it the browser refuses the drop and shows a "no
+                  // entry" cursor.
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  const index = rankable
+                    ? laneDropIndex(e.currentTarget, e.clientY, dragging.id)
+                    : shown.length;
+                  setDropAt((at) =>
+                    at?.column === col.key && at.index === index ? at : { column: col.key, index },
+                  );
+                }}
+                onDragEnter={() => {
+                  // A refused lane still has to say so, and dragover never
+                  // fires on one because it never calls preventDefault.
+                  if (!dragging || welcome) return;
+                  setDropAt((at) => (at?.column === col.key ? at : { column: col.key, index: 0 }));
+                }}
+                onDragLeave={(e) => {
+                  // Moving between two cards inside this lane fires dragleave
+                  // on the lane; only a pointer that actually left it counts.
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                  setDropAt((at) => (at?.column === col.key ? null : at));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const card = dragging;
+                  const index = dropAt?.column === col.key ? dropAt.index : shown.length;
+                  setDropAt(null);
+                  setDragging(null);
+                  if (card) void applyMove(card, col.key, index);
+                }}
+              >
+                {(() => {
+                  const nodes: React.ReactNode[] = [];
+                  const gap = <div key="placeholder" className={styles.placeholder} aria-hidden />;
+                  let seen = 0;
+
+                  for (const c of shown) {
+                    const isDragged = dragging?.id === c.id;
+                    if (!isDragged) {
+                      if (showPlaceholder && dropAt?.index === seen) nodes.push(gap);
+                      seen += 1;
+                    }
+                    nodes.push(
+                      <div key={c.id} data-card={c.id}>
+                        <BoardCardView
+                          ref={(el) => {
+                            cardRefs.current.set(c.id, el);
+                          }}
+                          card={c}
+                          dragging={isDragged}
+                          moving={movingId === c.id}
+                          onOpen={() => setOpen(c.id)}
+                          onMoveLane={(d) => moveLane(c, d)}
+                          onMoveRank={(d) => moveRank(c, d)}
+                          onDragStart={(e) => {
+                            setDragging(c);
+                            e.dataTransfer.effectAllowed = 'move';
+                            // Firefox will not begin a drag unless the event
+                            // carries data.
+                            e.dataTransfer.setData('text/plain', c.key);
+                          }}
+                          onDragEnd={() => {
+                            setDragging(null);
+                            setDropAt(null);
+                          }}
+                        />
+                      </div>,
+                    );
+                  }
+                  if (showPlaceholder && (dropAt?.index ?? 0) >= seen) nodes.push(gap);
+                  return nodes;
+                })()}
+
+                {shown.length === 0 && !showPlaceholder && (
+                  <p className={styles.colempty}>
+                    {filtered && all.length > 0
+                      ? `${all.length} hidden by the filter`
+                      : COLUMN_EMPTY[col.key]}
+                  </p>
+                )}
+              </div>
+            </section>
           );
         })}
       </div>
 
-      {/* ─── spec drawer ─────────────────────────────────────────────────── */}
+      <p className={styles.legend}>
+        Drag a card, or focus one: <kbd>←</kbd> <kbd>→</kbd> change lane, <kbd>↑</kbd> <kbd>↓</kbd>{' '}
+        reorder, <kbd>/</kbd> searches.
+        {!rankable && ' Reordering is off while a filter is on.'} Generating a spec is always a
+        deliberate click — never automatic.
+        {movingId && <span className={styles.saving}> · saving…</span>}
+      </p>
+
       {open && (
-        <>
-          <button type="button" className={styles.scrim} onClick={() => setOpen(null)} aria-label="Close" />
-          <aside className={styles.drawer}>
-            {!detail && (
-              <div style={{ padding: '1rem' }} aria-hidden>
-                <span className="skeleton" style={{ height: '0.8rem', width: '18%', display: 'block', marginBottom: '0.6rem' }} />
-                <span className="skeleton" style={{ height: '1.2rem', width: '70%', display: 'block', marginBottom: '0.8rem' }} />
-                <span className="skeleton" style={{ height: '0.85rem', width: '95%', display: 'block', marginBottom: '0.45rem' }} />
-                <span className="skeleton" style={{ height: '0.85rem', width: '88%', display: 'block', marginBottom: '0.45rem' }} />
-                <span className="skeleton" style={{ height: '0.85rem', width: '60%', display: 'block' }} />
-              </div>
-            )}
-
-            {detail && (
-              <>
-                <div className={styles.dhead}>
-                  <div className={styles.did}>
-                    <span>{detail.ticket.key}</span>
-                    <button type="button" className={styles.close} onClick={() => setOpen(null)}>
-                      ✕
-                    </button>
-                  </div>
-                  <div className={styles.dtitle}>{detail.ticket.title}</div>
-                  <div className={styles.dmeta}>
-                    {spec ? (
-                      <>
-                        <span className={`pill ${spec.status === 'approved' ? 'on' : ''}`}>
-                          {spec.status.replace('_', ' ')} · v{spec.version}
-                        </span>
-                        <span className="pill">{spec.citationCount} citations</span>
-                        {spec.unverifiedCount > 0 && (
-                          <span className="pill unverified">{spec.unverifiedCount} UNVERIFIED</span>
-                        )}
-                        {spec.approvedBy && (
-                          <span className="pill on">
-                            stamped by {spec.approvedBy}
-                            {spec.approvedAt
-                              ? ` · ${new Date(spec.approvedAt).toLocaleDateString()}`
-                              : ''}
-                          </span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="pill">no spec yet</span>
-                    )}
-                    <span className={styles.dgrow} />
-                    {!editing && (
-                      <>
-                        <button
-                          type="button"
-                          className="btn sm"
-                          onClick={() => {
-                            setEditing(true);
-                            setEditTitle(detail.ticket.title);
-                            setEditBody(detail.ticket.body);
-                          }}
-                        >
-                          ✎ Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="btn sm danger"
-                          disabled={ticketGated}
-                          title={
-                            ticketGated
-                              ? 'This ticket has an approved or built spec — it is part of the audit trail and cannot be deleted.'
-                              : undefined
-                          }
-                          onClick={() => {
-                            setDeleteError(null);
-                            setConfirmDeleteTicket(true);
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {editing && (
-                  <div className={styles.dbody}>
-                    <div className="field">
-                      <label htmlFor="et">Title</label>
-                      <input
-                        id="et"
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        maxLength={200}
-                        autoFocus
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="eb">The business ask, in plain language</label>
-                      <textarea
-                        id="eb"
-                        rows={7}
-                        value={editBody}
-                        onChange={(e) => setEditBody(e.target.value)}
-                      />
-                      {spec && (
-                        <p className="hint">
-                          The next spec draft reads this wording — v{spec.version} was drafted from
-                          the previous one.
-                        </p>
-                      )}
-                    </div>
-                    <div className={styles.dactions}>
-                      <button
-                        type="button"
-                        className="btn primary"
-                        disabled={!editTitle.trim() || busy === 'edit-ticket'}
-                        onClick={() =>
-                          act('edit-ticket', async () => {
-                            await patch(`/projects/${slug}/board/tickets/${detail.ticket.id}`, {
-                              title: editTitle.trim(),
-                              body: editBody,
-                            });
-                            setEditing(false);
-                          })
-                        }
-                      >
-                        {busy === 'edit-ticket' && <span className="spinner" />} Save
-                      </button>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={busy === 'edit-ticket'}
-                        onClick={() => setEditing(false)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {!editing && !spec && (
-                  <div className={styles.dbody}>
-                    <h6>Business ask (verbatim)</h6>
-                    <p className={styles.verbatim}>
-                      {detail.ticket.body || <em>No description provided.</em>}
-                    </p>
-                    <p className={styles.nospec}>
-                      No spec yet. Generating one runs SpecAgent against this project’s knowledge
-                      base — it drafts EARS requirements, a cited design, and sized tasks.
-                    </p>
-                  </div>
-                )}
-
-                {!editing && spec && (
-                  <>
-                    <div className={styles.dtabs}>
-                      {(
-                        [
-                          ['req', 'Requirements'],
-                          ['des', 'Design'],
-                          ['tas', 'Tasks'],
-                        ] as const
-                      ).map(([k, label]) => (
-                        <button
-                          key={k}
-                          type="button"
-                          className={tab === k ? styles.dton : styles.dtab}
-                          onClick={() => setTab(k)}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className={styles.dbody}>
-                      {tab === 'req' &&
-                        spec.content.requirements.map((req, i) => (
-                          <div key={i} className={styles.reqblock}>
-                            <h6>Story</h6>
-                            <p>{req.story}</p>
-                            {req.criteria.map((c, j) => (
-                              <div key={j} className={styles.ears}>
-                                <b>{c.keyword}</b> {c.trigger} <b>THE SYSTEM SHALL</b> {c.response}
-                              </div>
-                            ))}
-                          </div>
-                        ))}
-
-                      {tab === 'des' && (
-                        <>
-                          {spec.content.design.map((claim, i) => {
-                            const itemComments = detail.comments.filter(
-                              (c) => c.section === 'design' && c.itemIndex === i,
-                            );
-                            return (
-                              <div key={i} className={styles.claimblock}>
-                                <p className={styles.claim}>
-                                  {claim.text}{' '}
-                                  {/* A claim carrying both is an `unknown`: the
-                                      citation is real but was not confirmed
-                                      against what was retrieved, so a tick
-                                      beside it would be the exact lie the
-                                      verdict exists to prevent. */}
-                                  {claim.citation && (
-                                    <span className={styles.cite}>
-                                      {claim.citation}{' '}
-                                      {claim.verdict === 'stale' ? '⧗' : claim.unverified ? '?' : '✓'}
-                                    </span>
-                                  )}
-                                  {claim.unverified && (
-                                    <span className={styles.unv}>
-                                      ⚠{' '}
-                                      {claim.verdict === 'stale'
-                                        ? 'OUT OF DATE'
-                                        : claim.citation
-                                          ? 'UNCONFIRMED'
-                                          : 'UNVERIFIED'}{' '}
-                                      — {claim.unverified}
-                                    </span>
-                                  )}
-                                </p>
-
-                                {claim.unverified && (
-                                  <div className={styles.commentThread}>
-                                    {itemComments.map((c) => (
-                                      <div key={c.id} className={styles.commentRow}>
-                                        <div className={styles.commentMeta}>
-                                          <b>{c.authorName}</b>
-                                          <span>{new Date(c.createdAt).toLocaleDateString()}</span>
-                                        </div>
-                                        <p>{c.body}</p>
-                                      </div>
-                                    ))}
-
-                                    {commentable &&
-                                      (commentOpen === i ? (
-                                        <div className={styles.commentForm}>
-                                          <textarea
-                                            rows={2}
-                                            value={commentDrafts[i] ?? ''}
-                                            onChange={(e) =>
-                                              setCommentDrafts((d) => ({ ...d, [i]: e.target.value }))
-                                            }
-                                            placeholder="Ask a clarifying question…"
-                                            autoFocus
-                                          />
-                                          <div className={styles.commentFormActions}>
-                                            <button
-                                              type="button"
-                                              className="btn sm"
-                                              onClick={() => setCommentOpen(null)}
-                                            >
-                                              Cancel
-                                            </button>
-                                            <button
-                                              type="button"
-                                              className="btn sm primary"
-                                              disabled={
-                                                !(commentDrafts[i] ?? '').trim() || busy === 'comment'
-                                              }
-                                              onClick={() => submitComment(i)}
-                                            >
-                                              Comment
-                                            </button>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          className={styles.commentAffordance}
-                                          onClick={() => setCommentOpen(i)}
-                                        >
-                                          {itemComments.length > 0
-                                            ? `${itemComments.length} comment${itemComments.length === 1 ? '' : 's'}`
-                                            : 'Add comment'}
-                                        </button>
-                                      ))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                          {spec.content.outOfScope && spec.content.outOfScope.length > 0 && (
-                            <>
-                              <h6>Out of scope</h6>
-                              <ul className={styles.list}>
-                                {spec.content.outOfScope.map((o, i) => (
-                                  <li key={i}>{o}</li>
-                                ))}
-                              </ul>
-                            </>
-                          )}
-                          {spec.content.openQuestions && spec.content.openQuestions.length > 0 && (
-                            <>
-                              <h6>Open questions</h6>
-                              <ul className={styles.list}>
-                                {spec.content.openQuestions.map((q, i) => (
-                                  <li key={i}>{q}</li>
-                                ))}
-                              </ul>
-                            </>
-                          )}
-                        </>
-                      )}
-
-                      {tab === 'tas' &&
-                        spec.content.tasks.map((task) => (
-                          <div key={task.id} className={styles.task}>
-                            <span className={styles.cb}>[ ]</span>
-                            <span>
-                              <b>{task.id}</b> {task.title}
-                            </span>
-                            <span className={styles.sz}>
-                              {task.size}
-                              {task.repo ? ` · ${task.repo}` : ''}
-                              {task.asBuilt ? ' · always last' : ''}
-                            </span>
-                          </div>
-                        ))}
-                    </div>
-                  </>
-                )}
-
-                <div className={styles.dfoot}>
-                  {!spec && waitingForRunner && (
-                    <button type="button" className="btn primary" disabled>
-                      <span className="spinner" /> Queued for your runner — waiting for it to pick this up…
-                    </button>
-                  )}
-
-                  {!spec && !waitingForRunner && (
-                    <button
-                      type="button"
-                      className="btn primary"
-                      disabled={busy === 'gen'}
-                      onClick={() =>
-                        act('gen', async () => {
-                          const res = await post<{ spec: SpecView | null; queued?: boolean }>(
-                            `/projects/${slug}/board/tickets/${detail.ticket.id}/generate-spec`,
-                          );
-                          if (res.queued) setWaitingForRunner(true);
-                        })
-                      }
-                    >
-                      {busy === 'gen' ? (
-                        <>
-                          <span className="spinner" /> SpecAgent drafting…
-                        </>
-                      ) : (
-                        '✨ Generate spec'
-                      )}
-                    </button>
-                  )}
-
-                  {spec?.status === 'draft' && (
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={busy === 'review'}
-                      onClick={() =>
-                        act('review', () =>
-                          post(`/projects/${slug}/board/specs/${spec.id}/transition`, {
-                            to: 'in_review',
-                          }),
-                        )
-                      }
-                    >
-                      {busy === 'review' && <span className="spinner" />} Submit for review →
-                    </button>
-                  )}
-
-                  {(spec?.status === 'in_review' || spec?.status === 'changes_requested') && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={busy === 'revise'}
-                        onClick={() =>
-                          act('revise', () => post(`/projects/${slug}/board/specs/${spec.id}/revise`))
-                        }
-                      >
-                        {busy === 'revise' && <span className="spinner" />} Request agent revision
-                      </button>
-                      {spec.status === 'in_review' && (
-                        /* The gate. This button is the only path to `approved`,
-                           and the server records who pressed it. */
-                        <button
-                          type="button"
-                          className="btn primary"
-                          disabled={busy === 'approve'}
-                          onClick={() =>
-                            act('approve', () =>
-                              post(`/projects/${slug}/board/specs/${spec.id}/transition`, {
-                                to: 'approved',
-                              }),
-                            )
-                          }
-                        >
-                          {busy === 'approve' ? <span className="spinner" /> : `✓ Approve spec v${spec.version}`}
-                        </button>
-                      )}
-                    </>
-                  )}
-
-                  {spec?.status === 'approved' && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() =>
-                          navigator.clipboard.writeText(`specd spec pull ${spec.ticketKey}`)
-                        }
-                      >
-                        ⧉ specd spec pull {spec.ticketKey}
-                      </button>
-                      {/* Station 05, handoff mode (a): the hosted runner
-                          implements the tasks and leaves a branch to review. */}
-                      <button
-                        type="button"
-                        className="btn primary"
-                        disabled={busy === 'build'}
-                        onClick={() =>
-                          act('build', () => post(`/projects/${slug}/board/specs/${spec.id}/build`))
-                        }
-                      >
-                        {busy === 'build' ? (
-                          <>
-                            <span className="spinner" /> Building…
-                          </>
-                        ) : (
-                          '▶ Build it'
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={busy === 'building'}
-                        onClick={() =>
-                          act('building', () =>
-                            post(`/projects/${slug}/board/specs/${spec.id}/transition`, {
-                              to: 'building',
-                            }),
-                          )
-                        }
-                      >
-                        {busy === 'building' && <span className="spinner" />} Mark as building
-                      </button>
-                    </>
-                  )}
-
-                  {spec?.status === 'building' && (
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={busy === 'delivered'}
-                      onClick={() =>
-                        act('delivered', () =>
-                          post(`/projects/${slug}/board/specs/${spec.id}/transition`, {
-                            to: 'delivered',
-                          }),
-                        )
-                      }
-                    >
-                      {busy === 'delivered' && <span className="spinner" />} Mark delivered
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </aside>
-        </>
-      )}
-
-      {confirmDeleteTicket && detail && (
-        <ConfirmDialog
-          title={`Delete ${detail.ticket.key}?`}
-          body={
-            <>
-              Deletes <b>{detail.ticket.title}</b> and any draft specs under it. Run history
-              survives with the ticket reference cleared.
-            </>
-          }
-          confirmLabel="Delete ticket"
-          busy={deleteBusy}
-          error={deleteError}
-          onConfirm={deleteTicket}
-          onCancel={() => setConfirmDeleteTicket(false)}
+        <SpecDrawer
+          slug={slug}
+          ticketId={open}
+          assignees={assigneeNames}
+          onClose={() => setOpen(null)}
+          onChanged={reloadAll}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Who to show. A menu rather than a row of chips because a real board grows
+ * more people than a toolbar has room for, and "me" is pinned to the top
+ * because filtering to yourself is the single most common thing anyone does
+ * to a board.
+ */
+function AssigneeFilter({
+  options,
+  selected,
+  me,
+  onChange,
+}: {
+  options: { value: string; label: string; count: number }[];
+  selected: string[];
+  me: string | null;
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const ordered = me
+    ? [...options].sort((a, b) => Number(b.value === me) - Number(a.value === me))
+    : options;
+
+  const label =
+    selected.length === 0
+      ? 'Anyone'
+      : selected.length === 1
+        ? (options.find((o) => o.value === selected[0])?.label ?? '1 person')
+        : `${selected.length} people`;
+
+  return (
+    <div className={styles.menu} ref={root}>
+      <button
+        type="button"
+        className={selected.length > 0 ? styles.segon : styles.segoff}
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {label} ▾
+      </button>
+      {open && (
+        <div className={styles.menupanel} role="group" aria-label="Filter by assignee">
+          {ordered.length === 0 && <p className={styles.menuempty}>Nobody is assigned yet.</p>}
+          {ordered.map((option) => (
+            <label key={option.value} className={styles.menurow}>
+              <input
+                type="checkbox"
+                checked={selected.includes(option.value)}
+                onChange={(e) =>
+                  onChange(
+                    e.target.checked
+                      ? [...selected, option.value]
+                      : selected.filter((v) => v !== option.value),
+                  )
+                }
+              />
+              <span>
+                {option.label}
+                {option.value === me && <span className={styles.you}> you</span>}
+              </span>
+              <span className={styles.menucount}>{option.count}</span>
+            </label>
+          ))}
+          {selected.length > 0 && (
+            <button type="button" className={styles.menuclear} onClick={() => onChange([])}>
+              Clear
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

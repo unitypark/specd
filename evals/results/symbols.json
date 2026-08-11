@@ -1,11 +1,11 @@
 {
   "target": "/Users/junghwpark/Dev/Projects/specd",
   "typescript": {
-    "files": 154,
-    "oracleSymbols": 1120,
-    "precision": 0.9876543209876543,
+    "files": 162,
+    "oracleSymbols": 1152,
+    "precision": 0.9879931389365352,
     "recall": 1,
-    "f1": 0.9937888198757764,
+    "f1": 0.9939603106125972,
     "worstFalsePositives": [
       "bootstrap ×1",
       "AppModule ×1",

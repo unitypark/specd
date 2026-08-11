@@ -132,6 +132,16 @@ Each of these is a real gap, not an oversight in the writing:
 - **UNVERIFIED — no zero-downtime story.** Migration-then-restart against a
   single instance means a visible restart.
 
+## The day the repository goes public
+
+Run `./scripts/protect-main.sh`. GitHub's free plan refuses branch rulesets
+on private repositories, so protection for `main` is staged as that script
+rather than configured: one command, applied the moment the flip happens.
+It enforces PR-only changes with the `verify` check required before merge —
+closing the gap that let a merge land while its CI was still running — plus
+no force pushes and no branch deletion. The `grade` job is deliberately not
+in the required checks; see the workflow header for why.
+
 ## Rolling back
 
 Write this section first, when there is something to roll back. Today the

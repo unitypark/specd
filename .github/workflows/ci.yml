@@ -1,14 +1,22 @@
 # The gate that was being run by hand.
 #
 # `pnpm typecheck && pnpm test` is what knowledge/conventions.md commits to,
-# so that is exactly what this runs — no more, so CI cannot start disagreeing
-# with the documented command, and no less.
+# and `verify` runs it verbatim so CI cannot start disagreeing with the
+# documented command. It then also runs `pnpm build`: Next.js surfaces a
+# class of errors only at build time (a missing Suspense boundary around
+# useSearchParams was a real one, caught only by a local habit), and
+# typecheck plus tests are blind to all of it.
 #
 # Postgres is a service rather than an omission. Every test that needs it
 # skips itself when none is reachable, which keeps a laptop with no infra
 # green but would make a CI run that skipped them look identical to one that
 # passed them. The verify step below fails if the integration tests were
 # skipped, so that can never happen quietly.
+#
+# `grade` is not a gate. It runs the eval harness — the scores that move
+# when the corpus moves — and posts them to the run summary. It is
+# deliberately absent from scripts/protect-main.sh's required checks: a
+# quality score that blocks merges is a suite people learn to game, not read.
 name: CI
 
 on:
@@ -93,3 +101,85 @@ jobs:
           pnpm --filter @specd/api exec vitest run \
             --reporter=json --outputFile=vitest-report.json
           node scripts/check-no-skips.mjs apps/api/vitest-report.json
+
+      # Last because its failures are the rarest — but real: this is the only
+      # step that catches what only `next build` sees.
+      - name: Production build
+        run: pnpm build
+
+      # When a run fails, the JSON report names the exact assertion without
+      # log spelunking — the stream-race failure on main took a --log-failed
+      # excavation that this artifact would have replaced.
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-report
+          path: apps/api/vitest-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  grade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: specd
+          POSTGRES_PASSWORD: specd
+          POSTGRES_DB: specd
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U specd -d specd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://specd:specd@localhost:5433/specd
+      JWT_SECRET: ci-only-not-a-secret
+      VAULT_MASTER_KEY: ZGV2LW9ubHktdmF1bHQta2V5LWNoYW5nZS1tZS0zMmI=
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The Go and Python oracles shell out to their toolchains; Python is on
+      # the runner already, Go arrives pinned to the repo's own go.mod.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm db:migrate
+
+      - name: Run the eval harness
+        run: |
+          pnpm eval | tee eval-output.txt
+          {
+            echo '## Eval scores'
+            echo
+            echo 'Grades, not gates — the numbers move when the corpus moves.'
+            echo
+            echo '```'
+            cat eval-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the graded results
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: evals/results/
+          retention-days: 30

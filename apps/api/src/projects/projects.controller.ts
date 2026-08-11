@@ -37,6 +37,8 @@ class CreateProjectDto {
   @IsOptional() @IsString() @MaxLength(500) description?: string;
   @IsOptional() @IsInt() @Min(0) spendCapCents?: number;
   @IsOptional() @IsIn(MODEL_IDS) defaultModel?: string;
+  /** The wizard sends true: the project is a draft until setup completes. */
+  @IsOptional() @IsBoolean() draft?: boolean;
 }
 
 class UpdateProjectDto {
@@ -45,6 +47,8 @@ class UpdateProjectDto {
   @IsOptional() @IsInt() @Min(0) spendCapCents?: number;
   @IsOptional() @IsIn(MODEL_IDS) defaultModel?: string;
   @IsOptional() @IsBoolean() agentsPaused?: boolean;
+  /** One-way: true marks setup finished; false is ignored. */
+  @IsOptional() @IsBoolean() setupComplete?: boolean;
 }
 
 class AddRepoDto {

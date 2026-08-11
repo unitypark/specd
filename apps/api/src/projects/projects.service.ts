@@ -24,6 +24,12 @@ export class ProjectsService {
     description?: string | null;
     spendCapCents?: number;
     defaultModel?: string;
+    /**
+     * The wizard creates drafts — real only once setup completes. API
+     * consumers (CLI, tests, the loop) omit this and get a live project,
+     * because for them "created" and "set up" are the same moment.
+     */
+    draft?: boolean;
   }) {
     const slug = await this.uniqueSlug(slugify(input.name) || 'project');
 
@@ -38,6 +44,7 @@ export class ProjectsService {
           input.defaultModel && isModelId(input.defaultModel)
             ? input.defaultModel
             : 'claude-opus-5',
+        setupCompletedAt: input.draft ? null : new Date(),
       })
       .returning();
     if (!project) throw new Error('failed to create project');
@@ -91,13 +98,25 @@ export class ProjectsService {
 
   async update(
     projectId: string,
-    patch: { name?: string; description?: string | null; spendCapCents?: number; defaultModel?: string; agentsPaused?: boolean },
+    patch: {
+      name?: string;
+      description?: string | null;
+      spendCapCents?: number;
+      defaultModel?: string;
+      agentsPaused?: boolean;
+      setupComplete?: boolean;
+    },
   ) {
     const values: Record<string, unknown> = {};
     if (patch.name !== undefined) values.name = patch.name;
     if (patch.description !== undefined) values.description = patch.description;
     if (patch.spendCapCents !== undefined) values.spendCapCents = patch.spendCapCents;
     if (patch.agentsPaused !== undefined) values.agentsPaused = patch.agentsPaused;
+    // One-way, and first-completion wins: re-finishing the wizard must not
+    // rewrite when the project actually went live.
+    if (patch.setupComplete === true) {
+      values.setupCompletedAt = sql`coalesce(${projects.setupCompletedAt}, now())`;
+    }
     if (patch.defaultModel !== undefined && isModelId(patch.defaultModel)) {
       values.defaultModel = patch.defaultModel;
     }
@@ -199,6 +218,7 @@ export class ProjectsService {
       knowledgeHealth: Math.round(health?.score ?? 0),
       defaultModel: project.defaultModel,
       agentsPaused: project.agentsPaused,
+      setupComplete: project.setupCompletedAt !== null,
     };
   }
 

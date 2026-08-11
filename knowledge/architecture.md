@@ -102,8 +102,9 @@ filename order. Grouped by domain:
 
 - **Identity & access** — `users`, `memberships`, `device_codes` (CLI device
   flow), `runners` (paired machines, token hashed at rest)
-- **Projects & wiring** — `projects`, `connections` (VCS / AI / tracker, one
-  row each), `repositories`
+- **Projects & wiring** — `projects` (`setup_completed_at` NULL = wizard
+  draft: resume/discard on the dashboard, never listed as real),
+  `connections` (VCS / AI / tracker, one row each), `repositories`
 - **Delivery** — `tickets`, `specs` (versioned, append-only, `supersedes`),
   `spec_comments`, `agent_runs`, `run_logs`, `webhook_deliveries` (audit
   trail, pruned by age — S-103)

@@ -143,6 +143,8 @@ export interface ProjectSummary {
    * worse than none.
    */
   agentsPaused: boolean;
+  /** False = wizard draft: setup never finished; offer resume/discard. */
+  setupComplete: boolean;
 }
 
 export interface SpecView {

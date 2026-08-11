@@ -58,6 +58,12 @@ export const projects = pgTable(
     defaultModel: text('default_model').notNull().default('claude-opus-5'),
     /** Kill switch per project (§12). */
     agentsPaused: boolean('agents_paused').notNull().default(false),
+    /**
+     * NULL = wizard draft: the row exists because connections and repos hang
+     * off it, but setup never finished. The dashboard offers resume/discard
+     * for these instead of listing them as real projects.
+     */
+    setupCompletedAt: timestamp('setup_completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('projects_slug_key').on(t.slug)],

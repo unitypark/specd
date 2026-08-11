@@ -13,4 +13,5 @@ export interface ProjectSummary {
   knowledgeHealth: number;
   defaultModel: string;
   agentsPaused: boolean;
+  setupComplete: boolean;
 }

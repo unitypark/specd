@@ -24,7 +24,12 @@
 Verify command for changes: `pnpm typecheck && pnpm test`. CI runs exactly
 that on every push and pull request (`.github/workflows/ci.yml`), against a
 real pgvector service, and fails the run if the suites that need Postgres
-skipped themselves instead of passing.
+skipped themselves instead of passing. CI's `verify` job then also runs
+`pnpm build` — Next.js surfaces a class of errors only at build time, and
+typecheck and tests are blind to all of it — so run `pnpm build` locally
+before a PR that touches `apps/web`. A separate `grade` job runs `pnpm eval`
+and posts scores to the run summary; it is deliberately never a required
+check (grades, not gates).
 
 ## Package naming
 

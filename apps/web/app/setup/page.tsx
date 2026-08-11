@@ -1317,6 +1317,19 @@ function SetupWizard() {
                         <>
                           {' '}
                           — {r.fileCount} files on branch <code>{r.branch}</code>
+                          {r.url && (
+                            <>
+                              {' '}
+                              <a
+                                className="btn sm"
+                                href={r.url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Review the PR →
+                              </a>
+                            </>
+                          )}
                           <p className={styles.hintq}>{r.reviewHint}</p>
                         </>
                       )}

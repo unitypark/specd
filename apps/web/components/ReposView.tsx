@@ -301,6 +301,16 @@ export function ReposView({
               <td>
                 {r.setupState === 'merged' ? (
                   <span className="pill on">merged ✓</span>
+                ) : r.setupBranch && r.setupPrUrl ? (
+                  <a
+                    className="pill warn"
+                    href={r.setupPrUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open the setup PR to review and merge it"
+                  >
+                    on {r.setupBranch} ↗
+                  </a>
                 ) : r.setupBranch ? (
                   <span
                     className="pill warn"
@@ -447,6 +457,9 @@ export function ReposView({
           padding: 0.6rem 0.8rem;
           background: var(--panel-2);
           border-bottom: 1px solid var(--line);
+        }
+        td :global(a.pill) {
+          text-decoration: none;
         }
         td {
           padding: 0.65rem 0.8rem;

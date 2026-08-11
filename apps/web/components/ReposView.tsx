@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { get, post } from '@/lib/api';
+import { del, get, post } from '@/lib/api';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface Repo {
   id: string;
@@ -43,6 +44,7 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
   const [vcsConnectionStatus, setVcsConnectionStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<Repo | null>(null);
 
   const load = useCallback(() => {
     get<Repo[]>(`/projects/${slug}/repositories`).then(setRepos).catch(() => undefined);
@@ -153,6 +155,17 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
                     Make primary
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="btn sm danger"
+                  disabled={busy === r.id}
+                  onClick={() => {
+                    setError(null);
+                    setConfirmRemove(r);
+                  }}
+                >
+                  Remove
+                </button>
               </td>
             </tr>
           ))}
@@ -165,6 +178,36 @@ export function ReposView({ slug, onChange }: { slug: string; onChange: () => vo
         The <b>primary</b> repository is where cross-repo specs file their as-built copy. specd
         writes to branches and pull requests — never directly to your default branch.
       </p>
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title={`Remove ${confirmRemove.name} from specd?`}
+          body={
+            <>
+              Removes the repository connection and its derived knowledge — indexed docs, graph
+              edges, code nodes and commit history all go with it. The repository itself
+              {confirmRemove.localPath ? ' on disk' : ''} is untouched.
+              {confirmRemove.isPrimary && (
+                <>
+                  {' '}
+                  <b>This is the primary repository</b> — cross-repo specs file their as-built copy
+                  here, so pick a new primary afterwards.
+                </>
+              )}
+            </>
+          }
+          confirmLabel="Remove repository"
+          busy={busy === confirmRemove.id}
+          error={error}
+          onConfirm={() =>
+            act(confirmRemove.id, async () => {
+              await del(`/projects/${slug}/repositories/${confirmRemove.id}`);
+              setConfirmRemove(null);
+            })
+          }
+          onCancel={() => setConfirmRemove(null)}
+        />
+      )}
 
       <style jsx>{`
         table {

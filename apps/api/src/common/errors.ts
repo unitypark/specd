@@ -52,6 +52,48 @@ export class AgentsPaused extends HttpException {
   }
 }
 
+/**
+ * Deletion refused while agent runs are executing. Cascades would rip rows
+ * out from under a live worker, turning a deliberate deletion into a
+ * confusing crash somewhere else — finish or cancel the runs first.
+ */
+export class RunsInFlight extends HttpException {
+  constructor(scope: 'project' | 'ticket', runningCount: number) {
+    super(
+      {
+        error: 'runs_in_flight',
+        message:
+          `This ${scope} has ${runningCount} agent run(s) executing right now. ` +
+          'Deleting it would pull the data out from under them — wait for the ' +
+          'runs to finish, or cancel them, then delete.',
+        runningCount,
+      },
+      HttpStatus.CONFLICT,
+    );
+  }
+}
+
+/**
+ * A ticket whose spec reached the gate is part of the audit trail: the
+ * approval stamp, and possibly shipped code, point back at it. Append-only
+ * discipline (§7) applies to the ticket exactly as it does to the spec.
+ */
+export class TicketHasDeliveredWork extends HttpException {
+  constructor(specStatus: string) {
+    super(
+      {
+        error: 'ticket_has_delivered_work',
+        message:
+          `This ticket has a "${specStatus}" spec. Approved and built specs are ` +
+          'the audit trail — the record of who approved what — so the ticket ' +
+          'that produced them cannot be deleted.',
+        specStatus,
+      },
+      HttpStatus.CONFLICT,
+    );
+  }
+}
+
 export class AiNotConfigured extends HttpException {
   constructor(detail: string) {
     super(

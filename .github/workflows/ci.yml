@@ -70,7 +70,7 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
@@ -155,7 +155,7 @@ jobs:
 
       # The Go and Python oracles shell out to their toolchains; Python is on
       # the runner already, Go arrives pinned to the repo's own go.mod.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum

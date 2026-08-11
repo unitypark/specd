@@ -405,7 +405,16 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
               .from(agentRuns)
               .where(eq(agentRuns.id, runId))
               .limit(1);
-            if (run) onEnd(run.status);
+            // Only a terminal status is an end. The initial catch-up asks
+            // with ended=true so a run that finished before anyone watched
+            // still closes out — but a run that is merely queued or running
+            // must keep the stream open, not end it with a status that is
+            // not an ending. Announcing 'running' here closed every SSE
+            // stream right after replay (the controller completes on end),
+            // which sub-second dev runs masked and one loaded CI run caught.
+            if (run && (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled')) {
+              onEnd(run.status);
+            }
           }
         } while (again);
       } finally {

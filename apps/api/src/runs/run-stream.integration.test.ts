@@ -146,6 +146,34 @@ describe.skipIf(!reachable)('run log streaming (integration)', () => {
     expect(ended).toBe('succeeded');
   });
 
+  it('never announces an end for a run that is still running', async () => {
+    // The regression this suite flaked on: the initial catch-up read the
+    // run's status and reported it as an end WHATEVER it was — so every
+    // fresh subscription to a live run fired onEnd('running') and the SSE
+    // layer closed the stream right after replay. The flake was the finish
+    // racing that false end; the bug was the false end itself.
+    const run = await onB.start({ projectId, kind: 'index' });
+    await run.log('still going');
+    let ended: string | null = null;
+    const stop = onA.subscribe(
+      run.id,
+      () => {},
+      (status) => {
+        ended = status;
+      },
+    );
+
+    // Give the initial catch-up pump ample time to run its end-check.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(ended).toBeNull();
+
+    await onB.finish(run.id, { status: 'succeeded' });
+    await until(() => ended !== null);
+    stop();
+
+    expect(ended).toBe('succeeded');
+  });
+
   it('closes out a run that had already finished before anyone watched', async () => {
     const run = await onB.start({ projectId, kind: 'index' });
     await run.log('all over');

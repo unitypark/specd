@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from '@/components/AppShell';
 import { get, post } from '@/lib/api';
 import { BoardView } from '@/components/BoardView';
@@ -21,10 +21,22 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const loadedOnce = useRef(false);
   const reload = useCallback(() => {
     get<ProjectSummary>(`/projects/${slug}`)
-      .then(setProject)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'));
+      .then((p) => {
+        loadedOnce.current = true;
+        setProject(p);
+      })
+      .catch((err: unknown) => {
+        // Only the first load may take the page over with an error — a failed
+        // background refresh after a child's onChange must not replace a
+        // perfectly good page with a full-screen failure. The stale data
+        // stands; the next successful refresh corrects it.
+        if (!loadedOnce.current) {
+          setError(err instanceof Error ? err.message : 'Failed to load');
+        }
+      });
   }, [slug]);
 
   useEffect(reload, [reload]);
@@ -46,7 +58,15 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
   if (!project) {
     return (
       <AppShell crumb="Project">
-        <div className="empty">Loading…</div>
+        <div aria-hidden style={{ maxWidth: '52rem' }}>
+          <span className="skeleton" style={{ height: '1.4rem', width: '30%', marginBottom: '1rem' }} />
+          <span className="skeleton" style={{ height: '2.4rem', width: '60%', marginBottom: '1.2rem' }} />
+          <div style={{ display: 'flex', gap: '0.8rem' }}>
+            {[0, 1, 2, 3].map((i) => (
+              <span key={i} className="skeleton" style={{ height: '4rem', flex: 1 }} />
+            ))}
+          </div>
+        </div>
       </AppShell>
     );
   }

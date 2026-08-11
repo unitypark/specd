@@ -26,12 +26,18 @@ interface RunsPayload {
 
 export function AgentsView({ slug }: { slug: string }) {
   const [data, setData] = useState<RunsPayload | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [openRun, setOpenRun] = useState<string | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const abort = useRef<AbortController | null>(null);
 
   const load = useCallback(() => {
-    get<RunsPayload>(`/projects/${slug}/runs`).then(setData).catch(() => undefined);
+    setLoadError(null);
+    get<RunsPayload>(`/projects/${slug}/runs`)
+      .then(setData)
+      .catch((err: unknown) =>
+        setLoadError(err instanceof Error ? err.message : 'Failed to load agent runs'),
+      );
   }, [slug]);
 
   useEffect(load, [load]);
@@ -70,7 +76,32 @@ export function AgentsView({ slug }: { slug: string }) {
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  if (!data) return <div className="empty">Loading…</div>;
+  if (loadError) {
+    return (
+      <div className="err">
+        {loadError}{' '}
+        <button type="button" className="btn sm" onClick={load}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div aria-hidden>
+        <div className="card" style={{ maxWidth: '26rem', marginBottom: '1.2rem' }}>
+          <span className="skeleton" style={{ height: '1.3rem', width: '40%', marginBottom: '0.6rem' }} />
+          <span className="skeleton" style={{ height: '0.5rem' }} />
+        </div>
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="card" style={{ marginBottom: '0.5rem', padding: '0.65rem 0.9rem' }}>
+            <span className="skeleton" style={{ height: '0.95rem' }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   const pct = data.spend.capCents ? Math.min(100, (data.spend.spentCents / data.spend.capCents) * 100) : 0;
 

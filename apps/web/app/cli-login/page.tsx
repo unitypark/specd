@@ -13,9 +13,14 @@ export default function CliLoginPage() {
   const [code, setCode] = useState('');
   const [state, setState] = useState<'idle' | 'ok' | 'error'>('idle');
   const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
 
   async function approve(e: React.FormEvent) {
     e.preventDefault();
+    // Guards the double-submit a slow response invites; codes are single-use,
+    // so the second click would burn the very code being confirmed.
+    if (busy) return;
+    setBusy(true);
     setState('idle');
     try {
       await post('/auth/device/approve', { userCode: code.trim().toUpperCase() });
@@ -23,6 +28,8 @@ export default function CliLoginPage() {
     } catch (err) {
       setState('error');
       setMessage(err instanceof Error ? err.message : 'Could not confirm that code');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -58,8 +65,8 @@ export default function CliLoginPage() {
               />
             </div>
             {state === 'error' && <div className="err">{message}</div>}
-            <button type="submit" className="btn primary" disabled={code.trim().length < 4}>
-              Authorize this device
+            <button type="submit" className="btn primary" disabled={busy || code.trim().length < 4}>
+              {busy ? <span className="spinner" /> : 'Authorize this device'}
             </button>
             <p className="note">
               The CLI can read approved specs and register repositories. It cannot approve a spec —

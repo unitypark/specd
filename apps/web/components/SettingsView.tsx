@@ -49,7 +49,9 @@ export function SettingsView({
   onChange: () => void;
 }) {
   const router = useRouter();
-  const [connections, setConnections] = useState<Connection[]>([]);
+  // null = not loaded yet — a failed load must not render as "no connections".
+  const [connections, setConnections] = useState<Connection[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? '');
   const [cap, setCap] = useState((project.spendCapCents / 100).toFixed(0));
@@ -76,13 +78,22 @@ export function SettingsView({
   useEffect(() => setPaused(project.agentsPaused), [project.agentsPaused]);
 
   const load = useCallback(() => {
-    get<Connection[]>(`/projects/${slug}/connections`).then(setConnections).catch(() => undefined);
+    setLoadError(null);
+    get<Connection[]>(`/projects/${slug}/connections`)
+      .then(setConnections)
+      .catch((err: unknown) =>
+        setLoadError(err instanceof Error ? err.message : 'Failed to load connections'),
+      );
   }, [slug]);
 
   useEffect(load, [load]);
 
   const loadRunners = useCallback(() => {
-    get<RunnerSummary[]>(`/projects/${slug}/runners`).then(setRunnerList).catch(() => undefined);
+    get<RunnerSummary[]>(`/projects/${slug}/runners`)
+      .then(setRunnerList)
+      .catch((err: unknown) =>
+        setRunnerError(err instanceof Error ? err.message : 'Failed to load runners'),
+      );
   }, [slug]);
 
   useEffect(loadRunners, [loadRunners]);
@@ -207,7 +218,21 @@ export function SettingsView({
         </div>
       </div>
 
-      {connections.map((c) => {
+      {loadError && (
+        <div className="err">
+          {loadError}{' '}
+          <button type="button" className="btn sm" onClick={load}>
+            Retry
+          </button>
+        </div>
+      )}
+      {connections === null && !loadError && (
+        <div className="card" aria-hidden>
+          <span className="skeleton" style={{ height: '1rem', width: '35%', marginBottom: '0.6rem' }} />
+          <span className="skeleton" style={{ height: '0.85rem', width: '70%' }} />
+        </div>
+      )}
+      {(connections ?? []).map((c) => {
         const meta = KIND_LABEL[c.kind] ?? { icon: '🔌', title: c.kind };
         return (
           <div key={c.id} className="card row">

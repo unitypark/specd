@@ -94,6 +94,7 @@ function SetupWizard() {
   const [maxStep, setMaxStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [discardBusy, setDiscardBusy] = useState(false);
@@ -293,6 +294,7 @@ function SetupWizard() {
   async function addRepo() {
     if (!project) return;
     setBusy(true);
+    setBusyAction('add-repo');
     setError(null);
     try {
       const repo = await post<Repo>(`/projects/${project.slug}/repositories`, {
@@ -309,6 +311,7 @@ function SetupWizard() {
       fail(err);
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -425,6 +428,7 @@ function SetupWizard() {
       return;
     }
     setBusy(true);
+    setBusyAction('continue-2');
     setError(null);
     try {
       await post(`/projects/${project.slug}/connections/vcs`, { provider: vcs });
@@ -433,6 +437,7 @@ function SetupWizard() {
       fail(err);
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -494,6 +499,7 @@ function SetupWizard() {
   async function connectTracker() {
     if (!project || !tracker) return;
     setBusy(true);
+    setBusyAction('continue-4');
     setError(null);
     try {
       if (tracker === 'jira') {
@@ -522,6 +528,7 @@ function SetupWizard() {
       fail(err);
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -932,7 +939,7 @@ function SetupWizard() {
                         />
                       </div>
                       <button type="button" className="btn" onClick={addRepo} disabled={busy}>
-                        + Add repository
+                        {busyAction === 'add-repo' && <span className="spinner" />} + Add repository
                       </button>
                     </>
                   )}
@@ -966,7 +973,7 @@ function SetupWizard() {
                   disabled={busy || !canContinueFromCode || repos.length === 0}
                   onClick={connectVcsAndContinue}
                 >
-                  Continue →
+                  {busyAction === 'continue-2' ? <span className="spinner" /> : 'Continue →'}
                 </button>
                 {vcs === 'github' && !githubConnected && (
                   <span className={styles.hintl}>
@@ -1231,7 +1238,14 @@ function SetupWizard() {
                   }
                   onClick={connectTracker}
                 >
-                  Continue →
+                  {busyAction === 'continue-4' ? (
+                    <>
+                      <span className="spinner" />
+                      {tracker === 'jira' && jiraImport ? ' Importing issues…' : null}
+                    </>
+                  ) : (
+                    'Continue →'
+                  )}
                 </button>
               </div>
             </>

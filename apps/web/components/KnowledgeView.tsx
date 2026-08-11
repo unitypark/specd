@@ -128,7 +128,19 @@ export function KnowledgeView({ slug }: { slug: string }) {
 
         {progress && <div className="progress">{progress}</div>}
 
-        {docs.length === 0 && (
+        {!health && !error && (
+          <div aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="skeleton"
+                style={{ height: '2.2rem', marginBottom: '0.4rem' }}
+              />
+            ))}
+          </div>
+        )}
+
+        {health && docs.length === 0 && (
           <div className="empty">
             Nothing indexed yet. Merge the setup branch, then re-index — git is the source of truth,
             so specd only sees what you have adopted.

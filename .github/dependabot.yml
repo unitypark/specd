@@ -12,6 +12,17 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 5
+    ignore:
+      # Types must track the pinned runtime major (engines: node >=22) —
+      # a newer types major lets code compile against APIs the runtime
+      # lacks. The major follows a runtime upgrade, never the other way.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      # TypeScript majors are migrations, not bumps: 7.0's native compiler
+      # fails this repo today (TS2882 on CSS side-effect imports, see the
+      # closed #77). It arrives as a decision, not a weekly nag.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: gomod
     directory: /cli

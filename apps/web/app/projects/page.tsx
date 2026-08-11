@@ -14,6 +14,10 @@ export default function DashboardPage() {
   const [confirmDiscard, setConfirmDiscard] = useState<ProjectSummary | null>(null);
   const [discardBusy, setDiscardBusy] = useState(false);
   const [discardError, setDiscardError] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Live projects delete behind the same typed-slug ceremony as Settings —
+  // the card menu is a shortcut, not a softer path.
+  const [confirmDelete, setConfirmDelete] = useState<ProjectSummary | null>(null);
 
   const load = useCallback(() => {
     get<ProjectSummary[]>('/projects')
@@ -31,7 +35,8 @@ export default function DashboardPage() {
       setConfirmDiscard(null);
       load();
     } catch (err) {
-      setDiscardError(err instanceof Error ? err.message : 'Failed to discard');
+      setDiscardError(err instanceof Error ? err.message : 'Failed to delete');
+      throw err;
     } finally {
       setDiscardBusy(false);
     }
@@ -125,7 +130,42 @@ export default function DashboardPage() {
                 : 0;
               const stale = p.knowledgeHealth > 0 && p.knowledgeHealth < 70;
               return (
-                <Link key={p.id} href={`/p/${p.slug}`} className={styles.pj}>
+                <div key={p.id} className={styles.pjwrap}>
+                  <button
+                    type="button"
+                    className={styles.pjmenu}
+                    aria-label={`Actions for ${p.name}`}
+                    onClick={() => setMenuFor(menuFor === p.id ? null : p.id)}
+                  >
+                    ⋯
+                  </button>
+                  {menuFor === p.id && (
+                    <>
+                      <button
+                        type="button"
+                        className={styles.menuscrim}
+                        aria-label="Close menu"
+                        onClick={() => setMenuFor(null)}
+                      />
+                      <div className={styles.menu}>
+                        <Link href={`/p/${p.slug}?tab=settings`} className={styles.menuitem}>
+                          Settings
+                        </Link>
+                        <button
+                          type="button"
+                          className={`${styles.menuitem} ${styles.menudanger}`}
+                          onClick={() => {
+                            setMenuFor(null);
+                            setDiscardError(null);
+                            setConfirmDelete(p);
+                          }}
+                        >
+                          Delete project…
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  <Link href={`/p/${p.slug}`} className={styles.pj}>
                   <h4>{p.name}</h4>
                   <p className={styles.meta}>
                     {p.repoCount} repo{p.repoCount === 1 ? '' : 's'} ·{' '}
@@ -160,7 +200,8 @@ export default function DashboardPage() {
                   <div className={`meter ${stale ? 'warn' : ''}`}>
                     <i style={{ width: `${p.knowledgeHealth}%` }} />
                   </div>
-                </Link>
+                  </Link>
+                </div>
               );
             })}
           </div>
@@ -176,6 +217,25 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete project "${confirmDelete.name}"?`}
+          body={
+            <>
+              Deletes this project's tickets, specs, run history, connections (including stored
+              credentials) and its derived knowledge index. Your repositories — and every knowledge
+              doc in git — are untouched. <b>This cannot be undone.</b>
+            </>
+          }
+          confirmLabel="Delete project"
+          requireText={confirmDelete.slug}
+          busy={discardBusy}
+          error={discardError}
+          onConfirm={() => void discard(confirmDelete).then(() => setConfirmDelete(null)).catch(() => undefined)}
+          onCancel={() => setConfirmDelete(null)}
+        />
       )}
 
       {confirmDiscard && (

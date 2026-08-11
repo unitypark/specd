@@ -41,10 +41,13 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
 
   useEffect(reload, [reload]);
 
-  // Deep link from `specd open <id>`.
+  // Deep links: `specd open <id>` lands on the board; `?tab=` lands anywhere
+  // (the dashboard's card menu uses it to reach Settings directly).
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.has('spec') || url.pathname.endsWith('/board')) setTab('board');
+    const t = url.searchParams.get('tab');
+    if (t && (TABS as readonly string[]).includes(t)) setTab(t as Tab);
   }, []);
 
   if (error) {

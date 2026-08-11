@@ -143,3 +143,71 @@
   color: var(--ink-3);
   margin-top: 0.15rem;
 }
+
+/* Card action menu — the overview finally admits management exists. */
+.pjwrap {
+  position: relative;
+}
+.pjmenu {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.6rem;
+  z-index: 2;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink-3);
+  font: 700 1rem/1 var(--mono);
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+}
+.pjmenu:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+  background: var(--bg-2);
+}
+.menuscrim {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  background: none;
+  border: none;
+  cursor: default;
+}
+.menu {
+  position: absolute;
+  top: 2.2rem;
+  right: 0.6rem;
+  z-index: 4;
+  min-width: 11rem;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.menuitem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.8rem;
+  font: 500 0.92rem/1 var(--sans);
+  color: var(--ink-2);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  text-decoration: none;
+}
+.menuitem:last-child {
+  border-bottom: none;
+}
+.menuitem:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+.menudanger:hover {
+  color: var(--danger);
+}

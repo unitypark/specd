@@ -23,6 +23,11 @@ updates:
       # closed #77). It arrives as a decision, not a weekly nag.
       - dependency-name: typescript
         update-types: [version-update:semver-major]
+      # Same reasoning for the framework itself: a Next major changes build,
+      # routing and config surface at once (closed #80 — Next 16). Taken
+      # deliberately, with its upgrade guide open, not as a Monday bump.
+      - dependency-name: next
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: gomod
     directory: /cli

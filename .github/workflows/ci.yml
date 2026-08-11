@@ -61,7 +61,7 @@ jobs:
       VAULT_MASTER_KEY: ZGV2LW9ubHktdmF1bHQta2V5LWNoYW5nZS1tZS0zMmI=
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
 
@@ -70,7 +70,7 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
@@ -112,7 +112,7 @@ jobs:
       # excavation that this artifact would have replaced.
       - name: Upload test report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vitest-report
           path: apps/api/vitest-report.json
@@ -144,7 +144,7 @@ jobs:
       VAULT_MASTER_KEY: ZGV2LW9ubHktdmF1bHQta2V5LWNoYW5nZS1tZS0zMmI=
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
 
@@ -155,7 +155,7 @@ jobs:
 
       # The Go and Python oracles shell out to their toolchains; Python is on
       # the runner already, Go arrives pinned to the repo's own go.mod.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
@@ -178,7 +178,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the graded results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-results
           path: evals/results/

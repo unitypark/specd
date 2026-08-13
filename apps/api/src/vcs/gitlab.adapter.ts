@@ -225,16 +225,17 @@ export class GitLabAdapter implements VcsAdapter {
     return {
       branch: change.branch,
       url: mr.url,
-      reviewHint: `Opened MR !${mr.iid} on ${repo.name}. Merging is adopting.`,
+      reviewHint: `${mr.existing ? 'Updated' : 'Opened'} MR !${mr.iid} on ${repo.name}. Merging is adopting.`,
       filesWritten: change.files.length,
     };
   }
 
   /**
-   * Open an MR for a branch that is *already pushed* — the build station's
-   * path (mirrors `GitHubAdapter.openPullRequest`). Re-running a build must
-   * update the existing MR rather than fail, so an already-open MR for the
-   * branch is returned as-is rather than treated as an error.
+   * Open an MR for `branch`, or hand back the one already open for it —
+   * shared by `propose` and the build station, mirroring
+   * `GitHubAdapter.openPullRequest`. A re-run must update the open MR rather
+   * than fail on it, so an existing one is returned rather than treated as an
+   * error.
    */
   async openMergeRequest(
     name: string,

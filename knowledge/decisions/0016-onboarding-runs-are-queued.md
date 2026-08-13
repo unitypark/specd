@@ -114,8 +114,40 @@ change while a run waits. A claim is not a standing permission.
   it performed ran to its timeout reporting `undefined`. It had one call site
   (re-index) and `pnpm loop` is not part of `pnpm test`, which is why it sat
   unnoticed. Fixed here because this change adds the second call site.
-- **Not fixed here:** GitHub's `propose()` still cannot be run against a
+- ~~**Not fixed here:** GitHub's `propose()` still cannot be run against a
   repository that already has an open `specd/setup` PR — re-grounding such a
-  repo fails at the PR step, queue or no queue. That is a VCS-adapter question
-  rather than a run-tracking one, and `openPullRequest` already models the fix.
-  It is the natural next piece of work if re-grounding becomes a common path.
+  repo fails at the PR step, queue or no queue.~~ Fixed 2026-08-13; see the
+  update below.
+
+## Update — 2026-08-13: the re-grounding hazard is closed
+
+`GitHubAdapter.propose()` now ends by calling `openPullRequest()` — the method
+the build station already used — instead of posting a pull request directly.
+The branch it force-resets is the right one either way; if a PR is open for
+that branch it now shows the new commit and wants returning rather than
+repeating. Before, re-grounding died on GitHub's 422 having already written the
+scaffold and moved the branch, which is the worst place to stop: the repository
+was changed and the person was told it had failed.
+
+This does not disturb the reasoning that made an abandoned run fail rather than
+restart. Re-running is now *safe* where it was fatal, but it is still not free —
+it pays for a second repository read and a second model call, and it moves a
+branch someone may be part-way through reviewing. Whether to spend that stays a
+person's decision, which is where this ADR left it.
+
+Both adapters also stopped announcing "Opened" for a pull request they found
+rather than created. `existing` was already returned by `openPullRequest` and
+`openMergeRequest` and was being discarded at both call sites; the setup wizard
+prints that line verbatim, so a re-run now reads `Updated PR #3 …`.
+
+`GitHubAdapter` had no test file at all. It has one now, covering the create
+path, the re-run path, branch reset, and the case that must still fail — a 422
+with no open PR behind it, which would otherwise report a review surface that
+does not exist.
+
+`UNVERIFIED` — GitLab's `propose()` deletes and recreates the setup branch
+(`deleteBranchIfExists`) rather than force-updating it, so a re-run there may
+close the open MR and open a new one instead of updating it in place. It does
+not *fail*, which is why it is not part of this fix, but what GitLab does to an
+open MR whose source branch is deleted has not been checked against a live
+instance. Worth confirming before re-grounding is offered as a routine action.

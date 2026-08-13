@@ -202,32 +202,34 @@ export class GitHubAdapter implements VcsAdapter {
       body: JSON.stringify({ sha: commit.sha, force: true }),
     });
 
-    const pr = await this.api<{ html_url: string; number: number }>(`/repos/${slug}/pulls`, {
-      method: 'POST',
-      body: JSON.stringify({
-        title: change.title,
-        head: change.branch,
-        base,
-        body: change.body,
-      }),
+    // Goes through `openPullRequest` rather than posting one directly: the
+    // branch above was force-reset, so if a PR is already open for it that PR
+    // now shows the new commit and wants returning, not repeating. Posting
+    // directly meant re-grounding a repository died on GitHub's 422 with the
+    // scaffold already written and the branch already moved.
+    const pr = await this.openPullRequest(slug, {
+      branch: change.branch,
+      base,
+      title: change.title,
+      body: change.body,
     });
 
     return {
       branch: change.branch,
-      url: pr.html_url,
-      reviewHint: `Opened PR #${pr.number} on ${slug}. Merging is adopting.`,
+      url: pr.url,
+      reviewHint: `${pr.existing ? 'Updated' : 'Opened'} PR #${pr.number} on ${slug}. Merging is adopting.`,
       filesWritten: change.files.length,
     };
   }
 
   /**
-   * Open a PR for a branch that is *already pushed*.
+   * Open a PR for `branch`, or hand back the one already open for it.
    *
-   * `propose` builds its commit through the API because it has file contents
-   * and no checkout. The build station is the other way round: it has a real
-   * clone with real commits, pushes them with git, and needs only the review
-   * surface. Re-running a build must update the existing PR rather than fail,
-   * so an already-open PR for the branch is returned as-is.
+   * Shared by both write paths, which arrive from opposite directions: the
+   * build station has a real clone whose commits it pushed with git, while
+   * `propose` has file contents and builds its commit through the API. Both
+   * end at the same place, and for both a re-run must update the open PR
+   * rather than fail on it — GitHub answers 422 to a second PR for one head.
    */
   async openPullRequest(
     slug: string,

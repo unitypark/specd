@@ -202,6 +202,7 @@
   .chip.warnc { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
   .chip.okc { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
   .chip.new { background: var(--signal-soft); border-color: var(--signal); color: var(--signal-text); }
+  .chip.shipped { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); font-weight: 600; }
 
   .phase {
     border: 1px solid var(--line-2); border-radius: var(--radius);
@@ -276,7 +277,18 @@
 </header>
 
 <div class="tldr">
-  <h2>The short version</h2>
+  <h2>Status — updated 2026-08-13</h2>
+  <p><b>Phase 1 is delivered in full</b> — <b>#95</b> the MCP server, <b>#94</b> the Claude Code
+  plugin, <b>#96</b> Ground wiring both into every repo it grounds. <b>#97</b> delivers 2.1,
+  precedent retrieval, and <b>#100</b> closes 3.4 and 3.5. Three ADRs came out of it: <b>0017</b>
+  the engine over MCP, <b>0018</b> the working agreements as a plugin, plus the citation-judging
+  move into <code>packages/shared</code> that 0017 records. The research and this plan are
+  <b>#93</b>.</p>
+  <p><b>Still open: 2.2, 2.3, 2.4, 3.1, 3.2, 3.3.</b> 2.3 waits on #95 — it needs
+  <code>judgeCitation</code> in <code>packages/shared</code>, which that PR moves there — and the
+  MCP <code>list_precedents</code> tool waits on both #95 and #97.</p>
+  <hr style="border:none;border-top:1px solid var(--line);margin:18px 0;">
+  <h2 style="margin-top:0;">The short version <span style="text-transform:none;letter-spacing:0;color:var(--ink-3);font-family:var(--sans);font-size:13px;">(as written)</span></h2>
   <p><b>Three benchmarks now, one repeated finding.</b> specd built a citation-grade retrieval engine —
   three bounded stages, provenance on every expansion, verdicts on every claim — and then gave agents a
   static markdown file and one CLI verb to reach it. Every benchmarked project that targets coding
@@ -474,7 +486,7 @@
     <header><span class="pnum">Phase 1</span><h3>The agent surface</h3><span class="ptag">the round's reason to exist</span></header>
 
     <div class="item">
-      <div class="head"><h4>1.1 — <code>specd mcp serve</code>: the engine behind a protocol</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #95</span> 1.1 — <code>specd mcp serve</code>: the engine behind a protocol</h4>
         <div class="chips"><span class="chip">sem</span><span class="chip okc">impact: highest</span><span class="chip">effort: M</span></div></div>
       <p>A stdio MCP server as a new CLI subcommand — Go, in the existing binary, a thin client over the
       HTTP API using the keychain token, exactly as every other CLI verb works. Read-only by construction:
@@ -497,11 +509,11 @@
     </div>
 
     <div class="item">
-      <div class="head"><h4>1.2 — A Claude Code plugin: AGENTS.md rules become executable</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #94</span> 1.2 — A Claude Code plugin: AGENTS.md rules become executable</h4>
         <div class="chips"><span class="chip">sem</span><span class="chip okc">impact: high</span><span class="chip">effort: M</span></div></div>
       <p>Semantica ships one plugin body — skills, agents, hooks — under eight editor manifests, and makes
       its own repo an installable marketplace (<code>marketplace.json</code>). specd's version writes itself:
-      AGENTS.md’s seven rules are currently enforced by hope past the three specd already binds in software. As a plugin: <code>/specd:pull</code> (fetch,
+      AGENTS.md’s rules are currently enforced by hope past the three specd already binds in software. As a plugin: <code>/specd:pull</code> (fetch,
       verify buildable, set up the <code>spec/&lt;id&gt;-&lt;slug&gt;</code> branch), <code>/specd:implement</code>
       (task loop, one commit per task, verify command between tasks), <code>/specd:as-built</code> (render the
       deviations section against the pulled spec). Hooks do the enforcing: a PreToolUse gate that blocks
@@ -511,12 +523,12 @@
       shell around <code>jq</code>.</p>
       <p class="refs">semantica: <code>plugins/.claude-plugin/plugin.json</code>, <code>marketplace.json</code>,
       <code>plugins/hooks/hooks.json</code>, <code>plugins/skills/decision/SKILL.md</code> ·
-      specd: <code>packages/templates/src/agents-md.ts:24-49</code> (the seven rules), <code>main.go:417-439</code>
+      specd: <code>packages/templates/src/agents-md.ts</code> (<code>renderAgentsMd</code>), <code>main.go:417-439</code>
       (<code>spec status</code> as the gate primitive)</p>
     </div>
 
     <div class="item">
-      <div class="head"><h4>1.3 — Ground distributes the surface it just built</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #96</span> 1.3 — Ground distributes the surface it just built</h4>
         <div class="chips"><span class="chip">sem</span><span class="chip">impact: med</span><span class="chip">effort: S</span></div></div>
       <p>Onboarding already writes the working agreements into every repo; it should also wire the doors.
       The setup PR gains the MCP config block for the project (per-editor snippets in a
@@ -533,7 +545,7 @@
     <header><span class="pnum">Phase 2</span><h3>Records become intelligence</h3><span class="ptag">semantica's lifecycle, specd's substrate</span></header>
 
     <div class="item">
-      <div class="head"><h4>2.1 — Precedents: as-builts and ADRs answer before drafting starts</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #97</span> 2.1 — Precedents: as-builts and ADRs answer before drafting starts</h4>
         <div class="chips"><span class="chip">sem</span><span class="chip okc">impact: high</span><span class="chip">effort: M</span></div></div>
       <p>Semantica's best verb is <code>find_precedents()</code> — ranked similar past decisions, consulted
       before acting, with the docs' own caveat kept: precedents guide, they don't determine. specd already
@@ -635,7 +647,7 @@
     </div>
 
     <div class="item">
-      <div class="head"><h4>3.4 — Close the gap between the pricing page and the codebase</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #100</span> 3.4 — Close the gap between the pricing page and the codebase</h4>
         <div class="chips"><span class="chip">parity</span><span class="chip">impact: med (trust)</span><span class="chip">effort: S</span></div></div>
       <p>The product's brand is honesty — UNVERIFIED markers, "unmeasured ≠ fresh", failed vs could-not-run.
       The pricing page sells Bedrock &amp; Azure adapters, "Jira two-way sync" (inbound sync is explicitly
@@ -648,7 +660,7 @@
     </div>
 
     <div class="item">
-      <div class="head"><h4>3.5 — The open-source hygiene semantica's traction runs on</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #100</span> 3.5 — The open-source hygiene semantica's traction runs on</h4>
         <div class="chips"><span class="chip">sem</span><span class="chip">impact: med</span><span class="chip">effort: S</span></div></div>
       <p>CONTRIBUTING.md and SECURITY.md exist since #59; what's missing is the cadence layer: a
       CHANGELOG.md (keep-a-changelog, seeded from the merge history's unusually good one-line stories),

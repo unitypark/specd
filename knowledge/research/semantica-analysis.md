@@ -264,7 +264,7 @@ feature this analysis does not recommend trading away.
    ambient state (`specd://knowledge/health`, `specd://specs/awaiting-review`).
    Domain-split tool modules and centralized schemas, per `mcp/` layout.
 2. **Claude Code plugin with skills + hooks + marketplace.json in-repo** —
-   turn AGENTS.md rules 1–9 from prose into executable workflow: pull-first,
+   turn the AGENTS.md rules from prose into executable workflow: pull-first,
    cite-as-you-design, as-built-on-completion, docs-ride-the-change enforced
    by hooks against `specd spec status` exit codes.
 3. **Precedent retrieval over specd's own records** — as-built specs and ADRs

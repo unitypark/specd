@@ -55,7 +55,11 @@ async function call<T = unknown>(
 async function awaitRun<T>(slug: string, runId: string, timeoutMs = 120_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const run = await call<{ status: string; result: T; error?: string | null }>(
+    // The endpoint answers `{ run, logs }`. Reading `status` off the envelope
+    // instead of off `run` made every wait here run to its timeout with the
+    // status reported as `undefined`; only the re-index step used it, and it
+    // is not covered by `pnpm test`, so it sat unnoticed.
+    const { run } = await call<{ run: { status: string; result: T; error?: string | null } }>(
       'GET',
       `/projects/${slug}/runs/${runId}`,
     );
@@ -156,21 +160,32 @@ async function main(): Promise<void> {
   // ─── 02 GROUND ────────────────────────────────────────────────────────────
   section('02', 'GROUND');
 
-  const onboarded = await call<
-    { repoName: string; branch?: string; reviewHint?: string; fileCount?: number; error?: string; runId: string }[]
-  >('POST', `/projects/${slug}/onboard`, { repositoryIds: [repo.id] });
+  const onboarded = await call<{ repoName: string; runId: string; queued: true }[]>(
+    'POST',
+    `/projects/${slug}/onboard`,
+    { repositoryIds: [repo.id] },
+  );
 
-  const result = onboarded[0];
-  if (!result) throw new Error('onboarding returned no result');
-  if (result.error) throw new Error(`onboarding failed: ${result.error}`);
-  step(`onboarding agent wrote ${result.fileCount} files to branch ${result.branch}`);
+  const queuedOnboard = onboarded[0];
+  if (!queuedOnboard) throw new Error('onboarding returned no result');
+  step(`grounding queued for ${queuedOnboard.repoName}`);
+
+  // Grounding reads the repository and then calls a model, so it is a queued
+  // run rather than something the request waits for (0016). The loop follows
+  // the run the same way the setup wizard does.
+  const result = await awaitRun<{ branch: string; url: string | null; files: number }>(
+    slug,
+    queuedOnboard.runId,
+    600_000,
+  );
+  step(`onboarding agent wrote ${result.files} files to branch ${result.branch}`);
   if (!aiReady) {
     skip('AI-drafted architecture/conventions/glossary', 'no ANTHROPIC_API_KEY — template scaffold written instead');
   }
 
   const runDetail = await call<{ logs: { message: string }[] }>(
     'GET',
-    `/projects/${slug}/runs/${result.runId}`,
+    `/projects/${slug}/runs/${queuedOnboard.runId}`,
   );
   step(`run log has ${runDetail.logs.length} lines, replayable via SSE`);
 
@@ -179,7 +194,7 @@ async function main(): Promise<void> {
   const { simpleGit } = await import('simple-git');
   const git = simpleGit({ baseDir: fixture });
   const startBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
-  await git.merge([result.branch!, '--no-edit']);
+  await git.merge([result.branch, '--no-edit']);
   step(`merged ${result.branch} into ${startBranch} — adoption recorded`);
 
   await call('POST', `/projects/${slug}/repositories/${repo.id}/setup-merged`);

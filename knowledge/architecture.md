@@ -46,7 +46,7 @@ From `docker-compose.yml` (evidence):
 
 Dev credentials are `specd/specd`, database `specd`. It has a healthcheck; data lives in the named volume `specd-pgdata`.
 
-Postgres is the only runtime dependency. This doc previously flagged `UNVERIFIED` that Redis/BullMQ — advertised in the README and provisioned in compose — might not be wired at all. That doubt was correct: nothing imported either, and both were removed (see `decisions/0008-remove-unused-queue.md`). Runner dispatch polls a `queued` row in `agent_runs`; it is not a queue.
+Postgres is the only runtime dependency. This doc previously flagged `UNVERIFIED` that Redis/BullMQ — advertised in the README and provisioned in compose — might not be wired at all. That doubt was correct: nothing imported either, and both were removed (see `decisions/0008-remove-unused-queue.md`). Runner dispatch polls a `queued` row in `agent_runs`; it is not a queue. Index runs (`decisions/0012`) and grounding runs (`decisions/0016`) are the same row in `agent_runs` claimed by a worker inside the API process instead, woken by Postgres `LISTEN`/`NOTIFY` — still no broker, still one runtime dependency.
 
 ## Ports and entry points
 

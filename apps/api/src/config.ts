@@ -74,6 +74,22 @@ export class Config {
   /** An index run still 'running' after this is treated as abandoned. */
   readonly indexLeaseSeconds = num('SPECD_INDEX_LEASE_SECONDS', 900);
 
+  // ─── Onboard worker (0016) ─────────────────────────────────────────────────
+  // Grounding left the request path for the reason indexing did: reading a
+  // repository and then calling a model is longer than a request should stay
+  // open, and while it ran inline a second click opened a second setup PR.
+  /** Off for a process that should serve requests but execute no onboard runs. */
+  readonly onboardWorkerEnabled = (process.env.SPECD_ONBOARD_WORKER_ENABLED ?? 'true') !== 'false';
+  /** Backstop only, as with the index worker: NOTIFY is the primary wake-up. */
+  readonly onboardPollMs = num('SPECD_ONBOARD_POLL_MS', 60_000);
+  /**
+   * An onboard run still 'running' after this is treated as abandoned. Longer
+   * than the index lease, and deliberately generous: an abandoned onboard run
+   * is failed rather than retried (0016), so cutting a slow-but-live run short
+   * costs a person their grounding, where waiting only costs them time.
+   */
+  readonly onboardLeaseSeconds = num('SPECD_ONBOARD_LEASE_SECONDS', 1_800);
+
   // ─── GitHub App (§11) ──────────────────────────────────────────────────────
   // Absent by default: the whole product works in local mode without an App,
   // and every code path that needs one says so by name rather than failing

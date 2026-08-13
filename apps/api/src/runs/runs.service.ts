@@ -6,7 +6,7 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import { and, desc, eq, gt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { agentRuns, runLogs, type Db, type DbHandle } from '@specd/db';
 import {
   costEurCents,
@@ -227,6 +227,46 @@ export class RunsService implements OnModuleInit, OnModuleDestroy {
       .update(agentRuns)
       .set({ jobPayload: { repositoryIds: widened } })
       .where(eq(agentRuns.id, runId));
+  }
+
+  /**
+   * The onboard run already in flight for this repository, if there is one
+   * (0016).
+   *
+   * Two things separate this from `pendingIndexRun`. It counts `running` as
+   * well as `queued`, because this is single-flight rather than burst-folding:
+   * indexing twice is merely wasteful, but grounding twice opens a second setup
+   * PR and pays for a second model call, so a run stops being a fold target
+   * only when it reaches a terminal status. And it does not filter on `runner`
+   * — a run handed to a paired runner is still in flight, and a second request
+   * must join it rather than start its own.
+   */
+  async pendingOnboardRun(projectId: string, repositoryId: string): Promise<{ id: string } | null> {
+    const [row] = await this.db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.projectId, projectId),
+          eq(agentRuns.kind, 'onboard'),
+          eq(agentRuns.repositoryId, repositoryId),
+          inArray(agentRuns.status, ['queued', 'running']),
+        ),
+      )
+      .orderBy(agentRuns.createdAt)
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  /**
+   * Record the model a run resolved to. `start()` sets it at creation, but a
+   * run that was *enqueued* does not know its model until a worker picks it up
+   * and resolves the project's AI connection — until then the runs list would
+   * show a blank where every other run shows a name.
+   */
+  async setModel(runId: string, model: ModelId): Promise<void> {
+    await this.db.update(agentRuns).set({ model }).where(eq(agentRuns.id, runId));
   }
 
   /**

@@ -85,7 +85,7 @@ describe('generated artifacts', () => {
     ['package.json', 'tsconfig.json'],
   );
 
-  it('renders the seven working agreements verbatim', () => {
+  it('renders the working agreements verbatim', () => {
     const md = renderAgentsMd({
       repoName: 'aurora-api',
       stack,
@@ -101,6 +101,25 @@ describe('generated artifacts', () => {
     expect(md).toContain('specd spec pull <id>');
     expect(md).toContain('one task ≤ one PR');
     expect(md).toContain('commit the as-built spec');
+    expect(md).toContain('query them before reading');
+  });
+
+  it('wires the knowledge tools it just told the agent to prefer', () => {
+    const md = renderAgentsMd({
+      repoName: 'aurora-api',
+      stack,
+      isPrimary: true,
+      projectName: 'Aurora CRM',
+    });
+
+    // Rule 8 without the config is advice; the config without rule 8 is
+    // trivia. Landing one of the two alone is the way this stops working.
+    expect(md).toContain('query them before reading');
+    expect(md).toContain('"command": "specd", "args": ["mcp", "serve"]');
+    expect(md).toContain('search_knowledge');
+    // The read-only guarantee travels with the instructions, because an
+    // agent that thinks it can approve its own spec will try.
+    expect(md).toContain('read-only');
   });
 
   it('tells a non-primary repo where the as-built spec goes', () => {

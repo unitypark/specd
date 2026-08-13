@@ -65,6 +65,11 @@ export function renderAgentsMd(input: {
 9. If you learn the answer while implementing, write it into the doc it
    belongs in and delete the open question — in the same PR (rule 3).
 
+## Ask the knowledge base, do not re-derive it
+10. Where specd's knowledge tools are available, query them before reading
+    the tree: they answer with the passage AND the string to cite it by,
+    already checked. Grepping gets you the text and none of the evidence.
+
 ## The map
 ${mapLines}
 
@@ -73,6 +78,17 @@ ${mapLines}
 - Stack: ${stackLine}          [detected]
 - Verify before PR: ${verify}           [detected]
 - Spec shape: knowledge/specs/TEMPLATE.md            [generated]
+
+## Wiring the knowledge tools (rule 10)
+Point any MCP-capable editor at specd. It serves this project's knowledge
+base and its approved specs, and it is read-only — approval stays a
+signed-in human in the app.
+
+    { "mcpServers": { "specd": { "command": "specd", "args": ["mcp", "serve"] } } }
+
+Needs the specd CLI on your PATH and \`specd login\` once per machine.
+Tools: search_knowledge · get_doc · verify_citation · knowledge_health ·
+spec_status · spec_pull · list_specs
 `;
 }
 

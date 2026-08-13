@@ -29,7 +29,7 @@ eval`), also outside the workspace on purpose: evals grade, they never gate.
 | `cli` | Go `specd` binary (`cmd/specd`, `internal/{api,config}`) — thin client (D13): login, spec pull, runner pairing, the REPL |
 | `packages/shared` | Spec lifecycle state machine (`lifecycle.ts`), spec content + EARS (`spec.ts`), model allowlist + rate card (`models.ts`), Claude-reply parsing and shape-check (`claude-code-parse.ts`) |
 | `packages/db` | Drizzle schema (`src/schema.ts`, 20 tables) + plain-SQL migrations |
-| `packages/templates` | `AGENTS.md`, `CLAUDE.md`, `knowledge/` scaffold for onboarded repos |
+| `packages/templates` | `AGENTS.md`, `CLAUDE.md`, `knowledge/` scaffold for onboarded repos; `evidence.ts` reads a repo's facts (commands, CI, services, config, entities) before any model call (`decisions/0015`) |
 
 File counts are deliberately not recorded here — they rot faster than roles.
 Roles above were verified in source on 2026-08-11: `apps/api/src` is NestJS
@@ -73,9 +73,12 @@ exists only as the headless loop driver's knob (`apps/api/src/e2e-loop.ts`).
 2. `api_key` — Messages API with the project's vaulted key, metered per token
    from the rate card in `packages/shared/src/models.ts` (`costEurCents`,
    integer EUR cents).
-3. No credential — onboarding still writes the template scaffold with every
-   claim marked `UNVERIFIED`; agent runs fail with a clear error naming the
-   missing key rather than inventing content.
+3. No credential — onboarding still writes a scaffold, and since
+   `decisions/0015` it is a useful one: the commands, pipelines, services,
+   configuration, entities and test layout are all read out of the repo
+   without a model. Only the judgement sections stay empty, each carrying the
+   question it exists to answer. Other agent runs fail with a clear error
+   naming the missing key rather than inventing content.
 
 ## Invariants enforced in code
 

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { describeStack, detectStack } from './stack.js';
 import { renderAgentsMd } from './agents-md.js';
 import { renderScaffold, renderSetupPrBody } from './knowledge.js';
+import { collectEvidence } from './evidence.js';
+
+const noEvidence = collectEvidence({ files: [], samples: [] });
 
 function pkg(body: Record<string, unknown>) {
   return [{ path: 'package.json', content: JSON.stringify(body) }];
@@ -127,9 +130,7 @@ describe('generated artifacts', () => {
       projectName: 'Aurora CRM',
       isPrimary: true,
       stack,
-      topLevelDirs: ['src', 'test'],
-      entryPoints: ['src/main.ts'],
-      glossaryTerms: ['Deal', 'Workspace'],
+      evidence: collectEvidence({ files: ['src/main.ts', 'test/a.test.ts'], samples: [] }),
       date: '2026-08-06',
       agentsMd: renderAgentsMd({ repoName: 'aurora-api', stack, isPrimary: true, projectName: 'X' }),
     });
@@ -138,12 +139,37 @@ describe('generated artifacts', () => {
     expect(paths).toContain('AGENTS.md');
     expect(paths).toContain('CLAUDE.md');
     expect(paths).toContain('knowledge/README.md');
+    expect(paths).toContain('knowledge/product.md');
     expect(paths).toContain('knowledge/architecture.md');
     expect(paths).toContain('knowledge/conventions.md');
+    expect(paths).toContain('knowledge/testing.md');
     expect(paths).toContain('knowledge/glossary.md');
+    expect(paths).toContain('knowledge/open-questions.md');
+    expect(paths).toContain('knowledge/decisions/README.md');
     expect(paths).toContain('knowledge/decisions/0001-adopt-spec-driven.md');
     expect(paths).toContain('knowledge/runbooks/local-dev.md');
     expect(paths).toContain('knowledge/specs/README.md');
+    expect(paths).toContain('knowledge/specs/TEMPLATE.md');
+  });
+
+  it('asks the question instead of filling a section it has no draft for', () => {
+    const files = renderScaffold({
+      repoName: 'aurora-api',
+      projectName: 'Aurora CRM',
+      isPrimary: true,
+      stack,
+      evidence: noEvidence,
+      date: '2026-08-06',
+      agentsMd: 'RULES',
+    });
+
+    const product = files.find((f) => f.path === 'knowledge/product.md')!.content;
+    expect(product).toContain('UNVERIFIED — state the job this system does');
+
+    // And the gap becomes a work item rather than sitting silently in a doc.
+    const questions = files.find((f) => f.path === 'knowledge/open-questions.md')!.content;
+    expect(questions).toContain('What is this system for');
+    expect(questions).toContain('How is a change verified before it merges?');
   });
 
   it('makes CLAUDE.md a pointer, so editing one file keeps both in sync', () => {
@@ -152,9 +178,7 @@ describe('generated artifacts', () => {
       projectName: 'p',
       isPrimary: true,
       stack,
-      topLevelDirs: [],
-      entryPoints: [],
-      glossaryTerms: [],
+      evidence: noEvidence,
       date: '2026-08-06',
       agentsMd: 'RULES',
     });
@@ -169,9 +193,7 @@ describe('generated artifacts', () => {
       projectName: 'p',
       isPrimary: true,
       stack,
-      topLevelDirs: [],
-      entryPoints: [],
-      glossaryTerms: [],
+      evidence: noEvidence,
       date: '2026-08-06',
       agentsMd: 'RULES',
     });
@@ -187,11 +209,26 @@ describe('generated artifacts', () => {
       fileCount: 10,
       unverifiedCount: 7,
       stackLine: 'NestJS · TypeScript',
+      evidence: noEvidence,
+      drafted: true,
     });
     expect(body).toContain('review me, then merge to adopt');
-    expect(body).toContain('read-only repo scan');
+    expect(body).toContain('it cannot see your intent');
     expect(body).toContain('**7**');
     expect(body).toContain('Do not treat generated text as verified');
     expect(body).toContain('Merging is adopting');
+  });
+
+  it('says so when no model drafted anything, rather than implying one did', () => {
+    const body = renderSetupPrBody({
+      repoName: 'aurora-api',
+      projectName: 'Aurora CRM',
+      fileCount: 10,
+      unverifiedCount: 22,
+      stackLine: 'NestJS · TypeScript',
+      evidence: noEvidence,
+      drafted: false,
+    });
+    expect(body).toContain('No AI credential was available');
   });
 });

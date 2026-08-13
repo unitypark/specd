@@ -37,14 +37,28 @@ export function detectStack(files: RepoFileSample[], fileList: string[]): Detect
   const extras: string[] = [];
 
   const pkgRaw = byPath.get('package.json');
-  if (pkgRaw) {
+  if (pkgRaw !== undefined || files.some((f) => f.path.endsWith('/package.json'))) {
     let pkg: PackageJsonLike = {};
     try {
-      pkg = JSON.parse(pkgRaw) as PackageJsonLike;
+      pkg = JSON.parse(pkgRaw ?? '{}') as PackageJsonLike;
     } catch {
       // A malformed package.json is the repo's problem, not a reason to crash.
     }
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+    // In a workspace the root manifest is a task runner: the framework, the
+    // test runner and the ORM are all declared one level down. Reading only
+    // the root is how a NestJS monorepo used to come back "JavaScript, no
+    // framework" — a wrong [detected] line, which is worse than none (§15).
+    const deps: Record<string, string> = {};
+    for (const file of files) {
+      if (!file.path.endsWith('package.json')) continue;
+      try {
+        const parsed = JSON.parse(file.content) as PackageJsonLike;
+        Object.assign(deps, parsed.dependencies, parsed.devDependencies);
+      } catch {
+        // Same reasoning as above, one workspace at a time.
+      }
+    }
     const dep = (name: string) => name in deps;
 
     const framework = dep('@nestjs/core')
@@ -93,8 +107,14 @@ export function detectStack(files: RepoFileSample[], fileList: string[]): Detect
     if (dep('mongoose')) extras.push('MongoDB/Mongoose');
     if (dep('bullmq')) extras.push('BullMQ');
 
+    const typescript =
+      has('tsconfig.json') ||
+      has('tsconfig.base.json') ||
+      fileList.some((f) => f.endsWith('.ts') || f.endsWith('.tsx')) ||
+      dep('typescript');
+
     return {
-      language: has('tsconfig.json') ? 'TypeScript' : 'JavaScript',
+      language: typescript ? 'TypeScript' : 'JavaScript',
       framework,
       packageManager,
       testRunner,

@@ -1,8 +1,10 @@
 import {
+  collectEvidence,
   describeStack,
   detectStack,
   renderAgentsMd,
   renderScaffold,
+  scaffoldDocPaths,
   type DetectedStack,
   type ScaffoldFile,
 } from '@specd/templates';
@@ -33,10 +35,12 @@ export interface GalleryEntry {
   repoName: string;
   /** The manifest files `detectStack` reads. */
   sample: { files: { path: string; content: string }[]; fileList: string[] };
-  /** Directories the scan would find, for the architecture draft. */
-  topLevelDirs: string[];
-  entryPoints: string[];
-  glossaryTerms: string[];
+  /**
+   * A plausible file tree for a repo of this kind. The evidence pass runs over
+   * it exactly as it would over a real scan, so the page shows the modules,
+   * tests and conditional docs this shape would actually earn.
+   */
+  tree: string[];
 }
 
 const pkg = (body: Record<string, unknown>) => JSON.stringify(body, null, 2);
@@ -62,9 +66,20 @@ export const GALLERY: GalleryEntry[] = [
         },
       ],
     },
-    topLevelDirs: ['src', 'test', 'migrations'],
-    entryPoints: ['src/main.ts'],
-    glossaryTerms: ['Order', 'Fulfilment', 'Line item'],
+    tree: [
+      'src/main.ts',
+      'src/orders/orders.controller.ts',
+      'src/orders/orders.service.ts',
+      'src/orders/orders.service.test.ts',
+      'src/fulfilment/fulfilment.service.ts',
+      'src/fulfilment/fulfilment.service.test.ts',
+      'src/db/schema.ts',
+      'migrations/0001_init.sql',
+      'test/orders.e2e.test.ts',
+      '.github/workflows/ci.yml',
+      'docker-compose.yml',
+      '.env.example',
+    ],
   },
   {
     slug: 'nextjs',
@@ -85,9 +100,17 @@ export const GALLERY: GalleryEntry[] = [
         },
       ],
     },
-    topLevelDirs: ['app', 'components', 'lib'],
-    entryPoints: ['app/layout.tsx'],
-    glossaryTerms: ['Cart', 'Checkout', 'Variant'],
+    tree: [
+      'app/layout.tsx',
+      'app/page.tsx',
+      'app/cart/page.tsx',
+      'app/checkout/page.tsx',
+      'components/CartLine.tsx',
+      'components/CartLine.test.tsx',
+      'lib/pricing.ts',
+      'lib/pricing.test.ts',
+      '.github/workflows/ci.yml',
+    ],
   },
   {
     slug: 'django',
@@ -103,9 +126,16 @@ export const GALLERY: GalleryEntry[] = [
         },
       ],
     },
-    topLevelDirs: ['billing', 'invoices', 'tests'],
-    entryPoints: ['manage.py'],
-    glossaryTerms: ['Invoice', 'Dunning', 'Ledger entry'],
+    tree: [
+      'manage.py',
+      'billing/settings.py',
+      'billing/urls.py',
+      'invoices/models.py',
+      'invoices/views.py',
+      'invoices/migrations/0001_initial.py',
+      'tests/test_invoices.py',
+      'tests/test_dunning.py',
+    ],
   },
   {
     slug: 'fastapi',
@@ -121,9 +151,13 @@ export const GALLERY: GalleryEntry[] = [
         },
       ],
     },
-    topLevelDirs: ['app', 'tests'],
-    entryPoints: ['app/main.py'],
-    glossaryTerms: ['Price book', 'Tier', 'Quote'],
+    tree: [
+      'app/main.py',
+      'app/models.py',
+      'app/routers/quotes.py',
+      'app/routers/tiers.py',
+      'tests/test_quotes.py',
+    ],
   },
   {
     slug: 'go',
@@ -131,9 +165,14 @@ export const GALLERY: GalleryEntry[] = [
     blurb: 'Modules, go vet and go test — the verify command specd will actually run.',
     repoName: 'acme/gateway',
     sample: { fileList: ['go.mod', 'go.sum'], files: [{ path: 'go.mod', content: 'module github.com/acme/gateway\n\ngo 1.25\n' }] },
-    topLevelDirs: ['cmd', 'internal', 'pkg'],
-    entryPoints: ['cmd/gateway/main.go'],
-    glossaryTerms: ['Route', 'Upstream', 'Backpressure'],
+    tree: [
+      'cmd/gateway/main.go',
+      'internal/router/router.go',
+      'internal/router/router_test.go',
+      'internal/upstream/pool.go',
+      'internal/upstream/pool_test.go',
+      'pkg/backpressure/limiter.go',
+    ],
   },
   {
     slug: 'rust',
@@ -141,9 +180,14 @@ export const GALLERY: GalleryEntry[] = [
     blurb: 'Cargo with clippy in the verify command — a stricter gate than most.',
     repoName: 'acme/indexer',
     sample: { fileList: ['Cargo.toml', 'Cargo.lock'], files: [{ path: 'Cargo.toml', content: '[package]\nname = "indexer"\nedition = "2021"\n' }] },
-    topLevelDirs: ['src', 'benches', 'tests'],
-    entryPoints: ['src/main.rs'],
-    glossaryTerms: ['Segment', 'Posting list', 'Merge policy'],
+    tree: [
+      'src/main.rs',
+      'src/segment.rs',
+      'src/posting_list.rs',
+      'src/merge_policy.rs',
+      'benches/index.rs',
+      'tests/segment.rs',
+    ],
   },
   {
     slug: 'rails',
@@ -151,9 +195,15 @@ export const GALLERY: GalleryEntry[] = [
     blurb: 'Bundler and RSpec — conventions the agent should follow rather than reinvent.',
     repoName: 'acme/crm',
     sample: { fileList: ['Gemfile', 'Gemfile.lock'], files: [{ path: 'Gemfile', content: "source 'https://rubygems.org'\ngem 'rails', '~> 7.1'\ngem 'rspec-rails', group: :test\n" }] },
-    topLevelDirs: ['app', 'config', 'spec'],
-    entryPoints: ['config/application.rb'],
-    glossaryTerms: ['Contact', 'Pipeline', 'Deal'],
+    tree: [
+      'config/application.rb',
+      'app/models/contact.rb',
+      'app/models/deal.rb',
+      'app/controllers/deals_controller.rb',
+      'db/schema.rb',
+      'db/migrate/20260101_create_deals.rb',
+      'spec/models/deal_spec.rb',
+    ],
   },
   {
     slug: 'terraform',
@@ -161,9 +211,15 @@ export const GALLERY: GalleryEntry[] = [
     blurb: 'Infrastructure, where an unreviewed agent change is least forgiving.',
     repoName: 'acme/platform-infra',
     sample: { fileList: ['main.tf', 'variables.tf', 'outputs.tf'], files: [] },
-    topLevelDirs: ['modules', 'environments'],
-    entryPoints: ['main.tf'],
-    glossaryTerms: ['Workspace', 'Module', 'Remote state'],
+    tree: [
+      'main.tf',
+      'variables.tf',
+      'outputs.tf',
+      'modules/network/main.tf',
+      'modules/database/main.tf',
+      'environments/prod/main.tf',
+      'environments/staging/main.tf',
+    ],
   },
 ];
 
@@ -187,11 +243,20 @@ export function galleryPack(entry: GalleryEntry, date = '2026-01-01'): GalleryPa
   const stack = detectStack(entry.sample.files, entry.sample.fileList);
   const projectName = entry.repoName.split('/')[0] ?? 'acme';
 
+  // The same evidence pass a real scan runs, over the entry's own file list —
+  // so a gallery page shows the scaffold this repo shape would really get,
+  // conditional docs and all.
+  const evidence = collectEvidence({
+    files: [...new Set([...entry.sample.fileList, ...entry.tree])],
+    samples: entry.sample.files,
+  });
+
   const agentsMd = renderAgentsMd({
     repoName: entry.repoName,
     stack,
     isPrimary: true,
     projectName,
+    docs: scaffoldDocPaths(evidence),
   });
 
   const files = renderScaffold({
@@ -199,9 +264,7 @@ export function galleryPack(entry: GalleryEntry, date = '2026-01-01'): GalleryPa
     projectName,
     isPrimary: true,
     stack,
-    topLevelDirs: entry.topLevelDirs,
-    entryPoints: entry.entryPoints,
-    glossaryTerms: entry.glossaryTerms,
+    evidence,
     date,
     agentsMd,
   });

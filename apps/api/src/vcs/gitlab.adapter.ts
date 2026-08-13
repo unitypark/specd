@@ -1,6 +1,6 @@
+import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
-  MANIFEST_FILES,
   VcsError,
   type ChangeResult,
   type ProposedChange,
@@ -89,13 +89,10 @@ export class GitLabAdapter implements VcsAdapter {
       .map((n) => n.path)
       .filter((p) => !p.split('/').some((seg) => IGNORED_DIRS.has(seg)));
 
-    const wanted = new Set(MANIFEST_FILES);
-    const samples: RepoFile[] = [];
-    for (const path of files) {
-      if (!wanted.has(path)) continue;
-      const [file] = await this.readFilesAt(repo, [path], defaultBranch);
-      if (file) samples.push({ ...file, content: file.content.slice(0, 40_000) });
-    }
+    const samples = await collectSamples(files, async (target) => {
+      const [file] = await this.readFilesAt(repo, [target.path], defaultBranch);
+      return file ?? null;
+    });
 
     return { files, samples, defaultBranch, headSha: commit.id };
   }

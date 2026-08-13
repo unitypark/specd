@@ -84,25 +84,54 @@ export class VcsError extends Error {
   }
 }
 
-/** Manifests worth reading during a scan — small, high-signal, cheap. */
+/**
+ * Root files worth reading in full during a scan — small, high-signal, cheap.
+ * This is the first tier of the scan; `scan-targets.ts` adds the rest (CI,
+ * workspace manifests, schemas, docs, entry points) under per-tier caps.
+ */
 export const MANIFEST_FILES = [
   'package.json',
   'pnpm-workspace.yaml',
   'tsconfig.json',
+  'turbo.json',
+  'nx.json',
+  'deno.json',
   'pyproject.toml',
   'requirements.txt',
+  'setup.py',
   'go.mod',
+  'go.work',
   'Cargo.toml',
   'Gemfile',
+  'mix.exs',
+  'pubspec.yaml',
+  'Package.swift',
   'pom.xml',
   'build.gradle',
   'build.gradle.kts',
+  'settings.gradle',
+  'settings.gradle.kts',
   'composer.json',
   'README.md',
   'readme.md',
+  'README.rst',
   'CONTRIBUTING.md',
+  'ARCHITECTURE.md',
   'docker-compose.yml',
+  'docker-compose.yaml',
+  'compose.yml',
+  'Dockerfile',
   'Makefile',
+  'Taskfile.yml',
+  'justfile',
+  '.env.example',
+  '.env.sample',
+  '.env.template',
+  // Agent instructions the repo already has. Onboarding must read these before
+  // it proposes its own — overwriting a team's existing rules is not onboarding.
+  'AGENTS.md',
+  'CLAUDE.md',
+  '.cursorrules',
 ];
 
 /** Paths never worth scanning — noise that would drown the signal. */

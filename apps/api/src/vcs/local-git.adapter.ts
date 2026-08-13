@@ -5,9 +5,9 @@ import { Injectable } from '@nestjs/common';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { Config } from '../config.js';
 import { parseCommitLog, type HistoryCommit } from '../knowledge/history.js';
+import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
-  MANIFEST_FILES,
   VcsError,
   type ChangeResult,
   type ProposedChange,
@@ -95,17 +95,10 @@ export class LocalGitAdapter implements VcsAdapter {
 
     const visible = files.filter((f) => !f.split('/').some((seg) => IGNORED_DIRS.has(seg)));
 
-    const wanted = new Set(MANIFEST_FILES);
-    const samples: RepoFile[] = [];
-    for (const path of visible) {
-      if (!wanted.has(path)) continue;
-      try {
-        const content = await readFile(this.safeJoin(root, path), 'utf8');
-        samples.push({ path, content: content.slice(0, 40_000) });
-      } catch {
-        // A manifest we cannot read is simply one we do not report on.
-      }
-    }
+    const samples = await collectSamples(visible, async ({ path }) => ({
+      path,
+      content: await readFile(this.safeJoin(root, path), 'utf8'),
+    }));
 
     return { files: visible, samples, defaultBranch, headSha };
   }

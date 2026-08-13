@@ -105,7 +105,7 @@ export class PipelineService {
             user: prepared.user,
             schema: prepared.schema,
             model,
-            maxTokens: 16_000,
+            maxTokens: 32_000,
             ctx: prepared.ctx,
           };
           await this.runs.queueForRunner(run.id, payload as unknown as Record<string, unknown>);

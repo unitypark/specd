@@ -13,7 +13,11 @@ import type {
 import { DB_HANDLE } from '../db/db.module.js';
 import { RunsService } from '../runs/runs.service.js';
 import { SpecAgent } from '../agents/spec.agent.js';
-import { OnboardingAgent, type DraftedDocs } from '../agents/onboarding.agent.js';
+import {
+  OnboardingAgent,
+  type DraftedDocs,
+  type PreparedOnboardCall,
+} from '../agents/onboarding.agent.js';
 import {
   BuildAgent,
   type BuildRunnerReport,
@@ -62,13 +66,8 @@ export interface OnboardJobPayload {
   // Carried through to finalize() — the propose()/db-write half never needs
   // a runner at all (it is a VCS REST call with a platform-held token, not a
   // git checkout), so it happens back on the server once the draft returns.
-  ctx: {
-    repo: Repository;
-    projectName: string;
-    stack: DetectedStack;
-    topLevelDirs: string[];
-    entryPoints: string[];
-  };
+  // Taken from the agent rather than restated, so the two cannot drift.
+  ctx: PreparedOnboardCall['ctx'];
 }
 
 /**

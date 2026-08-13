@@ -222,10 +222,13 @@ through the stations:
 
 1. **Connect** — register the seeded fixture repo (or your own: a local path,
    a GitHub App installation, or a GitLab token).
-2. **Ground** — onboarding scans the repo and opens a **setup PR/branch**
-   containing `AGENTS.md` and a `knowledge/` scaffold. Every claim the scan
-   could not verify is marked `UNVERIFIED` — the wizard does not pretend to
-   know your architecture.
+2. **Ground** — onboarding reads your repo — manifests, CI workflows, compose
+   files, `.env.example`, schemas, workspace layout — and opens a **setup
+   PR/branch** with `AGENTS.md` and a `knowledge/` base. Tables of commands,
+   pipelines, services, configuration and entities are quoted from the files
+   they name; the judgement around them is drafted, and anything the scan
+   could not ground says `UNVERIFIED`. The wizard does not pretend to know
+   your architecture ([`knowledge/decisions/0015-onboarding-reads-the-repo-before-it-drafts.md`](knowledge/decisions/0015-onboarding-reads-the-repo-before-it-drafts.md)).
 3. **Adopt** — merge the setup branch. Merging *is* the adoption signal;
    specd indexes `knowledge/` the moment the webhook lands (local mode has an
    "I merged it" button instead).
@@ -274,9 +277,11 @@ rate card in integer EUR cents (floats never touch money):
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-**Neither** — specd still runs end to end: onboarding writes the scaffold with
-every claim marked `UNVERIFIED`, and spec generation fails with a clear error
-rather than inventing content.
+**Neither** — specd still runs end to end. Onboarding writes the whole scanned
+half of the knowledge base without a model — commands, CI, services,
+configuration, entities, test layout — and leaves each judgement section
+carrying the question it exists to answer. Spec generation fails with a clear
+error rather than inventing content.
 
 ## Runbook
 

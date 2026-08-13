@@ -1,6 +1,6 @@
+import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
-  MANIFEST_FILES,
   VcsError,
   type ChangeResult,
   type ProposedChange,
@@ -66,7 +66,10 @@ export class GitHubAdapter implements VcsAdapter {
     return repo.name;
   }
 
-  async snapshot(repo: RepoTarget): Promise<RepoSnapshot> {
+  /** The visible file tree at the tip of the default branch. */
+  private async tree(
+    repo: RepoTarget,
+  ): Promise<{ files: string[]; defaultBranch: string; headSha: string }> {
     const slug = this.slug(repo);
     const meta = await this.api<{ default_branch: string }>(`/repos/${slug}`);
     const defaultBranch = meta.default_branch || repo.defaultBranch;
@@ -85,13 +88,16 @@ export class GitHubAdapter implements VcsAdapter {
       .map((n) => n.path)
       .filter((p) => !p.split('/').some((seg) => IGNORED_DIRS.has(seg)));
 
-    const wanted = new Set(MANIFEST_FILES);
-    const samples: RepoFile[] = [];
-    for (const path of files) {
-      if (!wanted.has(path)) continue;
-      const [file] = await this.readFiles(repo, [path]);
-      if (file) samples.push({ ...file, content: file.content.slice(0, 40_000) });
-    }
+    return { files, defaultBranch, headSha };
+  }
+
+  async snapshot(repo: RepoTarget): Promise<RepoSnapshot> {
+    const { files, defaultBranch, headSha } = await this.tree(repo);
+
+    const samples = await collectSamples(files, async (target) => {
+      const [file] = await this.readFiles(repo, [target.path]);
+      return file ?? null;
+    });
 
     return { files, samples, defaultBranch, headSha };
   }
@@ -115,8 +121,10 @@ export class GitHubAdapter implements VcsAdapter {
   }
 
   async listFiles(repo: RepoTarget, prefix: string): Promise<string[]> {
-    const snap = await this.snapshot(repo);
-    return snap.files.filter((f) => f.startsWith(prefix));
+    // Deliberately the tree, not `snapshot()`: listing paths must not drag in
+    // the scan's file reads, which the indexer would pay for on every run.
+    const { files } = await this.tree(repo);
+    return files.filter((f) => f.startsWith(prefix));
   }
 
   async listFilesWithSha(

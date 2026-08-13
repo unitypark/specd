@@ -501,7 +501,7 @@
         <div class="chips"><span class="chip">sem</span><span class="chip okc">impact: high</span><span class="chip">effort: M</span></div></div>
       <p>Semantica ships one plugin body — skills, agents, hooks — under eight editor manifests, and makes
       its own repo an installable marketplace (<code>marketplace.json</code>). specd's version writes itself:
-      the nine AGENTS.md rules are currently enforced by hope. As a plugin: <code>/specd:pull</code> (fetch,
+      AGENTS.md’s seven rules are currently enforced by hope past the three specd already binds in software. As a plugin: <code>/specd:pull</code> (fetch,
       verify buildable, set up the <code>spec/&lt;id&gt;-&lt;slug&gt;</code> branch), <code>/specd:implement</code>
       (task loop, one commit per task, verify command between tasks), <code>/specd:as-built</code> (render the
       deviations section against the pulled spec). Hooks do the enforcing: a PreToolUse gate that blocks
@@ -511,7 +511,7 @@
       shell around <code>jq</code>.</p>
       <p class="refs">semantica: <code>plugins/.claude-plugin/plugin.json</code>, <code>marketplace.json</code>,
       <code>plugins/hooks/hooks.json</code>, <code>plugins/skills/decision/SKILL.md</code> ·
-      specd: <code>packages/templates/src/agents-md.ts:41-77</code> (the nine rules), <code>main.go:417-439</code>
+      specd: <code>packages/templates/src/agents-md.ts:24-49</code> (the seven rules), <code>main.go:417-439</code>
       (<code>spec status</code> as the gate primitive)</p>
     </div>
 
@@ -520,7 +520,7 @@
         <div class="chips"><span class="chip">sem</span><span class="chip">impact: med</span><span class="chip">effort: S</span></div></div>
       <p>Onboarding already writes the working agreements into every repo; it should also wire the doors.
       The setup PR gains the MCP config block for the project (per-editor snippets in a
-      <code>docs/agents.md</code> it scaffolds), and AGENTS.md gains a tenth rule: when specd's knowledge
+      <code>docs/agents.md</code> it scaffolds), and AGENTS.md gains an eighth rule: when specd's knowledge
       tools are available, query them before re-deriving from raw files. The templates stay the single
       source — the same discipline that makes CLAUDE.md a one-line importer of AGENTS.md so the two cannot
       drift.</p>

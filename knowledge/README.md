@@ -64,6 +64,10 @@ never rewritten as the analyzed system evolves.
   benchmarking read for the code-aware phase: validates the deterministic-index
   and Postgres-only bets, and carries the cost evidence for scoping code
   awareness to a symbol index rather than a call graph
+- [semantica analysis](research/semantica-analysis.md) — benchmarking read for
+  the agent-surface phase: the third project in a row to reach coding agents
+  over MCP with packaged skills and enforcing hooks, and the case for making
+  specd's own records queryable as precedent rather than filed as history
 
 ## How this stays alive
 

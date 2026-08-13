@@ -119,7 +119,10 @@ export class RunsController {
     });
   }
 
-  /** Station 02 — open the setup PRs. */
+  /**
+   * Station 02 — queue the grounding runs that open the setup PRs. Returns as
+   * soon as the rows are written; the outcome arrives on each run (0016).
+   */
   @Post('onboard')
   async onboard(
     @Param('slug') slug: string,
@@ -127,7 +130,7 @@ export class RunsController {
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user, ['owner', 'maintainer']);
-    return this.pipeline.runOnboarding({
+    return this.pipeline.enqueueOnboarding({
       projectId: project.id,
       repositoryIds: dto.repositoryIds,
       actor: { userId: user.sub, name: user.name },

@@ -25,6 +25,18 @@ import { OnboardingAgent } from './onboarding.agent.js';
 import { SpecAgent } from './spec.agent.js';
 import { BuildAgent } from './build.agent.js';
 import { IndexQueueService } from './index-queue.service.js';
+import { OnboardQueueService } from './onboard-queue.service.js';
+
+/** What queueing a station-02 run tells the caller. The outcome arrives on the
+ *  run itself — there is no branch or PR to report yet (0016). */
+export interface OnboardEnqueued {
+  repositoryId: string;
+  repoName: string;
+  runId: string;
+  queued: true;
+  /** Set when this request joined a run that was already in flight. */
+  coalescedInto?: string;
+}
 
 /**
  * Orchestration. Each public method here is one station of the fixed pipeline
@@ -32,12 +44,15 @@ import { IndexQueueService } from './index-queue.service.js';
  *
  *   check the gate/cap → open an auditable run → do the work → meter → finish
  *
- * Runs are executed in-process and awaited. That is honest for P1: a spec
- * draft is a single model call, and pretending it is a distributed job would
- * add a queue with nothing to schedule. Dispatch to a self-hosted runner is
- * the one exception, and it is a poll, not a queue — the runner claims a
- * queued `agent_runs` row. A real queue is only warranted once runs execute
- * somewhere other than this process; see knowledge/decisions/0008.
+ * Spec and build runs are executed in-process and awaited: a spec draft is a
+ * single model call, and pretending it is a distributed job would add a
+ * scheduler with nothing to schedule. Index runs ([[0012]]) and onboard runs
+ * ([[0016]]) are the exceptions — both are long enough that holding a request
+ * open for them is the wrong shape, so each is an `agent_runs` row that a
+ * worker in this process claims. None of that is a queue *system*: Postgres
+ * remains the only store, which is what knowledge/decisions/0008 asked for.
+ * Dispatch to a self-hosted runner is the same mechanism from the other side —
+ * the runner claims a queued row by polling.
  */
 @Injectable()
 export class PipelineService {
@@ -56,103 +71,135 @@ export class PipelineService {
     private readonly specAgent: SpecAgent,
     private readonly build: BuildAgent,
     private readonly indexQueue: IndexQueueService,
+    private readonly onboardQueue: OnboardQueueService,
   ) {}
 
-  /** Station 02 — Ground. Opens one setup PR (or branch) per repository. */
-  async runOnboarding(input: {
+  /**
+   * Station 02 — Ground. Queues one run per repository and returns (0016).
+   *
+   * Grounding reads a whole repository and then calls a model; holding an HTTP
+   * request open for that was already the wrong shape, and while it ran inline
+   * nothing stopped a second click from opening a second setup PR. The caller
+   * follows the run for the outcome, exactly as re-index has done since 0012.
+   */
+  async enqueueOnboarding(input: {
     projectId: string;
     repositoryIds: string[];
     actor: { userId: string; name: string };
-  }) {
+  }): Promise<OnboardEnqueued[]> {
+    // Checked here so a paused project or a spent cap is an answer to *this*
+    // request, and again in the worker because either can change while a run
+    // waits — a claim is not a standing permission.
     await this.runs.assertCanRun(input.projectId);
-    const project = await this.projects.byId(input.projectId);
-    const ai = await this.connections.resolveAi(project.id, project.defaultModel);
-    const model = this.resolveModel(ai.model, project.defaultModel);
 
-    const pairedRunner =
-      ai.mode === 'subscription_runner' ? await this.runners.pickPaired(project.id) : null;
-
-    const results: {
-      repositoryId: string;
-      repoName: string;
-      runId: string;
-      branch?: string;
-      url?: string | null;
-      reviewHint?: string;
-      fileCount?: number;
-      error?: string;
-      queued?: boolean;
-    }[] = [];
+    const results: OnboardEnqueued[] = [];
+    let queuedAny = false;
 
     for (const repoId of input.repositoryIds) {
+      // Resolved in the request path so an unknown repository is a 404 the
+      // caller sees, rather than a queued run that fails out of sight.
       const repo = await this.repositories.get(input.projectId, repoId);
-      const run = await this.runs.start({
-        projectId: input.projectId,
-        kind: 'onboard',
-        model,
-        runner: ai.mode === 'subscription_runner' ? 'self_hosted' : 'hosted',
-        triggeredByUserId: input.actor.userId,
-        triggeredByName: input.actor.name,
-        repositoryId: repo.id,
-      });
 
-      if (pairedRunner) {
-        try {
-          const prepared = await this.onboarding.prepare({ repo, projectName: project.name, run });
-          const payload: OnboardJobPayload = {
-            kind: 'onboard',
-            system: prepared.system,
-            user: prepared.user,
-            schema: prepared.schema,
-            model,
-            maxTokens: 32_000,
-            ctx: prepared.ctx,
-          };
-          await this.runs.queueForRunner(run.id, payload as unknown as Record<string, unknown>);
-          await run.log(`queued for runner "${pairedRunner.name}" — waiting for it to poll`);
-          results.push({ repositoryId: repo.id, repoName: repo.name, runId: run.id, queued: true });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          await run.log(message, 'error');
-          await this.runs.finish(run.id, { status: 'failed', error: message });
-          this.logger.warn(`onboarding dispatch failed for ${repo.name}: ${message}`);
-          results.push({ repositoryId: repo.id, repoName: repo.name, runId: run.id, error: message });
-        }
-        continue;
-      }
-
-      try {
-        const result = await this.onboarding.run({
-          repo,
-          projectName: project.name,
-          apiKey: ai.apiKey,
-          model,
-          mode: ai.mode,
-          run,
-        });
-        await this.runs.finish(run.id, {
-          status: 'succeeded',
-          result: { branch: result.branch, url: result.url, files: result.fileCount },
-        });
+      const existing = await this.runs.pendingOnboardRun(input.projectId, repo.id);
+      if (existing) {
+        await this.runs.logRun(
+          existing.id,
+          `${input.actor.name} asked to ground ${repo.name} again while this run was ` +
+            `still in flight — folded into this run rather than opening a second setup PR`,
+        );
         results.push({
           repositoryId: repo.id,
           repoName: repo.name,
-          runId: run.id,
-          branch: result.branch,
-          url: result.url,
-          reviewHint: result.reviewHint,
-          fileCount: result.fileCount,
+          runId: existing.id,
+          queued: true,
+          coalescedInto: existing.id,
         });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        await run.log(message, 'error');
-        await this.runs.finish(run.id, { status: 'failed', error: message });
-        this.logger.warn(`onboarding failed for ${repo.name}: ${message}`);
-        results.push({ repositoryId: repo.id, repoName: repo.name, runId: run.id, error: message });
+        continue;
       }
+
+      const runId = await this.runs.enqueue({
+        projectId: input.projectId,
+        kind: 'onboard',
+        triggeredByUserId: input.actor.userId,
+        triggeredByName: input.actor.name,
+        repositoryId: repo.id,
+        // Left null deliberately. A runner's claim keys on `job_payload IS NOT
+        // NULL` for a dispatchable kind (0004/0005), so filling it before
+        // `OnboardingAgent.prepare()` has produced a prompt would let a paired
+        // runner claim a job with nothing in it yet.
+        jobPayload: null,
+      });
+      await this.runs.logRun(runId, 'queued — waiting for the onboarding worker');
+      results.push({ repositoryId: repo.id, repoName: repo.name, runId, queued: true });
+      queuedAny = true;
     }
 
+    if (queuedAny) await this.onboardQueue.wake();
     return results;
+  }
+
+  /**
+   * Execute a queued onboarding run — the counterpart to `runReindex`, called
+   * by the worker that claimed the row and never from a request path.
+   */
+  async runOnboardingRun(input: {
+    runId: string;
+    projectId: string;
+    repositoryId: string;
+  }): Promise<void> {
+    const run = this.runs.handleFor(input.runId);
+
+    try {
+      await this.runs.assertCanRun(input.projectId);
+
+      const project = await this.projects.byId(input.projectId);
+      const repo = await this.repositories.get(input.projectId, input.repositoryId);
+      const ai = await this.connections.resolveAi(project.id, project.defaultModel);
+      const model = this.resolveModel(ai.model, project.defaultModel);
+      // The row was queued before anything knew which model it would use.
+      await this.runs.setModel(input.runId, model);
+
+      const pairedRunner =
+        ai.mode === 'subscription_runner' ? await this.runners.pickPaired(project.id) : null;
+
+      if (pairedRunner) {
+        const prepared = await this.onboarding.prepare({ repo, projectName: project.name, run });
+        const payload: OnboardJobPayload = {
+          kind: 'onboard',
+          system: prepared.system,
+          user: prepared.user,
+          schema: prepared.schema,
+          model,
+          maxTokens: 32_000,
+          ctx: prepared.ctx,
+        };
+        // Hands the row on rather than finishing it: `queueForRunner` sets
+        // `runner = 'self_hosted'`, which is precisely what stops this worker
+        // from claiming it straight back off the queue (0016).
+        await this.runs.queueForRunner(input.runId, payload as unknown as Record<string, unknown>);
+        await run.log(`queued for runner "${pairedRunner.name}" — waiting for it to poll`);
+        return;
+      }
+
+      const result = await this.onboarding.run({
+        repo,
+        projectName: project.name,
+        apiKey: ai.apiKey,
+        model,
+        mode: ai.mode,
+        run,
+      });
+      await this.runs.finish(input.runId, {
+        status: 'succeeded',
+        result: { branch: result.branch, url: result.url, files: result.fileCount },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await run.log(message, 'error');
+      await this.runs.finish(input.runId, { status: 'failed', error: message });
+      this.logger.warn(`onboarding run ${input.runId} failed: ${message}`);
+      throw err;
+    }
   }
 
   /** Station 03 — Spec. A deliberate human click, never automatic (§8). */

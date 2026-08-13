@@ -548,9 +548,10 @@ function SetupWizard() {
     }
   }
 
-  // A repo dispatched to a paired runner comes back `queued` with no
-  // branch/PR yet — poll each queued run until it finishes rather than
-  // leaving the wizard showing a result that never arrives.
+  // Every repo comes back `queued` with no branch/PR yet: grounding is a run
+  // the server executes, not something the request waits for (0016). Poll each
+  // one until it finishes rather than leaving the wizard showing a result that
+  // never arrives.
   useEffect(() => {
     if (!project || !onboardResults?.some((r) => r.queued)) return;
     const id = setInterval(async () => {
@@ -1308,8 +1309,8 @@ function SetupWizard() {
                       {r.queued ? (
                         <>
                           {' '}
-                          — <span className="spinner" /> queued for your runner, waiting for it to
-                          pick this up…
+                          — <span className="spinner" /> queued — reading the repository and
+                          drafting the scaffold…
                         </>
                       ) : r.error ? (
                         <> — {r.error}</>

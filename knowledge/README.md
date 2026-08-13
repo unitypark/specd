@@ -41,6 +41,7 @@ everything else is a consequence of it.
 - [0013 — doc↔code coupling is mined from git history](decisions/0013-doc-code-coupling-from-git-history.md)
 - [0014 — the index holds code, not only docs](decisions/0014-the-index-holds-code-not-only-docs.md)
 - [0015 — onboarding reads the repository before it drafts](decisions/0015-onboarding-reads-the-repo-before-it-drafts.md)
+- [0016 — grounding runs are queued rows, and an abandoned one is failed](decisions/0016-onboarding-runs-are-queued.md)
 
 New decisions join this list in the PR that adds them — the map rides the
 change like everything else.

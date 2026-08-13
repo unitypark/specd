@@ -449,6 +449,37 @@ those tokens on every route that is not explicitly CLI-allowed. Approving a spec
 through it is not blocked — it is impossible. See
 [ADR 0017](knowledge/decisions/0017-the-engine-answers-over-mcp.md).
 
+## The Claude Code plugin
+
+`AGENTS.md` is a numbered list of rules, and three of them are enforced by
+software: the
+server refuses to serve an unapproved spec, the webhook matches merged
+`spec/<id>-<slug>` branches back to their spec, and the build station files the
+as-built record itself. The rest were enforced by asking nicely.
+
+The plugin in [`plugins/`](plugins/) makes two more of them bind at the moment
+they are broken. Install it from this repository, which is its own marketplace:
+
+```
+/plugin marketplace add unitypark/specd
+/plugin install specd@specd
+```
+
+| | |
+| --- | --- |
+| `/specd:pull <id>` | gate first, then the knowledge the design cites, then the branch |
+| `/specd:implement` | tasks in order, one commit each, verify between them |
+| `/specd:as-built` | files the record — copied from the approved spec, never composed |
+
+Two hooks do the enforcing. **`gate.sh`** blocks an edit on a `spec/` branch
+whose spec is not approved, and it fails *open* on every infrastructure problem
+— no CLI, not logged in, server unreachable — because a hook that blocks all
+editing when the API is down is a hook people uninstall. **`docs-ride-the-change.sh`**
+asks once, when a spec branch changed code and nothing under `knowledge/`,
+whether rule 3 was met. Neither can approve anything: that is a signed-in human
+in the app, and [ADR 0018](knowledge/decisions/0018-working-agreements-ship-as-a-plugin.md)
+says why a plugin that could open the gate would defeat the product.
+
 ## Self-hosted runners
 
 Pair a machine (`specd runner pair <code>` — code from the project's Settings),

@@ -1,0 +1,16 @@
+{
+  "name": "specd",
+  "owner": {
+    "name": "unitypark",
+    "url": "https://github.com/unitypark/specd"
+  },
+  "plugins": [
+    {
+      "name": "specd",
+      "description": "Spec-driven delivery in Claude Code: pull an approved spec, implement its tasks in order, file the as-built record — with the human gate enforced by hooks rather than hoped for.",
+      "source": "./plugins",
+      "category": "Productivity",
+      "tags": ["spec-driven", "knowledge-base", "code-review", "specd"]
+    }
+  ]
+}

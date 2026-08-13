@@ -1,0 +1,22 @@
+{
+  "name": "specd",
+  "description": "Spec-driven delivery in Claude Code: pull an approved spec, implement its tasks in order, file the as-built record — with the human gate enforced by hooks rather than hoped for.",
+  "version": "0.1.0",
+  "author": {
+    "name": "specd contributors",
+    "url": "https://github.com/unitypark/specd"
+  },
+  "homepage": "https://specd.dev",
+  "repository": "https://github.com/unitypark/specd",
+  "license": "MIT",
+  "keywords": [
+    "specd",
+    "spec-driven",
+    "knowledge base",
+    "as-built",
+    "approval gate",
+    "citations"
+  ],
+  "skills": "./skills",
+  "hooks": "./hooks/hooks.json"
+}

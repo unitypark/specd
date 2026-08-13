@@ -5,12 +5,35 @@ import styles from '../landing.module.css';
 
 export const metadata: Metadata = { title: 'specd — pricing' };
 
-/** Pricing lives on its own page rather than in the landing flow (rev 15). */
-const TIERS = [
+/**
+ * Pricing lives on its own page rather than in the landing flow (rev 15).
+ *
+ * Anything not built yet says so. The README is careful about this — pre-1.0,
+ * nothing deploys as a service, `deploy.md` reports no host — and a pricing
+ * page that quietly sells the same product as finished undoes that, because
+ * this is the page a stranger reads first. `planned` is the same discipline
+ * the product applies to its own signals: unmeasured is not fresh, and
+ * not-built is not shipped.
+ */
+type Feature = { label: string; planned?: true };
+
+const TIERS: {
+  name: string;
+  amount: string;
+  note?: string;
+  hot?: string;
+  features: Feature[];
+  cta: { label: string; href: string; primary: boolean };
+}[] = [
   {
     name: 'Free',
     amount: '€0',
-    features: ['1 project · 2 repos', 'BYO API key or your runner', 'Built-in board', 'Community templates'],
+    features: [
+      { label: '1 project · 2 repos' },
+      { label: 'BYO API key or your runner' },
+      { label: 'Built-in board' },
+      { label: 'Community templates' },
+    ],
     cta: { label: 'Start free', href: '/setup', primary: false },
   },
   {
@@ -18,13 +41,28 @@ const TIERS = [
     amount: '€49',
     note: ' /project/mo + metered runs',
     hot: 'MOST TEAMS',
-    features: ['Unlimited repos · free seats', 'Hosted agent runners', 'Jira two-way sync', 'Delivery & knowledge dashboards'],
+    features: [
+      { label: 'Unlimited repos · free seats' },
+      // No cloud exists yet: runners are self-hosted and paired per machine.
+      { label: 'Hosted agent runners', planned: true },
+      // Outbound mirroring works; moving an issue in Jira does not move the
+      // spec, and the adapter has never met a live Atlassian site (docs/jira.md).
+      { label: 'Jira two-way sync', planned: true },
+      { label: 'Delivery & knowledge dashboards' },
+    ],
     cta: { label: 'Start trial', href: '/setup', primary: true },
   },
   {
     name: 'Enterprise',
     amount: 'Custom',
-    features: ['Self-host / private cloud', 'SSO · audit export', 'Bedrock & Azure adapters', 'Org template packs'],
+    features: [
+      // Self-hosting is what specd already is — local-first, your Postgres.
+      { label: 'Self-host / private cloud' },
+      { label: 'SSO · audit export', planned: true },
+      // The model allowlist is Anthropic-only (packages/shared/src/models.ts).
+      { label: 'Bedrock & Azure adapters', planned: true },
+      { label: 'Org template packs', planned: true },
+    ],
     cta: { label: 'Talk to us', href: 'mailto:hello@specd.dev', primary: false },
   },
 ];
@@ -58,7 +96,10 @@ export default function Pricing() {
                 </div>
                 <ul>
                   {t.features.map((f) => (
-                    <li key={f}>{f}</li>
+                    <li key={f.label} className={f.planned ? styles.planned : undefined}>
+                      {f.label}
+                      {f.planned && <span className={styles.soon}>planned</span>}
+                    </li>
                   ))}
                 </ul>
                 <Link

@@ -42,6 +42,7 @@ everything else is a consequence of it.
 - [0014 — the index holds code, not only docs](decisions/0014-the-index-holds-code-not-only-docs.md)
 - [0015 — onboarding reads the repository before it drafts](decisions/0015-onboarding-reads-the-repo-before-it-drafts.md)
 - [0016 — grounding runs are queued rows, and an abandoned one is failed](decisions/0016-onboarding-runs-are-queued.md)
+- [0017 — the knowledge engine answers over MCP](decisions/0017-the-engine-answers-over-mcp.md)
 
 New decisions join this list in the PR that adds them — the map rides the
 change like everything else.

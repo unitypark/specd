@@ -14,6 +14,7 @@ import {
   type DbContext,
   type Repository,
 } from '@specd/db';
+import { citationRef, judgeCitation } from '@specd/shared';
 import type {
   CitationCoverage,
   KnowledgeDocKind,
@@ -1328,6 +1329,50 @@ export class KnowledgeService {
       .where(and(eq(knowledgeDocs.id, docId), eq(knowledgeDocs.projectId, projectId)))
       .limit(1);
     return row ?? null;
+  }
+
+  /**
+   * The same doc by the name it is cited under. An agent holding
+   * `knowledge/architecture.md#auth` has a path, never a uuid, and asking it
+   * to list the tree first to translate one into the other is a round trip
+   * that exists only because the API preferred its own identifiers.
+   */
+  async getDocByPath(projectId: string, path: string) {
+    const [row] = await this.db
+      .select()
+      .from(knowledgeDocs)
+      .where(and(eq(knowledgeDocs.path, path), eq(knowledgeDocs.projectId, projectId)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Judge one citation on demand, the way the SpecAgent judges the ones in a
+   * draft — same retrieval, same coverage, same `judgeCitation`.
+   *
+   * The verdict answers a narrower question than it looks like, and the
+   * difference is worth stating: retrieval runs *for this citation*, so
+   * `unknown` here means the corpus could not surface the passage even when
+   * asked about it directly. In a spec draft the same verdict means only that
+   * the passage did not make the top-k of a broader query. Both are "could not
+   * check", and neither is "not there" — that is what `unsupported` is for.
+   */
+  async verifyCitation(projectId: string, citation: string) {
+    const { chunks, truncatedCount } = await this.retrieve(projectId, citation, 12);
+    const coverage = await this.coverageFor(
+      projectId,
+      chunks.map((c) => c.path),
+    );
+    const judged = judgeCitation(citation, chunks, { ...coverage, truncatedCount });
+    return {
+      citation,
+      verdict: judged.verdict,
+      // `unverified` is the sentence the SpecAgent would have written into the
+      // spec. It says which gap to close, so it is the useful half of a
+      // verdict that is not `supported`.
+      note: judged.unverified ?? null,
+      checkedAgainst: chunks.map((c) => citationRef(c)),
+    };
   }
 
   /**

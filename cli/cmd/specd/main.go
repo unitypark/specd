@@ -75,6 +75,8 @@ func main() {
 		err = cmdRunner(args[1:])
 	case "open":
 		err = cmdOpen(args[1:])
+	case "mcp":
+		err = cmdMCP(args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("specd %s\n", version)
 	case "help", "--help", "-h":
@@ -114,6 +116,7 @@ func usage() {
   specd runner pair <code>       pair this machine as a self-hosted runner
   specd runner token             print the stored runner token (for SPECD_RUNNER_TOKEN)
   specd open [id]                open the spec (or project) in the browser
+  specd mcp serve                serve the knowledge base to an AI editor over MCP
 
 Flags:
   --project <slug>               override the default project

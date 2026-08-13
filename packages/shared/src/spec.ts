@@ -245,3 +245,33 @@ export function renderSpecMarkdown(input: {
 
   return lines.join('\n');
 }
+
+/**
+ * What an as-built record says about how it went.
+ *
+ * Reads exactly what `renderAsBuiltMarkdown` above writes, which is why it
+ * lives beside it: the writer and the reader of this format have to move
+ * together, and a parser kept anywhere else would drift the first time the
+ * template gained a line.
+ *
+ * Both halves are deliberately conservative. A verification line is returned
+ * verbatim rather than reduced to a boolean, because "passed", "**failed** at
+ * build time" and "not run" are three different facts and the third is the one
+ * a summary would quietly turn into one of the other two. Deviations are
+ * reported as present or absent, never summarised — whoever wrote that section
+ * wrote it for a reader, and paraphrasing it here would be this codebase
+ * doing the one thing it tells its agents not to do.
+ */
+export function outcomeOf(content: string): {
+  verification: string | null;
+  hasDeviations: boolean;
+} {
+  const hasDeviations = /^##\s+Deviations\s*$/m.test(content);
+
+  const heading = content.match(/^##\s+Verification\s*$/m);
+  if (!heading?.index) return { verification: null, hasDeviations };
+
+  const after = content.slice(heading.index + heading[0].length);
+  const line = after.split('\n').find((l) => l.trim().length > 0);
+  return { verification: line?.trim() ?? null, hasDeviations };
+}

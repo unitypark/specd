@@ -3,6 +3,7 @@ import {
   asBuiltPath,
   countCitations,
   countUnverified,
+  outcomeOf,
   renderAsBuiltMarkdown,
   renderSpecMarkdown,
   slugify,
@@ -153,5 +154,74 @@ describe('spec content', () => {
       expect(a).toBe(b);
       expect(a).toContain(renderSpecMarkdown(spec));
     });
+  });
+});
+
+describe('reading an as-built record', () => {
+  const record = (verify: { passed: boolean | null; command: string | null }) =>
+    renderAsBuiltMarkdown(
+      {
+        ticketKey: 'CRM-1',
+        title: 'Add a widget',
+        version: 2,
+        status: 'delivered',
+        approvedBy: 'Theo',
+        approvedAt: '2026-08-01T00:00:00.000Z',
+        content: {
+          requirements: [],
+          design: [],
+          tasks: [],
+          outOfScope: [],
+          openQuestions: [],
+        },
+      },
+      verify,
+    );
+
+  // The parser reads what the renderer writes, so it is tested against the
+  // renderer's real output rather than a hand-typed approximation — a
+  // template that gains a blank line should fail this, not ship past it.
+  it('reads back each of the three verification outcomes', () => {
+    expect(outcomeOf(record({ passed: true, command: 'pnpm test' })).verification).toBe(
+      '`pnpm test` — passed',
+    );
+    expect(outcomeOf(record({ passed: false, command: 'pnpm test' })).verification).toBe(
+      '`pnpm test` — **failed** at build time',
+    );
+    // The one a boolean would lose. "Nobody ran it" is not "it failed", and
+    // it is not "it passed" either.
+    expect(outcomeOf(record({ passed: null, command: 'pnpm test' })).verification).toBe(
+      '`pnpm test` — not run',
+    );
+  });
+
+  it('reads a repo with no verify command as such', () => {
+    expect(outcomeOf(record({ passed: null, command: null })).verification).toBe(
+      'No verify command was detected for this repository.',
+    );
+  });
+
+  it('notices a Deviations section without summarising it', () => {
+    const clean = record({ passed: true, command: 'pnpm test' });
+    expect(outcomeOf(clean).hasDeviations).toBe(false);
+
+    const diverged = `${clean}\n## Deviations\n\nTask 3 ran on the merge poll instead.\n`;
+    const read = outcomeOf(diverged);
+    expect(read.hasDeviations).toBe(true);
+    // Still reports the verification: a record that diverged is not a record
+    // that went unverified.
+    expect(read.verification).toBe('`pnpm test` — passed');
+  });
+
+  it('says nothing rather than guessing when the section is absent', () => {
+    expect(outcomeOf('# Just a doc\n\nSome prose.\n')).toEqual({
+      verification: null,
+      hasDeviations: false,
+    });
+  });
+
+  it('does not mistake a mention of deviations for the section itself', () => {
+    const prose = '# ADR\n\nWe considered deviations from the plan but did not take any.\n';
+    expect(outcomeOf(prose).hasDeviations).toBe(false);
   });
 });

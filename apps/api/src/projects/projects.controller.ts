@@ -377,6 +377,29 @@ export class ProjectsController {
     return { docs, health, grounding };
   }
 
+  /**
+   * What this project already decided about something like this.
+   *
+   * A reviewer standing at the gate has the same question the SpecAgent had
+   * while drafting — has this ground been walked before, and how did it go?
+   * The drawer asks this so that answer is on screen *before* the approval,
+   * which is the only moment it can still change anything.
+   *
+   * Declared above `:docId` on purpose: `precedents` would otherwise be
+   * captured as a document id and fail its uuid parse.
+   */
+  @Get(':slug/knowledge/precedents')
+  async precedents(
+    @Param('slug') slug: string,
+    @Query('q') q: string | undefined,
+    @CurrentUser() user: TokenClaims,
+  ) {
+    const project = await this.projects.bySlug(slug);
+    await this.projects.requireRole(user.sub, project.id, ['owner', 'maintainer', 'reviewer']);
+    if (!q || q.trim().length < 2) return [];
+    return this.knowledge.findPrecedents(project.id, q.trim());
+  }
+
   @Get(':slug/knowledge/:docId')
   async knowledgeDoc(
     @Param('slug') slug: string,

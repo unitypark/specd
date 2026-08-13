@@ -162,3 +162,24 @@ export interface SpecView {
   createdAt: string;
   supersedes: string | null;
 }
+
+/**
+ * A past decision this project already made about something similar — an
+ * as-built spec or an ADR, surfaced before a new one is drafted.
+ *
+ * Ranked, not scored: `score` is a retrieval rank, and `matchedOn` says which
+ * section produced it so a reader can judge the match themselves. A precedent
+ * guides; it does not decide.
+ */
+export interface Precedent {
+  path: string;
+  title: string;
+  kind: 'spec' | 'adr';
+  score: number;
+  /** The heading whose passage matched — why this surfaced. */
+  matchedOn: string | null;
+  /** The as-built verification line, verbatim. Null for an ADR. */
+  verification: string | null;
+  /** Whether reality diverged enough that someone wrote it down. */
+  hasDeviations: boolean;
+}

@@ -14,10 +14,11 @@ import {
   type DbContext,
   type Repository,
 } from '@specd/db';
-import { citationRef, judgeCitation } from '@specd/shared';
+import { citationRef, judgeCitation, outcomeOf } from '@specd/shared';
 import type {
   CitationCoverage,
   KnowledgeDocKind,
+  Precedent,
   RetrievalResult,
   RetrievedChunk,
 } from '@specd/shared';
@@ -755,6 +756,123 @@ export class KnowledgeService {
       matchedCount,
       truncatedCount: Math.max(0, matchedCount - rrfChunks.length),
     };
+  }
+
+  /**
+   * What this project already decided about something like this.
+   *
+   * `knowledge/specs/` and `knowledge/decisions/` are the two places specd
+   * writes its own history, and until now they were retrieved like any other
+   * prose — a paragraph at a time, ranked against architecture notes and
+   * runbooks, usually losing. But they answer a different question from the
+   * rest of the corpus. Architecture says how the system is; an as-built spec
+   * says what happened when someone last built something shaped like this,
+   * whether it worked, and where reality diverged from the plan.
+   *
+   * So they get their own lookup, and it is deliberately **doc-level**: the
+   * useful unit is "S-102 did this and here is how it went", not the best
+   * paragraph of S-102. Same RRF fusion as `retrieve()`, scoped to the two
+   * kinds, collapsed to the best chunk per doc.
+   *
+   * No confidence score is invented for these. They are ranked, and the
+   * heading that matched is reported so a reader can see why each one
+   * surfaced — a precedent guides, it does not decide, and dressing a
+   * retrieval rank as a probability would claim otherwise.
+   */
+  async findPrecedents(projectId: string, query: string, limit = 4): Promise<Precedent[]> {
+    const queryVec = await this.embeddings.embedQuery(query);
+    const k = 60;
+    const pool = Math.max(limit * 8, 40);
+
+    const rows = await this.handle.sql<
+      {
+        path: string;
+        repo_name: string;
+        title: string | null;
+        kind: string;
+        heading: string | null;
+        content: string;
+        score: number;
+      }[]
+    >`
+      WITH lexemes AS (
+        -- Any shared term, not every term.
+        --
+        -- plainto_tsquery ANDs every lexeme it produces, which is right for a
+        -- search box and catastrophic here: the caller passes a whole ticket,
+        -- so the predicate becomes "one 1800-character chunk contains all 26
+        -- content words of this ticket" and nothing ever matches. Rewriting
+        -- the operators to OR keeps the only veto that mattered — a query
+        -- sharing no vocabulary at all with the corpus still matches nothing,
+        -- which is the "we have never been here" answer this lookup exists to
+        -- be able to give — while letting a real ticket reach the specs that
+        -- discuss it. Ranking below decides which of the matches are worth
+        -- showing.
+        SELECT replace(plainto_tsquery('english', ${query})::text, '&', '|')::tsquery AS q
+      ),
+      dense AS (
+        SELECT c.id,
+               row_number() OVER (ORDER BY c.embedding <=> ${EmbeddingService.toSqlVector(queryVec)}::vector) AS rank
+        FROM knowledge_chunks c
+        JOIN knowledge_docs kd ON kd.id = c.doc_id
+        WHERE c.project_id = ${projectId}
+          AND c.embedding IS NOT NULL
+          AND kd.kind IN ('spec', 'adr')
+        ORDER BY c.embedding <=> ${EmbeddingService.toSqlVector(queryVec)}::vector
+        LIMIT ${pool}
+      ),
+      lexical AS (
+        SELECT c.id,
+               row_number() OVER (ORDER BY ts_rank_cd(c.tsv, (SELECT q FROM lexemes)) DESC) AS rank
+        FROM knowledge_chunks c
+        JOIN knowledge_docs kd ON kd.id = c.doc_id
+        WHERE c.project_id = ${projectId}
+          AND kd.kind IN ('spec', 'adr')
+          AND c.tsv @@ (SELECT q FROM lexemes)
+        ORDER BY ts_rank_cd(c.tsv, (SELECT q FROM lexemes)) DESC
+        LIMIT ${pool}
+      ),
+      fused AS (
+        -- Lexical match required, dense used only to rank. Ordinary retrieval
+        -- fuses the two arms symmetrically, and should: there a weak match is
+        -- a passage the model can read and discard.
+        --
+        -- A precedent cannot be discarded that cheaply. It arrives labelled
+        -- "this project has been here before", and the dense arm has no
+        -- distance threshold: with no relevance predicate it returns its top
+        -- pool rows for any query at all, so an unrelated ticket would be
+        -- handed the nearest spec in the space and invited to draw a parallel
+        -- that does not exist. The lexical arm is the only one that can say
+        -- no, because its match is a predicate rather than a ranking.
+        SELECT l.id,
+               COALESCE(1.0 / (${k} + d.rank), 0) + 1.0 / (${k} + l.rank) AS score
+        FROM lexical l
+        LEFT JOIN dense d ON d.id = l.id
+      ),
+      best AS (
+        SELECT f.id, f.score, c.doc_id, c.heading,
+               row_number() OVER (PARTITION BY c.doc_id ORDER BY f.score DESC, f.id) AS per_doc
+        FROM fused f
+        JOIN knowledge_chunks c ON c.id = f.id
+      )
+      SELECT kd.path, r.name AS repo_name, kd.title, kd.kind, b.heading, kd.content, b.score
+      FROM best b
+      JOIN knowledge_docs kd ON kd.id = b.doc_id
+      JOIN repositories r ON r.id = kd.repository_id
+      WHERE b.per_doc = 1
+      ORDER BY b.score DESC
+      LIMIT ${limit}
+    `;
+
+    return rows.map((row) => ({
+      path: row.path,
+      repoName: row.repo_name,
+      title: row.title ?? row.path,
+      kind: row.kind === 'adr' ? ('adr' as const) : ('spec' as const),
+      score: Number(row.score),
+      matchedOn: headingAnchor(row.heading),
+      ...outcomeOf(row.content),
+    }));
   }
 
   /**

@@ -245,3 +245,46 @@ export function renderSpecMarkdown(input: {
 
   return lines.join('\n');
 }
+
+/**
+ * What an as-built record says about how it went.
+ *
+ * Reads exactly what `renderAsBuiltMarkdown` above writes, which is why it
+ * lives beside it: the writer and the reader of this format have to move
+ * together, and a parser kept anywhere else would drift the first time the
+ * template gained a line.
+ *
+ * Both halves are deliberately conservative. A verification line is returned
+ * verbatim rather than reduced to a boolean, because "passed", "**failed** at
+ * build time" and "not run" are three different facts and the third is the one
+ * a summary would quietly turn into one of the other two. Deviations are
+ * reported as present or absent, never summarised — whoever wrote that section
+ * wrote it for a reader, and paraphrasing it here would be this codebase
+ * doing the one thing it tells its agents not to do.
+ */
+export function outcomeOf(content: string): {
+  verification: string | null;
+  hasDeviations: boolean;
+} {
+  // Fenced blocks are quoted, not asserted. specd's own knowledge base
+  // documents this very format inside code fences, so scanning the raw text
+  // would report that the format's *documentation* diverged from its plan.
+  const prose = content.replace(/^```[\s\S]*?^```/gm, '');
+
+  const hasDeviations = /^##\s+Deviations\s*$/m.test(prose);
+
+  const heading = prose.match(/^##\s+Verification\s*$/m);
+  // `index === 0` is a real position, not an absence: a hand-written record
+  // may open with this heading, and `!heading.index` would call it missing.
+  if (!heading || heading.index === undefined) return { verification: null, hasDeviations };
+
+  const after = prose.slice(heading.index + heading[0].length);
+  const line = after.split('\n').find((l) => l.trim().length > 0);
+  // Stop at the next heading. An empty Verification section — what a
+  // hand-appended record looks like — would otherwise report the heading
+  // that follows it ("## Deviations") as the outcome of the verify run.
+  if (line === undefined || /^#{1,6}\s/.test(line.trim())) {
+    return { verification: null, hasDeviations };
+  }
+  return { verification: line.trim(), hasDeviations };
+}

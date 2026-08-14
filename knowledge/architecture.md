@@ -141,6 +141,37 @@ Resolution states: `resolved`, `unresolved`, `dangling_anchor`. Producer tiers: 
 
 <!-- /generated:graph-vocabulary -->
 
+### Precedents
+
+`KnowledgeService.findPrecedents()` is a second lookup over the same chunks,
+scoped to `spec` and `adr` docs and collapsed to one row per document. It
+answers the question the rest of the corpus cannot: not how the system is, but
+what happened when someone last built something shaped like this — carrying the
+as-built verification line verbatim and whether reality diverged enough that
+somebody wrote a Deviations section.
+
+Two deliberate differences from ordinary retrieval:
+
+- **A lexical match is required**; the dense arm only ranks. Ordinary retrieval
+  fuses both arms symmetrically because a weak match there is a passage the
+  model reads and discards. A precedent arrives labelled *this project has been
+  here before*, and the dense arm has no distance threshold — it returns its
+  top rows for any query at all, so an unrelated ticket would be handed the
+  nearest spec and invited to draw a parallel that does not exist.
+- **The lexical predicate ORs its terms.** `plainto_tsquery` ANDs every lexeme
+  it produces, which is right for a search box and wrong here: the caller
+  passes a whole ticket, so the predicate becomes *one chunk contains all
+  twenty-six content words of this ticket* and nothing ever matches. The
+  operators are rewritten to `|`. That keeps the veto that mattered — a query
+  sharing no vocabulary with the corpus still matches nothing — while letting a
+  real ticket reach the specs that discuss it. `precedents.integration.test.ts`
+  pins both ends: a full ticket body finds its precedent, and a question about
+  ground nobody has walked returns none.
+- **Precedents are context, not evidence.** The SpecAgent receives them in
+  their own block and is told not to cite them. An as-built record says what
+  happened last time, which is a reason to go and read the architecture doc —
+  not a substitute for citing it.
+
 ## Trust boundaries
 
 - CLI is a thin client (D13): fetches, registers, reports; never authors,

@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "node --import @swc-node/register/esm-register src/seed.ts",
     "loop": "node --import @swc-node/register/esm-register src/e2e-loop.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed:demo": "node --import @swc-node/register/esm-register src/seed-demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

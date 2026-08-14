@@ -787,6 +787,7 @@ export class KnowledgeService {
     const rows = await this.handle.sql<
       {
         path: string;
+        repo_name: string;
         title: string | null;
         kind: string;
         heading: string | null;
@@ -794,28 +795,41 @@ export class KnowledgeService {
         score: number;
       }[]
     >`
-      WITH candidates AS (
-        SELECT c.id, c.doc_id, c.heading
-        FROM knowledge_chunks c
-        JOIN knowledge_docs kd ON kd.id = c.doc_id
-        WHERE c.project_id = ${projectId} AND kd.kind IN ('spec', 'adr')
+      WITH lexemes AS (
+        -- Any shared term, not every term.
+        --
+        -- plainto_tsquery ANDs every lexeme it produces, which is right for a
+        -- search box and catastrophic here: the caller passes a whole ticket,
+        -- so the predicate becomes "one 1800-character chunk contains all 26
+        -- content words of this ticket" and nothing ever matches. Rewriting
+        -- the operators to OR keeps the only veto that mattered — a query
+        -- sharing no vocabulary at all with the corpus still matches nothing,
+        -- which is the "we have never been here" answer this lookup exists to
+        -- be able to give — while letting a real ticket reach the specs that
+        -- discuss it. Ranking below decides which of the matches are worth
+        -- showing.
+        SELECT replace(plainto_tsquery('english', ${query})::text, '&', '|')::tsquery AS q
       ),
       dense AS (
         SELECT c.id,
-               row_number() OVER (ORDER BY kc.embedding <=> ${EmbeddingService.toSqlVector(queryVec)}::vector) AS rank
-        FROM candidates c
-        JOIN knowledge_chunks kc ON kc.id = c.id
-        WHERE kc.embedding IS NOT NULL
-        ORDER BY kc.embedding <=> ${EmbeddingService.toSqlVector(queryVec)}::vector
+               row_number() OVER (ORDER BY c.embedding <=> ${EmbeddingService.toSqlVector(queryVec)}::vector) AS rank
+        FROM knowledge_chunks c
+        JOIN knowledge_docs kd ON kd.id = c.doc_id
+        WHERE c.project_id = ${projectId}
+          AND c.embedding IS NOT NULL
+          AND kd.kind IN ('spec', 'adr')
+        ORDER BY c.embedding <=> ${EmbeddingService.toSqlVector(queryVec)}::vector
         LIMIT ${pool}
       ),
       lexical AS (
         SELECT c.id,
-               row_number() OVER (ORDER BY ts_rank_cd(kc.tsv, plainto_tsquery('english', ${query})) DESC) AS rank
-        FROM candidates c
-        JOIN knowledge_chunks kc ON kc.id = c.id
-        WHERE kc.tsv @@ plainto_tsquery('english', ${query})
-        ORDER BY ts_rank_cd(kc.tsv, plainto_tsquery('english', ${query})) DESC
+               row_number() OVER (ORDER BY ts_rank_cd(c.tsv, (SELECT q FROM lexemes)) DESC) AS rank
+        FROM knowledge_chunks c
+        JOIN knowledge_docs kd ON kd.id = c.doc_id
+        WHERE c.project_id = ${projectId}
+          AND kd.kind IN ('spec', 'adr')
+          AND c.tsv @@ (SELECT q FROM lexemes)
+        ORDER BY ts_rank_cd(c.tsv, (SELECT q FROM lexemes)) DESC
         LIMIT ${pool}
       ),
       fused AS (
@@ -830,11 +844,6 @@ export class KnowledgeService {
         -- handed the nearest spec in the space and invited to draw a parallel
         -- that does not exist. The lexical arm is the only one that can say
         -- no, because its match is a predicate rather than a ranking.
-        --
-        -- The cost is a precedent phrased in entirely different words from the
-        -- ticket, which this will miss. That is the right way round: a missing
-        -- precedent leaves a drafter exactly where they already were, and a
-        -- false one actively misleads them.
         SELECT l.id,
                COALESCE(1.0 / (${k} + d.rank), 0) + 1.0 / (${k} + l.rank) AS score
         FROM lexical l
@@ -844,11 +853,12 @@ export class KnowledgeService {
         SELECT f.id, f.score, c.doc_id, c.heading,
                row_number() OVER (PARTITION BY c.doc_id ORDER BY f.score DESC, f.id) AS per_doc
         FROM fused f
-        JOIN candidates c ON c.id = f.id
+        JOIN knowledge_chunks c ON c.id = f.id
       )
-      SELECT kd.path, kd.title, kd.kind, b.heading, kd.content, b.score
+      SELECT kd.path, r.name AS repo_name, kd.title, kd.kind, b.heading, kd.content, b.score
       FROM best b
       JOIN knowledge_docs kd ON kd.id = b.doc_id
+      JOIN repositories r ON r.id = kd.repository_id
       WHERE b.per_doc = 1
       ORDER BY b.score DESC
       LIMIT ${limit}
@@ -856,6 +866,7 @@ export class KnowledgeService {
 
     return rows.map((row) => ({
       path: row.path,
+      repoName: row.repo_name,
       title: row.title ?? row.path,
       kind: row.kind === 'adr' ? ('adr' as const) : ('spec' as const),
       score: Number(row.score),

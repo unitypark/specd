@@ -266,12 +266,25 @@ export function outcomeOf(content: string): {
   verification: string | null;
   hasDeviations: boolean;
 } {
-  const hasDeviations = /^##\s+Deviations\s*$/m.test(content);
+  // Fenced blocks are quoted, not asserted. specd's own knowledge base
+  // documents this very format inside code fences, so scanning the raw text
+  // would report that the format's *documentation* diverged from its plan.
+  const prose = content.replace(/^```[\s\S]*?^```/gm, '');
 
-  const heading = content.match(/^##\s+Verification\s*$/m);
-  if (!heading?.index) return { verification: null, hasDeviations };
+  const hasDeviations = /^##\s+Deviations\s*$/m.test(prose);
 
-  const after = content.slice(heading.index + heading[0].length);
+  const heading = prose.match(/^##\s+Verification\s*$/m);
+  // `index === 0` is a real position, not an absence: a hand-written record
+  // may open with this heading, and `!heading.index` would call it missing.
+  if (!heading || heading.index === undefined) return { verification: null, hasDeviations };
+
+  const after = prose.slice(heading.index + heading[0].length);
   const line = after.split('\n').find((l) => l.trim().length > 0);
-  return { verification: line?.trim() ?? null, hasDeviations };
+  // Stop at the next heading. An empty Verification section — what a
+  // hand-appended record looks like — would otherwise report the heading
+  // that follows it ("## Deviations") as the outcome of the verify run.
+  if (line === undefined || /^#{1,6}\s/.test(line.trim())) {
+    return { verification: null, hasDeviations };
+  }
+  return { verification: line.trim(), hasDeviations };
 }

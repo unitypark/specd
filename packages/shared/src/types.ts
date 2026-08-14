@@ -173,12 +173,19 @@ export interface SpecView {
  */
 export interface Precedent {
   path: string;
+  /**
+   * Which repository it came from. `knowledge_docs` is unique on
+   * (repository_id, path), and onboarding scaffolds identical filenames into
+   * every repo it grounds, so a path alone does not identify a document in a
+   * multi-repo project.
+   */
+  repoName: string;
   title: string;
   kind: 'spec' | 'adr';
   score: number;
   /** The heading whose passage matched — why this surfaced. */
   matchedOn: string | null;
-  /** The as-built verification line, verbatim. Null for an ADR. */
+  /** The as-built verification line, verbatim; null where the record has none. */
   verification: string | null;
   /** Whether reality diverged enough that someone wrote it down. */
   hasDeviations: boolean;

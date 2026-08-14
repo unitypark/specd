@@ -458,6 +458,25 @@ Two things you must not do:
    half-invented. No preamble, no restating the ticket back.`;
 }
 
+/**
+ * Flatten one field of a precedent to a single bounded line.
+ *
+ * A precedent's title is the first heading of an as-built record, which is the
+ * ticket title this system already treats as untrusted — delimited and
+ * labelled as data on the way in. Filing it into `knowledge/specs/` and
+ * reading it back as history is how that label gets lost: the same string
+ * returns inside the trusted half of the prompt, where a title carrying a
+ * forged `=== SECTION ===` line would read as a real boundary. Collapsing
+ * whitespace removes the only position a delimiter is recognised from, and
+ * the cap stops one malformed record from spending the whole context — the
+ * bound its neighbours already have (excerpts 2,200 chars, revision notes
+ * 12,000) and this block was missing.
+ */
+function quoteField(value: string, max = 160): string {
+  const flat = value.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
 function buildUserPrompt(input: {
   projectName: string;
   ticketKey: string;
@@ -527,12 +546,14 @@ support for a design claim — use them to find the knowledge doc that does.
 
 ${input.precedents
         .map((p) => {
-          const matched = p.matchedOn ? ` (matched on "${p.matchedOn}")` : '';
-          const verified = p.verification ? `\n    verification: ${p.verification}` : '';
+          const matched = p.matchedOn ? ` (matched on "${quoteField(p.matchedOn)}")` : '';
+          const verified = p.verification
+            ? `\n    verification: ${quoteField(p.verification)}`
+            : '';
           const diverged = p.hasDeviations
             ? '\n    reality diverged from this plan — it has a Deviations section'
             : '';
-          return `- ${p.title} [${p.kind}] — ${p.path}${matched}${verified}${diverged}`;
+          return `- ${quoteField(p.title)} [${p.kind}] — ${p.repoName}:${p.path}${matched}${verified}${diverged}`;
         })
         .join('\n')}\n`
     : '';

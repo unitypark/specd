@@ -157,11 +157,36 @@ describe.skipIf(!reachable)('precedents (integration)', () => {
     expect(unrun?.hasDeviations).toBe(false);
   });
 
+  it('names the repository, because a path alone is ambiguous', async () => {
+    const found = await service.findPrecedents(projectId, 'runner claims a queued job');
+    expect(found.every((p) => p.repoName === 'test/kb')).toBe(true);
+  });
+
   it('says why each precedent surfaced', async () => {
     const found = await service.findPrecedents(projectId, 'runner claims a queued job');
     // A rank with no reason is a number a reviewer has to trust blindly; the
     // heading is what lets them judge the match themselves.
     expect(found.some((p) => p.matchedOn !== null)).toBe(true);
+  });
+
+  it('answers a whole ticket, not just a tidy phrase', async () => {
+    // The shape `SpecAgent.prepare()` actually sends: `${title}\n${body}`.
+    // Every other test here passes a hand-written phrase, and a lexical
+    // predicate that ANDs its terms passes all of them while returning
+    // nothing for this — the feature would be inert in production and green
+    // in CI. Any change to the lexical arm has to keep this passing.
+    const ticket = [
+      'Runner job dispatch is dropping jobs under load',
+      '',
+      'When several machines are paired and a burst of specs is approved at once,',
+      'some queued jobs are never claimed by anybody and sit until someone notices.',
+      'We think two runners may be racing for the same row. Can we make the claim',
+      'atomic, and can an abandoned job find its way back into the queue?',
+    ].join('\n');
+
+    const found = await service.findPrecedents(projectId, ticket);
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.map((p) => p.path)).toContain('knowledge/specs/S-100-runner-job-dispatch.md');
   });
 
   it('has nothing to say about ground nobody has walked', async () => {

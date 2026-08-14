@@ -157,9 +157,16 @@ Two deliberate differences from ordinary retrieval:
   model reads and discards. A precedent arrives labelled *this project has been
   here before*, and the dense arm has no distance threshold — it returns its
   top rows for any query at all, so an unrelated ticket would be handed the
-  nearest spec and invited to draw a parallel that does not exist. The cost is
-  missing a precedent worded differently from the ticket, which is the right
-  way round: a missing precedent leaves a drafter where they already were.
+  nearest spec and invited to draw a parallel that does not exist.
+- **The lexical predicate ORs its terms.** `plainto_tsquery` ANDs every lexeme
+  it produces, which is right for a search box and wrong here: the caller
+  passes a whole ticket, so the predicate becomes *one chunk contains all
+  twenty-six content words of this ticket* and nothing ever matches. The
+  operators are rewritten to `|`. That keeps the veto that mattered — a query
+  sharing no vocabulary with the corpus still matches nothing — while letting a
+  real ticket reach the specs that discuss it. `precedents.integration.test.ts`
+  pins both ends: a full ticket body finds its precedent, and a question about
+  ground nobody has walked returns none.
 - **Precedents are context, not evidence.** The SpecAgent receives them in
   their own block and is told not to cite them. An as-built record says what
   happened last time, which is a reason to go and read the architecture doc —

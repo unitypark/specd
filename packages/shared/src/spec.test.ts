@@ -225,3 +225,27 @@ describe('reading an as-built record', () => {
     expect(outcomeOf(prose).hasDeviations).toBe(false);
   });
 });
+
+describe('reading an as-built record that was written by hand', () => {
+  // Found in review. Each of these produced a wrong answer, and each is a
+  // shape a human-written or hand-appended record actually takes.
+  it('does not report the next heading as the verify outcome', () => {
+    const empty = '# S-9\n\n## Verification\n\n## Deviations\n\nWe skipped it.\n';
+    expect(outcomeOf(empty)).toEqual({ verification: null, hasDeviations: true });
+  });
+
+  it('reads a record that opens with the heading', () => {
+    // `index === 0` is a position, not an absence.
+    expect(outcomeOf('## Verification\n\n`pnpm test` — passed\n').verification).toBe(
+      '`pnpm test` — passed',
+    );
+  });
+
+  it('does not mistake a documented example for project history', () => {
+    // specd's own knowledge base documents this format inside fences; scanning
+    // raw text reports the documentation as a spec that diverged.
+    const doc = ['# How to file an as-built', '', '```markdown', '## Deviations', '',
+      'Task 3 ran on the merge poll.', '```', ''].join('\n');
+    expect(outcomeOf(doc).hasDeviations).toBe(false);
+  });
+});

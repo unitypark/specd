@@ -1,7 +1,7 @@
 # Runbook — local development (unitypark/specd)
 
 Getting it running for the first time lives in the
-[README's Runbook section](../../README.md#runbook): prerequisites, the six
+[README's Runbook section](../../README.md#runbook): prerequisites, the seven
 first-run commands, restarting, the health check, a troubleshooting table and
 how to reset. That is the single source for it and this file does not repeat
 it — if the two ever disagree, the README is right and this is stale.
@@ -63,6 +63,20 @@ fake missing a method a real adapter grew, say — surfaces the same way.
 CI refuses to accept either. It runs the suite a second time with a JSON
 reporter and fails if anything was skipped, which is the one place it is
 deliberately stricter than a local run.
+
+### The trap: the gate is what rebuilds the packages
+
+`@specd/db` and `@specd/shared` are imported through their `dist/`, which is
+gitignored and which no install hook builds. `pnpm typecheck` starts with
+`pnpm --filter "./packages/*" build`, so running the gate rebuilds them as a
+side effect — which is why this rarely bites while you are working normally,
+and reliably bites the one time you pull and go straight to `pnpm dev`.
+
+The API then fails at import, before it can listen. Nothing announces it:
+`node --watch` keeps the dead process alive waiting for a file change, and
+Next transpiles `@specd/shared` from source, so the web app compiles and
+serves regardless. The symptom is a UI that renders with nothing in it. The
+fix is the build; the README's troubleshooting table carries both rows.
 
 ## Evals
 

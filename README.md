@@ -146,11 +146,12 @@ corepack enable && pnpm install
 pnpm demo
 ```
 
-`pnpm demo` writes a `.env` if there isn't one, starts Postgres and **waits for
-it to actually accept connections**, applies migrations, seeds a project with a
-fixture repository already connected, and starts both dev servers — printing
-the URL and a login. Each step says what it is doing, so a failure names the
-step rather than arriving as a stack trace three steps later.
+`pnpm demo` writes a `.env` if there isn't one, builds the workspace packages,
+starts Postgres and **waits for it to actually accept connections**, applies
+migrations, seeds a project with a fixture repository already connected, and
+starts both dev servers — printing the URL and a login. Each step says what it
+is doing, so a failure names the step rather than arriving as a stack trace
+three steps later.
 
 It deliberately leaves the repository **ungrounded**: watching Ground read a
 real repository is the most interesting thing specd does, and pre-baking it
@@ -173,12 +174,21 @@ the repo-root `.env` themselves. The file ships with a dev database URL, a dev
 JWT secret and a dev vault key; every value you'd change for a real environment
 is commented with what it does and how to generate it.
 
-### 2 · Install
+### 2 · Install and build the workspace packages
 
 ```bash
 corepack enable   # once per machine — activates the pinned pnpm
 pnpm install
+pnpm --filter "./packages/*" build
 ```
+
+The build is not optional and `pnpm install` does not do it for you.
+`@specd/db` and `@specd/shared` are imported through their `dist/`, which is
+gitignored — so the API cannot start until they have been built once, and it
+needs building again after any pull that changed a package. Only the API is
+affected: Next transpiles `@specd/shared` from source, which is why a stale
+`dist` shows up as a web app that compiles and serves but has no data behind
+it.
 
 ### 3 · Start Postgres
 
@@ -331,6 +341,8 @@ CI database look like a pass).
 | API can't reach Postgres | `pnpm infra:up` never ran, or Docker is down | `docker ps` should list `specd-postgres` as `healthy`. |
 | `EADDRINUSE` on `:3000`/`:4000` | A previous `pnpm dev` is still running | `lsof -nP -iTCP:3000 -sTCP:LISTEN`, stop it, retry. |
 | Schema-shaped error right after pulling | New migrations landed | `pnpm db:migrate` — idempotent. |
+| Web app renders but has no data in it | The API died at startup, and `node --watch` keeps a crashed process alive — so `pnpm dev` still looks healthy | `curl localhost:4000/api/health`; nothing answering confirms it. The reason is in the API's own output, scrolled past by the web server's. The next row is the usual one. |
+| `@specd/db does not provide an export named …` | `packages/*/dist` is missing or older than its `src` | `pnpm --filter "./packages/*" build`. `dist` is gitignored and no install hook builds it, so this is also needed after any pull that touched a package. |
 | Web dev server 500s after `pnpm build` | `next build` and `next dev` share `apps/web/.next` in incompatible shapes | Stop the dev server, `rm -rf apps/web/.next`, start it again. |
 | Whole test file reports *skipped* | No database — or the suite's own `beforeAll` threw | Bring Postgres up; if it persists, suspect the suite's setup, not the database. |
 

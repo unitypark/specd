@@ -27,7 +27,7 @@ const run = (cmd, args, opts = {}) =>
   spawnSync(cmd, args, { cwd: root, stdio: 'inherit', shell: false, ...opts });
 
 function step(n, what) {
-  process.stdout.write(`\n[${n}/5] ${what}\n`);
+  process.stdout.write(`\n[${n}/6] ${what}\n`);
 }
 
 function die(what) {
@@ -43,7 +43,19 @@ if (existsSync(join(root, '.env'))) {
   console.log('.env created from .env.example. The dev defaults work as they are.');
 }
 
-step(2, 'Postgres');
+// `@specd/db` and `@specd/shared` are consumed through their `dist/`, which is
+// gitignored and which nothing builds at install time — so a clean clone has
+// no `dist` at all, and a clone that has merely been pulled has yesterday's.
+// The web app does not notice: Next transpiles `@specd/shared` from source.
+// The API does, and it fails at import, before it can listen. That is the
+// worst shape this failure could take — `pnpm dev` keeps running, the web app
+// compiles and serves, and every request it makes goes nowhere.
+step(2, 'Workspace packages');
+if (run('pnpm', ['--filter', './packages/*', 'build']).status !== 0) {
+  die('Could not build the workspace packages.');
+}
+
+step(3, 'Postgres');
 if (run('docker', ['compose', 'up', '-d', 'postgres']).status !== 0) {
   die('Could not start Postgres. Is Docker running?');
 }
@@ -67,13 +79,13 @@ for (let i = 0; i < 60; i += 1) {
 process.stdout.write('\n');
 if (!ready) die('Postgres did not become ready in 60s. `docker compose logs postgres` says why.');
 
-step(3, 'Schema');
+step(4, 'Schema');
 if (run('pnpm', ['db:migrate']).status !== 0) die('Migrations failed.');
 
-step(4, 'A project to look at');
+step(5, 'A project to look at');
 if (run('pnpm', ['seed:demo']).status !== 0) die('Seeding failed.');
 
-step(5, 'The app');
+step(6, 'The app');
 console.log('Starting the API and the web app. Ctrl-C stops both.\n');
 const dev = spawn('pnpm', ['dev'], { cwd: root, stdio: 'inherit' });
 dev.on('exit', (code) => process.exit(code ?? 0));

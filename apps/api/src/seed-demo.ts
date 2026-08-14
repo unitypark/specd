@@ -120,7 +120,10 @@ async function main(): Promise<void> {
     }
 
     console.log('\nspecd is ready to look at.\n');
-    console.log(`  http://localhost:3000/p/${DEMO.slug}/board`);
+    // No `/board` on the end: the board is the project page's default tab, not
+    // a route of its own, so the longer URL is a 404 — and a 404 is where the
+    // demo used to send everyone who followed the line it printed.
+    console.log(`  http://localhost:3000/p/${DEMO.slug}`);
     console.log(`  sign in as ${DEMO.email} / ${DEMO.password}\n`);
     console.log(`Connected repository: ${fixture.path}`);
     console.log(

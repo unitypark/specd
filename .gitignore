@@ -1,4 +1,9 @@
+# Both spellings on purpose. The trailing slash matches a directory only, so a
+# node_modules *symlink* — what you get pointing a scratch worktree at another
+# checkout's install — slips past it and lands in a commit, where it breaks CI
+# with ENOTDIR on the next install.
 node_modules/
+node_modules
 dist/
 build/
 .next/

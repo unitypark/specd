@@ -14,6 +14,7 @@ a spec with a **citation behind each claim**, and gates it behind a **named
 human** — so the agent builds what you approved, and nothing else.
 
 <p>
+  <a href="https://unitypark.github.io/specd/"><img src="https://img.shields.io/badge/docs-unitypark.github.io%2Fspecd-0f0f0f?logo=readthedocs&logoColor=white" alt="Documentation"></a>
   <a href="https://github.com/unitypark/specd/actions/workflows/ci.yml"><img src="https://github.com/unitypark/specd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white" alt="Node ≥ 22">

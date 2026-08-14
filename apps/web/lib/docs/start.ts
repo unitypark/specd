@@ -352,7 +352,7 @@ export const START: DocCategory = {
           rows: [
             [
               '**Node ≥ 22** and **pnpm 10.32.1**',
-              'The workspace pins pnpm through `packageManager` — run `corepack enable` once and the right version is used automatically.',
+              'The workspace pins pnpm through `packageManager`. On Node 22–24, `corepack enable` once activates the pinned version automatically. Node 25 dropped corepack from the distribution — install pnpm yourself instead (`npm i -g pnpm@10.32.1`, or Homebrew).',
             ],
             [
               '**Docker**',
@@ -373,7 +373,7 @@ export const START: DocCategory = {
           k: 'code',
           caption: 'terminal',
           code: `git clone https://github.com/unitypark/specd.git && cd specd
-corepack enable && pnpm install
+pnpm install
 pnpm demo`,
         },
         {

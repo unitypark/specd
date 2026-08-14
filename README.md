@@ -34,7 +34,7 @@ human** — so the agent builds what you approved, and nothing else.
 
 ```bash
 git clone https://github.com/unitypark/specd.git && cd specd
-corepack enable && pnpm install
+pnpm install
 pnpm demo          # Postgres, the API and the web app — one command
 ```
 
@@ -149,14 +149,14 @@ The loop closes on merge: delivered work re-indexes, the as-built spec lands in
 
 | You need | Why |
 | --- | --- |
-| **Node ≥ 22** and **pnpm 10.32.1** | The workspace pins pnpm via `packageManager` — run `corepack enable` once and the right version is used automatically. |
+| **Node ≥ 22** and **pnpm 10.32.1** | The workspace pins pnpm via `packageManager`. On Node 22–24, `corepack enable` once activates the pinned version automatically. Node 25 dropped corepack from the distribution — install pnpm yourself instead (`npm i -g pnpm@10.32.1`, or Homebrew). |
 | **Docker** | Postgres with the `vector` extension (`pgvector/pgvector:pg17`, provisioned by `docker-compose.yml`). Postgres is specd's *only* runtime dependency. |
 | **Go ≥ 1.25** *(optional)* | Only for building the `specd` CLI. The platform runs without it. |
 | **Claude Code CLI or an Anthropic API key** *(optional)* | Only for agent runs. Everything else — indexing, retrieval, the graph, health — works with neither. |
 
 ```bash
 git clone https://github.com/unitypark/specd.git && cd specd
-corepack enable && pnpm install
+pnpm install
 pnpm demo
 ```
 
@@ -191,7 +191,7 @@ is commented with what it does and how to generate it.
 ### 2 · Install and build the workspace packages
 
 ```bash
-corepack enable   # once per machine — activates the pinned pnpm
+corepack enable   # Node 22–24 only, once per machine — activates the pinned pnpm
 pnpm install
 pnpm --filter "./packages/*" build
 ```

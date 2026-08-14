@@ -1,0 +1,102 @@
+# Publishes the project site to GitHub Pages.
+#
+# The site is generated from apps/web/lib/docs — the same modules the web app
+# renders at /docs — by `pnpm site:build`. Nothing generated is committed: the
+# output is built here and uploaded straight to Pages, so there is exactly one
+# source of truth for the documentation and no way for a stale checked-in copy
+# to disagree with it.
+#
+# Before the first run, set Settings → Pages → Source to "GitHub Actions".
+# Until then this workflow builds fine and fails at the deploy step, which is
+# the honest failure — it says the site is not configured, rather than
+# silently producing nothing.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    # Only the inputs that can change what gets published. A commit that
+    # touches the API has no effect on the site, and a Pages deploy it
+    # triggered would just be noise in the deployment history.
+    paths:
+      - 'apps/web/lib/docs/**'
+      - 'apps/web/app/fonts/**'
+      - 'apps/web/app/icon.svg'
+      - 'apps/web/public/shots/**'
+      - 'scripts/site/**'
+      - '.github/workflows/pages.yml'
+  # So the site can be republished without an empty commit — after changing the
+  # Pages source, say, or to recover from a failed deploy.
+  workflow_dispatch:
+
+# Deploy needs to write the Pages artifact and mint an id-token for the
+# deployment; everything else stays read-only.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never cancel one in flight: a half-finished Pages
+# deployment is a site serving a mix of two builds.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Before the build, not after: its `base_url` output is what the
+      # generator stamps into canonical and Open Graph URLs, and it already
+      # knows whether this repository serves from github.io or a custom
+      # domain. Hardcoding the URL would send a fork's canonical tags here.
+      - uses: actions/configure-pages@v5
+        id: pages
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The generator imports the docs modules directly through tsx. It needs
+      # no workspace package builds and touches no database — this is the one
+      # job in the repository that runs on a bare install.
+      - run: pnpm install --frozen-lockfile
+
+      # tsx transpiles without checking, so the generator would happily emit
+      # subtly wrong HTML from code that does not typecheck. It is not in the
+      # repo's `pnpm typecheck` gate — that one is the workspace packages —
+      # so it is checked here, where it matters.
+      - name: Typecheck the generator
+        run: pnpm site:typecheck
+
+      - name: Build the site
+        run: pnpm site:build
+        env:
+          SITE_ORIGIN: ${{ steps.pages.outputs.base_url }}
+
+      # Every link on the site is relative — that is what lets one build serve
+      # from /specd/ and from a custom domain. An off-by-one `../` is invisible
+      # in review, so it is checked here rather than discovered by a visitor.
+      - name: Check every local link resolves
+        run: node scripts/site/check-links.mjs
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

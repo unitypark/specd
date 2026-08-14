@@ -7,12 +7,11 @@
 
 # specd
 
-**Spec-driven delivery, productized.**
+### Software, built to spec.
 
-Connect your repos, an AI provider and a tracker. specd grounds a knowledge base
-in your code, drafts every ticket into a **cited** spec, gates it behind a
-**named human**, and files the delivered work back into the knowledge base — so
-the next spec starts better than the last.
+specd grounds a knowledge base in your own repositories, drafts every ticket into
+a spec with a **citation behind each claim**, and gates it behind a **named
+human** — so the agent builds what you approved, and nothing else.
 
 <p>
   <a href="https://github.com/unitypark/specd/actions/workflows/ci.yml"><img src="https://github.com/unitypark/specd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -23,16 +22,25 @@ the next spec starts better than the last.
   <img src="https://img.shields.io/badge/postgres-pgvector-4169E1?logo=postgresql&logoColor=white" alt="Postgres + pgvector">
 </p>
 
-<p>
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#the-knowledge-engine">Knowledge engine</a> ·
-  <a href="#the-cli">CLI</a> ·
-  <a href="#configuration">Configuration</a> ·
-  <a href="#project-status">Status</a>
-</p>
+**[Documentation](https://unitypark.github.io/specd/docs/)** ·
+[Quick start](#quick-start) ·
+[How it works](#how-it-works) ·
+[Knowledge engine](#the-knowledge-engine) ·
+[Evals](#evals) ·
+[Status](#project-status)
 
 </div>
+
+```bash
+git clone https://github.com/unitypark/specd.git && cd specd
+corepack enable && pnpm install
+pnpm demo          # Postgres, the API and the web app — one command
+```
+
+<p align="center">
+  <img src="apps/web/public/shots/spec.png" width="900"
+       alt="A spec open for review in specd: EARS acceptance criteria, six citations, and five claims flagged UNVERIFIED.">
+</p>
 
 > **Status: pre-1.0, local-first.** specd runs end to end as a development
 <!-- Keep this a floor, not an exact count — exact counts rot within days.
@@ -64,41 +72,50 @@ own input, and the server refuses an unapproved spec no matter who asks.
 
 ## What you get
 
-- **Specs a reviewer can check, claim by claim.** Every design claim is either
-  cited to a retrieved excerpt or flagged `UNVERIFIED`. Citations are validated
-  against what was actually retrieved and judged with **four verdicts**:
-  `supported`, `unsupported` (checked and wrong — no such doc, or no such
-  section), `unknown` (the corpus couldn't answer — the doc never reached the
-  prompt, holds no indexed content, or was cut for budget), and `stale` (the
-  passage is real but describes **code that changed since the doc was last
-  touched**). "I found no evidence" and "no evidence exists" are different
-  answers, and only one of them is safe to write into a spec.
-- **A knowledge graph, not just a vector store.** Five deterministic link kinds
-  (`citation`, `wikilink`, `symbolref`, `mdlink`, `coderef`) extracted with
-  parser rules — **no LLM ever runs at index time**, because a hallucinated
-  edge poisons retrieval invisibly. Retrieval is Reciprocal Rank Fusion over
-  pgvector + Postgres full-text, then a one-hop expansion across the graph,
-  every added chunk carrying the edge that pulled it in.
-- **Code-aware.** specd indexes the repository's file tree and its declarations
-  (TypeScript, Go, Python — line-based tier, graded against real compilers,
-  see [Evals](#evals)). A doc citing `RunnerJobsService.claim()` resolves to
-  the real symbol; retrieval serves the function's **actual source** as a
-  citable excerpt; and when the code moves on without the doc, both the doc's
-  health and the spec's citation say so.
-- **Drift measured against the code, not the calendar.** Doc↔code coupling is
-  mined from a bounded window of git history — *"6 commits touched
-  `apps/api/src/runners/` since this doc last moved with it"* names the code to
-  go read, where a 90-day timer only measures time passing.
-- **Honest signals, everywhere.** Truncation notices fire only when matching
-  material was really cut. Freshness says "unmeasured" rather than "fresh" when
-  it cannot know. Health counts broken links, dangling anchors, orphans and
-  stale code references as numbers the UI can badge — and they move the score.
-- **Operations that survive contact.** Index runs are queued rows woken by
-  Postgres `LISTEN/NOTIFY` (no broker — Postgres is the only runtime
-  dependency), claimed with `FOR UPDATE SKIP LOCKED`, wrapped in one
-  transaction with **shrink guards** that roll back a run trying to delete
-  rows nobody authorised. Jobs abandoned by a dead runner are reclaimed by
-  lease. Run logs stream live over SSE, across API instances.
+**Specs a reviewer can check, claim by claim.** Every design claim is either
+cited to a retrieved excerpt or flagged `UNVERIFIED`. Citations are validated
+against what was actually retrieved and judged with **four verdicts**:
+
+| Verdict | Means |
+| --- | --- |
+| `supported` | The passage exists and says what the claim says it says. |
+| `unsupported` | Checked, and wrong — no such doc, or no such section. |
+| `unknown` | The corpus couldn't answer — the doc never reached the prompt, holds no indexed content, or was cut for budget. |
+| `stale` | The passage is real, but describes **code that changed since the doc was last touched**. |
+
+"I found no evidence" and "no evidence exists" are different answers, and only
+one of them is safe to write into a spec.
+
+**A knowledge graph, not just a vector store.** Five deterministic link kinds
+(`citation`, `wikilink`, `symbolref`, `mdlink`, `coderef`) extracted with
+parser rules — **no LLM ever runs at index time**, because a hallucinated edge
+poisons retrieval invisibly. Retrieval is Reciprocal Rank Fusion over pgvector
++ Postgres full-text, then a one-hop expansion across the graph, every added
+chunk carrying the edge that pulled it in.
+
+**Code-aware.** specd indexes the repository's file tree and its declarations
+(TypeScript, Go, Python — line-based tier, graded against real compilers, see
+[Evals](#evals)). A doc citing `RunnerJobsService.claim()` resolves to the real
+symbol; retrieval serves the function's **actual source** as a citable excerpt;
+and when the code moves on without the doc, both the doc's health and the
+spec's citation say so.
+
+**Drift measured against the code, not the calendar.** Doc↔code coupling is
+mined from a bounded window of git history — *"6 commits touched
+`apps/api/src/runners/` since this doc last moved with it"* names the code to
+go read, where a 90-day timer only measures time passing.
+
+**Honest signals, everywhere.** Truncation notices fire only when matching
+material was really cut. Freshness says "unmeasured" rather than "fresh" when
+it cannot know. Health counts broken links, dangling anchors, orphans and stale
+code references as numbers the UI can badge — and they move the score.
+
+**Operations that survive contact.** Index runs are queued rows woken by
+Postgres `LISTEN/NOTIFY` (no broker — Postgres is the only runtime
+dependency), claimed with `FOR UPDATE SKIP LOCKED`, wrapped in one transaction
+with **shrink guards** that roll back a run trying to delete rows nobody
+authorised. Jobs abandoned by a dead runner are reclaimed by lease. Run logs
+stream live over SSE, across API instances.
 
 ## How it works
 
@@ -129,8 +146,6 @@ The loop closes on merge: delivered work re-indexes, the as-built spec lands in
 
 ## Quick start
 
-### Prerequisites
-
 | You need | Why |
 | --- | --- |
 | **Node ≥ 22** and **pnpm 10.32.1** | The workspace pins pnpm via `packageManager` — run `corepack enable` once and the right version is used automatically. |
@@ -138,26 +153,25 @@ The loop closes on merge: delivered work re-indexes, the as-built spec lands in
 | **Go ≥ 1.25** *(optional)* | Only for building the `specd` CLI. The platform runs without it. |
 | **Claude Code CLI or an Anthropic API key** *(optional)* | Only for agent runs. Everything else — indexing, retrieval, the graph, health — works with neither. |
 
-### Just show me
-
 ```bash
 git clone https://github.com/unitypark/specd.git && cd specd
 corepack enable && pnpm install
 pnpm demo
 ```
 
-`pnpm demo` writes a `.env` if there isn't one, starts Postgres and **waits for
-it to actually accept connections**, applies migrations, seeds a project with a
-fixture repository already connected, and starts both dev servers — printing
-the URL and a login. Each step says what it is doing, so a failure names the
-step rather than arriving as a stack trace three steps later.
+`pnpm demo` writes a `.env` if there isn't one, builds the workspace packages,
+starts Postgres and **waits for it to actually accept connections**, applies
+migrations, seeds a project with a fixture repository already connected, and
+starts both dev servers — printing the URL and a login. Each step says what it
+is doing, so a failure names the step rather than arriving as a stack trace
+three steps later.
 
 It deliberately leaves the repository **ungrounded**: watching Ground read a
 real repository is the most interesting thing specd does, and pre-baking it
 would hide the demo's best moment.
 
-The steps below are the same thing done by hand, if you would rather see each
-one.
+<details>
+<summary><b>The same thing by hand, one step at a time</b></summary>
 
 ### 1 · Clone and configure
 
@@ -173,12 +187,21 @@ the repo-root `.env` themselves. The file ships with a dev database URL, a dev
 JWT secret and a dev vault key; every value you'd change for a real environment
 is commented with what it does and how to generate it.
 
-### 2 · Install
+### 2 · Install and build the workspace packages
 
 ```bash
 corepack enable   # once per machine — activates the pinned pnpm
 pnpm install
+pnpm --filter "./packages/*" build
 ```
+
+The build is not optional and `pnpm install` does not do it for you.
+`@specd/db` and `@specd/shared` are imported through their `dist/`, which is
+gitignored — so the API cannot start until they have been built once, and it
+needs building again after any pull that changed a package. Only the API is
+affected: Next transpiles `@specd/shared` from source, which is why a stale
+`dist` shows up as a web app that compiles and serves but has no data behind
+it.
 
 ### 3 · Start Postgres
 
@@ -236,10 +259,13 @@ curl http://localhost:4000/api/health
 `"ai"` saying no key is configured is normal and honest — agent runs will fail
 with a clear error until a project supplies one, and nothing else cares.
 
-### 8 · Walk the loop
+</details>
+
+### Walk the loop
 
 Open <http://localhost:3000>, create an account, and the wizard takes you
-through the stations:
+through the stations — narrated click by click in
+**[Your first spec](https://unitypark.github.io/specd/docs/your-first-spec/)**:
 
 1. **Connect** — register the seeded fixture repo (or your own: a local path,
    a GitHub App installation, or a GitLab token).
@@ -265,17 +291,18 @@ through the stations:
 7. **Learn** — you merge, the webhook fires, the as-built spec is filed into
    `knowledge/specs/`, and the index refreshes. The next spec starts better.
 
-Or exercise the whole thing headlessly over the real HTTP API:
+Or exercise the whole thing headlessly over the real HTTP API — steps that need
+a model are **skipped and labelled**, never silently passed:
 
 ```bash
 pnpm --filter @specd/api loop
 ```
 
-Steps that need a model are **skipped and labelled**, never silently passed.
-
 ### Giving it a model
 
-Three ways in, and the wizard preflights which of them this machine can do:
+Three ways in, and the wizard preflights which of them this machine can do.
+Full detail:
+**[Bring your own model](https://unitypark.github.io/specd/docs/bring-your-own-model/)**.
 
 **Your Claude subscription — no API key.** specd drives the Claude Code CLI
 already signed in on this machine:
@@ -304,47 +331,14 @@ configuration, entities, test layout — and leaves each judgement section
 carrying the question it exists to answer. Spec generation fails with a clear
 error rather than inventing content.
 
-## Runbook
-
-Day-two development — evals, migrations, working on the index, the traps —
-lives in [`knowledge/runbooks/local-dev.md`](knowledge/runbooks/local-dev.md).
-The essentials:
-
-### Verify before a PR
-
-```bash
-pnpm typecheck && pnpm test
-```
-
-That is the whole gate — CI runs exactly the same two commands against a real
-pgvector service, then **fails the run if the Postgres-dependent suites skipped
-themselves** instead of passing (they self-skip when no database is reachable,
-which keeps a laptop without Docker green — and would otherwise make a broken
-CI database look like a pass).
-
-### Troubleshooting
-
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `DATABASE_URL is required — copy .env.example to .env` | No `.env` at the repo root yet | `cp .env.example .env`, then retry. |
-| Same error, `.env` exists | Not at the repo root, or the value is empty | `grep DATABASE_URL .env` from the repo root should print a real value — the loader looks there, not at the shell's `cwd`. |
-| API can't reach Postgres | `pnpm infra:up` never ran, or Docker is down | `docker ps` should list `specd-postgres` as `healthy`. |
-| `EADDRINUSE` on `:3000`/`:4000` | A previous `pnpm dev` is still running | `lsof -nP -iTCP:3000 -sTCP:LISTEN`, stop it, retry. |
-| Schema-shaped error right after pulling | New migrations landed | `pnpm db:migrate` — idempotent. |
-| Web dev server 500s after `pnpm build` | `next build` and `next dev` share `apps/web/.next` in incompatible shapes | Stop the dev server, `rm -rf apps/web/.next`, start it again. |
-| Whole test file reports *skipped* | No database — or the suite's own `beforeAll` threw | Bring Postgres up; if it persists, suspect the suite's setup, not the database. |
-
-### Resetting
-
-`pnpm infra:down` is a plain `docker compose down` — the data volume survives.
-For a true reset: `docker compose down -v`, then
-`pnpm infra:up && pnpm db:migrate && pnpm db:seed`.
-
 ## The knowledge engine
 
 The part of specd that makes the specs worth trusting. Design notes live in
 [`knowledge/architecture.md`](knowledge/architecture.md) and the ADRs under
-[`knowledge/decisions/`](knowledge/README.md#decisions); the shape:
+[`knowledge/decisions/`](knowledge/README.md#decisions); the reader-facing
+walkthrough is
+**[The retrieval engine](https://unitypark.github.io/specd/docs/retrieval-engine/)**.
+The shape:
 
 **Indexing is deterministic and atomic.** Docs are chunked on headings,
 embedded, and their links extracted with parser rules — no model call ever runs
@@ -418,7 +412,7 @@ specd spec status CRM-131      # lifecycle state; exit 3 when unapproved
 specd specs list --status approved
 specd connect .                # register a local repo (code stays on your machine)
 specd runner pair XXXXX-XXXXX  # pair this machine as a self-hosted runner
-specd open CRM-131             # open the spec in the web app
+specd doctor                   # check the whole setup, in dependency order
 ```
 
 Run `specd` with no arguments at a TTY and you get an interactive shell — the
@@ -443,34 +437,18 @@ approved** — deliberately distinct, so a pipeline can gate on approval:
     esac
 ```
 
-| Variable | Purpose |
-| --- | --- |
-| `SPECD_API` | API base URL (default `http://localhost:4000/api`) |
-| `SPECD_PROJECT` | default project slug, overriding `specd use` |
-| `SPECD_TOKEN` | token override — for CI |
-| `SPECD_WEB` | web origin, used by `specd open` |
-| `SPECD_RUNNER_TOKEN` | runner token override |
+`specd doctor` exists because specd is several services at once — an API,
+Postgres with an extension, a vault key, a web app on another origin, an
+optional model provider, an optional embedder, an optional paired runner — and
+when it does not work the failure usually surfaces as whatever broke first
+rather than as the cause. It reports each in dependency order and **skips what
+an earlier failure makes unknowable** rather than piling on. Optional
+configuration is a note, never a fault. Exit 4 means something needs fixing.
 
-### Checking the setup
+→ Every command, flag and environment variable:
+**[CLI reference](https://unitypark.github.io/specd/docs/cli/)**.
 
-```bash
-specd doctor          # or --json, for CI
-```
-
-specd is several services at once — an API, Postgres with an extension, a vault
-key, a web app on another origin, an optional model provider, an optional
-embedder, an optional paired runner — and when it does not work the failure
-usually surfaces as whatever broke first rather than as the cause.
-
-`doctor` reports config, server, database, embeddings, AI credential, identity
-and default project in dependency order, and **skips what an earlier failure
-makes unknowable** rather than piling on: one broken thing reads as one broken
-thing. Optional configuration is reported as a note, never a fault — no
-platform key, no default project and the built-in embedder are all supported
-ways to run specd. The embedder note names the retrieval ceiling honestly and
-says how to lift it. Exit 4 means something needs fixing.
-
-### Serving the knowledge base to an editor
+## Serving the knowledge base to an editor
 
 `specd mcp serve` puts the retrieval engine behind MCP, so an agent working in
 Claude Code, Cursor, Windsurf or anything else that speaks the protocol can ask
@@ -500,15 +478,15 @@ It is **read-only, by construction rather than by convention**: the server
 carries the same CLI-audience token as every other command, and the API refuses
 those tokens on every route that is not explicitly CLI-allowed. Approving a spec
 through it is not blocked — it is impossible. See
-[ADR 0017](knowledge/decisions/0017-the-engine-answers-over-mcp.md).
+[ADR 0017](knowledge/decisions/0017-the-engine-answers-over-mcp.md) and the
+**[MCP tools reference](https://unitypark.github.io/specd/docs/mcp/)**.
 
 ## The Claude Code plugin
 
 `AGENTS.md` is a numbered list of rules, and three of them are enforced by
-software: the
-server refuses to serve an unapproved spec, the webhook matches merged
-`spec/<id>-<slug>` branches back to their spec, and the build station files the
-as-built record itself. The rest were enforced by asking nicely.
+software: the server refuses to serve an unapproved spec, the webhook matches
+merged `spec/<id>-<slug>` branches back to their spec, and the build station
+files the as-built record itself. The rest were enforced by asking nicely.
 
 The plugin in [`plugins/`](plugins/) makes two more of them bind at the moment
 they are broken. Install it from this repository, which is its own marketplace:
@@ -527,78 +505,12 @@ they are broken. Install it from this repository, which is its own marketplace:
 Two hooks do the enforcing. **`gate.sh`** blocks an edit on a `spec/` branch
 whose spec is not approved, and it fails *open* on every infrastructure problem
 — no CLI, not logged in, server unreachable — because a hook that blocks all
-editing when the API is down is a hook people uninstall. **`docs-ride-the-change.sh`**
-asks once, when a spec branch changed code and nothing under `knowledge/`,
-whether rule 3 was met. Neither can approve anything: that is a signed-in human
-in the app, and [ADR 0018](knowledge/decisions/0018-working-agreements-ship-as-a-plugin.md)
+editing when the API is down is a hook people uninstall.
+**`docs-ride-the-change.sh`** asks once, when a spec branch changed code and
+nothing under `knowledge/`, whether rule 3 was met. Neither can approve
+anything: that is a signed-in human in the app, and
+[ADR 0018](knowledge/decisions/0018-working-agreements-ship-as-a-plugin.md)
 says why a plugin that could open the gate would defeat the product.
-
-## Self-hosted runners
-
-Pair a machine (`specd runner pair <code>` — code from the project's Settings),
-then start the daemon:
-
-```bash
-SPECD_RUNNER_TOKEN=$(specd runner token) SPECD_API=http://localhost:4000/api \
-  pnpm --filter @specd/runner start
-```
-
-It claims `spec`, `onboard` and `build` jobs, drives the machine's own local
-Claude Code, and reports back. It never touches the database or the knowledge
-index — the server does that on either side. A job whose runner stops
-heartbeating becomes claimable again after its lease (180s; builds 900s), and
-after three reclaims it is failed as repeatedly abandoned rather than bouncing
-forever.
-
-**A dispatched build clones and pushes with the runner machine's own git
-credentials** — specd sends no VCS token, and push access is checked before the
-first model call rather than discovered at the end. Details:
-[`docs/runners.md`](docs/runners.md).
-
-## The Build station
-
-An approved spec can be built from the spec drawer (or
-`POST /projects/:slug/board/specs/:specId/build`). Three properties are
-enforced rather than hoped for:
-
-- **The gate is re-checked at the point of use** — an unapproved spec gets the
-  same 409 the CLI gets, at the moment agent output would first reach code.
-- **The agent gets editing tools only — never a shell.** specd runs the repo's
-  own verify command itself.
-- **It never touches your working tree.** Local builds use a throwaway git
-  worktree; hosted builds a shallow clone in a scratch directory. The branch
-  survives; the workspace does not.
-
-The as-built spec is written by specd, not the model — a verbatim record of
-what was approved. Verify results distinguish **failed** (your tests ran and
-did not pass) from **could not run** (toolchain missing) — different problems,
-different reviewers.
-
-## Integrations
-
-**GitHub — as an App, not a PAT.** Repository-scoped tokens that expire within
-the hour, three permissions (`contents:write`, `pull_requests:write`,
-`metadata:read`), registered in one click with the API running:
-`open http://localhost:4000/api/github/app/register`. Webhook deliveries are
-HMAC-verified over raw bytes in constant time before parsing; an **unset secret
-rejects everything** rather than waving it through; every delivery is recorded
-with what specd decided — including the ones it ignored. Walkthrough:
-[`docs/github-app.md`](docs/github-app.md).
-
-**Merging is adopting.** The merge *is* the signal — setup branch merged →
-adoption recorded and `knowledge/` indexed; `spec/…` branch merged → spec
-marked delivered and re-indexed; anything touching `knowledge/` on the default
-branch → re-indexed. Closing a PR without merging changes nothing, on purpose.
-
-**GitLab** — gitlab.com and self-managed, connected with an access token
-(GitLab has nothing App-shaped). Same adapter interface, same branch-and-MR
-write path, same fail-closed webhook rule using the mechanism GitLab actually
-offers (token echo, constant-time compare). Walkthrough:
-[`docs/gitlab.md`](docs/gitlab.md).
-
-**Jira** — connect, import issues, backlink comments and status mirroring work
-from the wizard; sync is **one-way** (see [status](#project-status)).
-Walkthrough: [`docs/jira.md`](docs/jira.md).
 
 ## The invariants, and where they are enforced
 
@@ -628,7 +540,123 @@ Each is enforced in code, not by convention, and each has a test.
 - **Leaving is free.** Git holds the knowledge; the platform holds a derived
   index. Delete a project and nothing you would miss is gone.
 
-## Repository map
+<details>
+<summary><b>Integrations — GitHub, GitLab, Jira, self-hosted runners</b></summary>
+
+**GitHub — as an App, not a PAT.** Repository-scoped tokens that expire within
+the hour, three permissions (`contents:write`, `pull_requests:write`,
+`metadata:read`), registered in one click with the API running:
+`open http://localhost:4000/api/github/app/register`. Webhook deliveries are
+HMAC-verified over raw bytes in constant time before parsing; an **unset secret
+rejects everything** rather than waving it through; every delivery is recorded
+with what specd decided — including the ones it ignored. Walkthrough:
+[`docs/github-app.md`](docs/github-app.md) ·
+[docs site](https://unitypark.github.io/specd/docs/github/).
+
+**Merging is adopting.** The merge *is* the signal — setup branch merged →
+adoption recorded and `knowledge/` indexed; `spec/…` branch merged → spec
+marked delivered and re-indexed; anything touching `knowledge/` on the default
+branch → re-indexed. Closing a PR without merging changes nothing, on purpose.
+
+**GitLab** — gitlab.com and self-managed, connected with an access token
+(GitLab has nothing App-shaped). Same adapter interface, same branch-and-MR
+write path, same fail-closed webhook rule using the mechanism GitLab actually
+offers (token echo, constant-time compare). Walkthrough:
+[`docs/gitlab.md`](docs/gitlab.md).
+
+**Jira** — connect, import issues, backlink comments and status mirroring work
+from the wizard; sync is **one-way** (see [status](#project-status)). Nothing
+Jira does can fail a specd action: approving a spec succeeds whether or not
+Jira is reachable, because local state is authoritative and Jira is a
+projection of it. Walkthrough: [`docs/jira.md`](docs/jira.md).
+
+**Self-hosted runners.** Pair a machine (`specd runner pair <code>` — code from
+the project's Settings), then start the daemon:
+
+```bash
+SPECD_RUNNER_TOKEN=$(specd runner token) SPECD_API=http://localhost:4000/api \
+  pnpm --filter @specd/runner start
+```
+
+It claims `spec`, `onboard` and `build` jobs, drives the machine's own local
+Claude Code, and reports back. It never touches the database or the knowledge
+index — the server does that on either side. A job whose runner stops
+heartbeating becomes claimable again after its lease (180s; builds 900s), and
+after three reclaims it is failed as repeatedly abandoned rather than bouncing
+forever.
+
+**A dispatched build clones and pushes with the runner machine's own git
+credentials** — specd sends no VCS token, and push access is checked before the
+first model call rather than discovered at the end. Details:
+[`docs/runners.md`](docs/runners.md).
+
+</details>
+
+<details>
+<summary><b>The Build station — what it is allowed to do</b></summary>
+
+An approved spec can be built from the spec drawer (or
+`POST /projects/:slug/board/specs/:specId/build`). Three properties are
+enforced rather than hoped for:
+
+- **The gate is re-checked at the point of use** — an unapproved spec gets the
+  same 409 the CLI gets, at the moment agent output would first reach code.
+- **The agent gets editing tools only — never a shell.** specd runs the repo's
+  own verify command itself.
+- **It never touches your working tree.** Local builds use a throwaway git
+  worktree; hosted builds a shallow clone in a scratch directory. The branch
+  survives; the workspace does not.
+
+The as-built spec is written by specd, not the model — a verbatim record of
+what was approved. Verify results distinguish **failed** (your tests ran and
+did not pass) from **could not run** (toolchain missing) — different problems,
+different reviewers.
+
+</details>
+
+<details>
+<summary><b>Runbook — verifying, troubleshooting, resetting</b></summary>
+
+Day-two development — evals, migrations, working on the index, the traps —
+lives in [`knowledge/runbooks/local-dev.md`](knowledge/runbooks/local-dev.md).
+The essentials:
+
+### Verify before a PR
+
+```bash
+pnpm typecheck && pnpm test
+```
+
+That is the whole gate — CI runs exactly the same two commands against a real
+pgvector service, then **fails the run if the Postgres-dependent suites skipped
+themselves** instead of passing (they self-skip when no database is reachable,
+which keeps a laptop without Docker green — and would otherwise make a broken
+CI database look like a pass).
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `DATABASE_URL is required — copy .env.example to .env` | No `.env` at the repo root yet | `cp .env.example .env`, then retry. |
+| Same error, `.env` exists | Not at the repo root, or the value is empty | `grep DATABASE_URL .env` from the repo root should print a real value — the loader looks there, not at the shell's `cwd`. |
+| API can't reach Postgres | `pnpm infra:up` never ran, or Docker is down | `docker ps` should list `specd-postgres` as `healthy`. |
+| `EADDRINUSE` on `:3000`/`:4000` | A previous `pnpm dev` is still running | `lsof -nP -iTCP:3000 -sTCP:LISTEN`, stop it, retry. |
+| Schema-shaped error right after pulling | New migrations landed | `pnpm db:migrate` — idempotent. |
+| Web app renders but has no data in it | The API died at startup, and `node --watch` keeps a crashed process alive — so `pnpm dev` still looks healthy | `curl localhost:4000/api/health`; nothing answering confirms it. The reason is in the API's own output, scrolled past by the web server's. The next row is the usual one. |
+| `@specd/db does not provide an export named …` | `packages/*/dist` is missing or older than its `src` | `pnpm --filter "./packages/*" build`. `dist` is gitignored and no install hook builds it, so this is also needed after any pull that touched a package. |
+| Web dev server 500s after `pnpm build` | `next build` and `next dev` share `apps/web/.next` in incompatible shapes | Stop the dev server, `rm -rf apps/web/.next`, start it again. |
+| Whole test file reports *skipped* | No database — or the suite's own `beforeAll` threw | Bring Postgres up; if it persists, suspect the suite's setup, not the database. |
+
+### Resetting
+
+`pnpm infra:down` is a plain `docker compose down` — the data volume survives.
+For a true reset: `docker compose down -v`, then
+`pnpm infra:up && pnpm db:migrate && pnpm db:seed`.
+
+</details>
+
+<details>
+<summary><b>Repository map</b></summary>
 
 | Path | What it is |
 | --- | --- |
@@ -639,6 +667,8 @@ Each is enforced in code, not by convention, and each has a test.
 | `packages/shared` | Spec lifecycle, EARS rendering, model rate card, cost metering |
 | `packages/db` | Drizzle schema + plain-SQL migrations (Postgres + pgvector) |
 | `packages/templates` | `AGENTS.md`, `CLAUDE.md` and the `knowledge/` scaffold |
+| `apps/web/lib/docs` | The documentation, as data — rendered by the app *and* the published site |
+| `scripts/site` | The static-site generator behind [the docs site](https://unitypark.github.io/specd/) |
 | `evals` | Quality grading against independent oracles — see [Evals](#evals) |
 | `knowledge/` | specd's own knowledge base — the product eats its own food |
 
@@ -651,6 +681,8 @@ specd develops specd: this repository's own `knowledge/` is a live instance of
 the product's knowledge base — ADRs, runbooks, as-built specs, and the research
 that shaped the engine. Start at
 [`knowledge/README.md`](knowledge/README.md).
+
+</details>
 
 ## Project status
 
@@ -668,6 +700,25 @@ Honest, because the wizard must not lie and neither should the README:
 - **A known ceiling, stated:** the default embedder is lexical, so both
   retrieval arms measure similar signals until you configure a real embedding
   provider. Everything around it is tuned; the ceiling needs a key or a model.
+
+## Documentation
+
+Thirty-one pages, beginner to reference, published at
+**[unitypark.github.io/specd/docs](https://unitypark.github.io/specd/docs/)**
+and served in-app at `/docs`. Both render from the same source
+(`apps/web/lib/docs`), so they cannot drift.
+
+| Start here | Concepts | Reference |
+| --- | --- | --- |
+| [What is specd?](https://unitypark.github.io/specd/docs/what-is-specd/) | [The six stations](https://unitypark.github.io/specd/docs/the-pipeline/) | [CLI](https://unitypark.github.io/specd/docs/cli/) |
+| [Why spec-driven](https://unitypark.github.io/specd/docs/why-spec-driven/) | [Specs and citations](https://unitypark.github.io/specd/docs/specs-and-citations/) | [MCP tools](https://unitypark.github.io/specd/docs/mcp/) |
+| [Quickstart](https://unitypark.github.io/specd/docs/quickstart/) | [The human gate](https://unitypark.github.io/specd/docs/the-human-gate/) | [Configuration](https://unitypark.github.io/specd/docs/configuration/) |
+| [Your first spec](https://unitypark.github.io/specd/docs/your-first-spec/) | [The learning loop](https://unitypark.github.io/specd/docs/learning-loop/) | [Architecture](https://unitypark.github.io/specd/docs/architecture/) |
+
+```bash
+pnpm site:build     # → site/
+pnpm site:serve     # → http://localhost:8899
+```
 
 ## Development
 

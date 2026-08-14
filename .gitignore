@@ -28,3 +28,13 @@ pnpm-debug.log*
 # isolated build worktrees
 .specd-build/
 apps/api/vitest-report.json
+
+# The published site is generated from apps/web/lib/docs by `pnpm site:build`
+# and uploaded straight to Pages by CI. Committing the output would mean two
+# sources of truth for the same words, and the stale one always wins an
+# argument nobody knew they were having.
+#
+# Leading slash on purpose: a bare `site/` matches at any depth, which also
+# swallowed scripts/site/ — the generator's own source — and hid it from
+# `git status` entirely.
+/site/

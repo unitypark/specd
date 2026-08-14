@@ -1,0 +1,24 @@
+{
+  // The site generator is run by tsx, which transpiles without checking types.
+  // This config exists so `pnpm site:typecheck` can check it — the Pages
+  // workflow runs that before it builds, so a type error in the generator
+  // fails the deploy rather than producing subtly wrong HTML.
+  //
+  // Not `extends: ../../tsconfig.base.json`: that config is NodeNext, which
+  // requires explicit `.js` extensions on relative imports. The generator is
+  // loaded by tsx and by tsc only — never by node directly — so bundler
+  // resolution is both accurate and what its extensionless imports need.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

@@ -1,0 +1,823 @@
+/*
+ * Documentation.
+ *
+ * Three columns at full width — rail, article, contents — collapsing to two
+ * and then to one. The article column is capped at ~72ch rather than filling
+ * the space it is given: this is the one surface in the product where somebody
+ * reads several hundred words in a row, and measure matters more than
+ * symmetry.
+ *
+ * Josefin's small x-height is why body copy here is set at 1.06rem rather than
+ * the 1rem a workhorse sans would take (see DESIGN.md).
+ */
+
+.shell {
+  min-height: 100vh;
+  background: var(--bg);
+  /* `clip`, not `hidden` — hidden would make this a scroll container and
+     break the sticky nav and the sticky rails. */
+  overflow-x: clip;
+}
+
+.grid {
+  max-width: min(92rem, 100%);
+  margin: 0 auto;
+  padding: 1.4rem 1.6rem 6rem;
+  display: grid;
+  grid-template-columns: 15.5rem minmax(0, 1fr);
+  gap: clamp(2rem, 4vw, 3.6rem);
+  align-items: start;
+}
+
+/* ─── left rail ───────────────────────────────────────────────────────────── */
+
+.sidebar {
+  position: sticky;
+  /* Nav pill (72px) plus its 8px inset, plus air. */
+  top: 6.5rem;
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+  padding-right: 0.6rem;
+  /* The rail scrolls independently, which on a trackpad means its scrollbar
+     appears and shifts the links by ~8px. Reserving the gutter keeps them
+     still. */
+  scrollbar-gutter: stable;
+}
+
+.filter {
+  width: 100%;
+  font: 500 0.92rem/1.4 var(--sans);
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 1.4rem;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--ink);
+}
+.filter:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--emphasis-soft);
+}
+
+.navgroup {
+  margin-bottom: 1.5rem;
+}
+.navtitle {
+  display: block;
+  font: 700 0.74rem/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 0.6rem;
+}
+.navgroup ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* The hairline is the category's spine; the active link paints over it. */
+  border-left: 1px solid var(--line);
+}
+.navgroup li {
+  margin: 0;
+}
+
+.navlink,
+.navlinkOn {
+  display: block;
+  font: 500 0.98rem/1.35 var(--sans);
+  padding: 0.36rem 0.7rem;
+  margin-left: -1px;
+  border-left: 1px solid transparent;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.navlink:hover {
+  color: var(--ink);
+  border-left-color: var(--line-2);
+  text-decoration: none;
+}
+.navlinkOn {
+  color: var(--ink);
+  font-weight: 700;
+  border-left-color: var(--ink);
+}
+
+.navempty {
+  font: 400 0.9rem/1.6 var(--sans);
+  color: var(--ink-3);
+}
+
+/* Mobile drawer toggle — hidden above the breakpoint. */
+.navtoggle {
+  display: none;
+  font: 700 0.72rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* ─── middle + right ──────────────────────────────────────────────────────── */
+
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 13.5rem;
+  gap: clamp(1.5rem, 3vw, 3.2rem);
+  align-items: start;
+}
+/* The index has no "on this page" rail, so reserving its column would leave a
+   13rem hole down the right of the page. */
+.mainFull {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.article {
+  min-width: 0;
+  /* Measure, not width. Long-form prose past ~75 characters costs the reader
+     the start of the next line. */
+  max-width: 72ch;
+  padding-top: 1.6rem;
+}
+/* The index is a directory, not an essay — its three-up cards and its
+   title/summary/meta rows want the width that prose does not. */
+.articleWide {
+  max-width: 62rem;
+}
+
+.crumb {
+  font: 700 0.72rem/1 var(--mono);
+  letter-spacing: 0.2em;
+  color: var(--ink-3);
+  margin: 0 0 1rem;
+}
+.crumb a {
+  color: var(--ink-3);
+  text-decoration: none;
+}
+.crumb a:hover {
+  color: var(--ink);
+}
+
+.h1 {
+  font: 400 clamp(2.1rem, 4vw, 3rem)/1.08 var(--serif);
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  margin: 0 0 0.9rem;
+  text-wrap: balance;
+}
+
+.lead {
+  font-size: 1.24rem;
+  line-height: 1.68;
+  color: var(--ink-2);
+  margin: 0 0 1.4rem;
+  /* Capped independently of the article, which on the index is a directory
+     wide enough to make an uncapped lead unreadable. */
+  max-width: 62ch;
+}
+
+/* Prose outside `.body` — the index writes a few paragraphs of its own. */
+.para {
+  font-size: 1.06rem;
+  line-height: 1.78;
+  color: var(--ink-2);
+  margin: 0 0 1.4rem;
+  max-width: 68ch;
+}
+.lead strong,
+.lead b {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.meta {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 2.4rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--line);
+}
+.chip {
+  font: 600 0.74rem/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.34rem 0.6rem;
+}
+
+/* ─── body copy ───────────────────────────────────────────────────────────── */
+
+.body {
+  color: var(--ink-2);
+  font-size: 1.06rem;
+  line-height: 1.78;
+}
+.body p {
+  margin: 0 0 1.15rem;
+}
+.body strong,
+.body b {
+  color: var(--ink);
+  font-weight: 700;
+}
+.body em {
+  font-style: italic;
+}
+.body a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 0.18em;
+}
+.body a:hover {
+  text-decoration-color: var(--ink);
+}
+/* Inline code sits inside running prose, so it is toned down rather than
+   boxed — a filled chip every third word turns a paragraph into a fence.
+   Scoped to the whole article, not just `.body`: page summaries and the
+   index's listing carry the same inline syntax. The two surfaces that want a
+   different treatment — the dark `.codeblock` and the `.firstcard` chip —
+   are declared after this and win on source order. */
+.article code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.32em;
+  word-break: break-word;
+}
+
+.h2 {
+  font: 600 1.6rem/1.25 var(--serif);
+  color: var(--ink);
+  margin: 3rem 0 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+  /* So an anchored jump does not land the heading under the sticky nav. */
+  scroll-margin-top: 7rem;
+}
+/* The header block already closes with a rule; a second one 3rem later reads
+   as a mistake. Only reachable on the index, where an h2 is a direct sibling
+   of the meta row — on a doc page the h2s live inside `.body`. */
+.meta + .h2 {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.h3 {
+  font: 600 1.2rem/1.3 var(--serif);
+  color: var(--ink);
+  margin: 2.1rem 0 0.7rem;
+  scroll-margin-top: 7rem;
+}
+
+.ul,
+.ol {
+  margin: 0 0 1.3rem;
+  padding-left: 1.3rem;
+}
+.ul li,
+.ol li {
+  margin-bottom: 0.6rem;
+}
+.ul {
+  list-style: none;
+  padding-left: 1.1rem;
+}
+.ul li {
+  position: relative;
+}
+.ul li::before {
+  content: '';
+  position: absolute;
+  left: -1.05rem;
+  top: 0.72em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+.dl {
+  margin: 0 0 1.6rem;
+}
+.dl > div {
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--line);
+}
+.dl > div:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.dl dt {
+  font: 700 1.02rem/1.45 var(--sans);
+  color: var(--ink);
+  margin-bottom: 0.28rem;
+}
+.dl dd {
+  margin: 0;
+}
+
+/* ─── code ────────────────────────────────────────────────────────────────── */
+
+.codeblock {
+  margin: 0 0 1.5rem;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0f0f0f;
+}
+.codeblock figcaption {
+  font: 600 0.72rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.codeblock pre {
+  margin: 0;
+  padding: 0.95rem 1rem;
+  overflow-x: auto;
+}
+.codeblock code {
+  font: 400 0.88rem/1.65 var(--mono);
+  color: #f2f2f2;
+  background: none;
+  border: 0;
+  padding: 0;
+  white-space: pre;
+}
+
+/* ─── tables ──────────────────────────────────────────────────────────────── */
+
+/* The wrapper scrolls, never the page: a six-column reference table must not
+   give the whole document a horizontal scrollbar on a phone. */
+.tablewrap {
+  margin: 0 0 1.6rem;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.98rem;
+}
+.table th {
+  text-align: left;
+  font: 700 0.74rem/1.3 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--line-2);
+  white-space: nowrap;
+}
+.table td {
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  line-height: 1.65;
+}
+.table tr:last-child td {
+  border-bottom: 0;
+}
+.table td:first-child {
+  color: var(--ink);
+}
+
+/* ─── callouts ────────────────────────────────────────────────────────────── */
+
+.note {
+  margin: 0 0 1.6rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink-3);
+  border-radius: 0 8px 8px 0;
+  background: var(--panel);
+}
+.note strong {
+  display: block;
+  font: 700 1rem/1.4 var(--sans);
+  color: var(--ink);
+  margin-bottom: 0.35rem;
+}
+.note p {
+  margin: 0;
+}
+
+.note_info {
+  border-left-color: var(--ink-3);
+}
+.note_good {
+  border-left-color: var(--ink);
+}
+.note_warn {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+}
+/*
+ * `rule` is for the invariants specd enforces in code, and it is the one tone
+ * that gets the emphasis treatment — a dark spine and a lifted surface, the
+ * same "point of application" language as a primary button. These paragraphs
+ * are the load-bearing claims of the whole product; they should look like it.
+ */
+.note_rule {
+  border: 1px solid transparent;
+  border-left: 3px solid transparent;
+  border-image: none;
+  background: var(--panel);
+  box-shadow: var(--emphasis-shadow);
+  border-radius: 8px;
+  position: relative;
+  padding-left: 1.35rem;
+}
+.note_rule::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 8px 0 0 8px;
+  background: var(--emphasis);
+}
+
+/* ─── steps ───────────────────────────────────────────────────────────────── */
+
+.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 0 0 1.8rem;
+  padding: 0;
+}
+.steps li {
+  counter-increment: step;
+  position: relative;
+  padding: 0 0 1.3rem 3rem;
+  margin: 0;
+}
+.steps li::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 0.1rem;
+  font: 700 0.86rem/1 var(--mono);
+  color: var(--ink-3);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0.34rem 0.42rem;
+}
+/* The spine connecting the markers, stopping at the last one. */
+.steps li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 1.02rem;
+  top: 2.1rem;
+  bottom: 0.4rem;
+  width: 1px;
+  background: var(--line);
+}
+.steps h4 {
+  font: 700 1.05rem/1.4 var(--sans);
+  color: var(--ink);
+  margin: 0 0 0.3rem;
+}
+.steps p {
+  margin: 0;
+}
+
+/* ─── cards ───────────────────────────────────────────────────────────────── */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.9rem;
+  margin: 0 0 1.8rem;
+}
+.card {
+  display: block;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  text-decoration: none;
+  transition: border-color 0.15s, box-shadow 0.2s, transform 0.15s;
+}
+a.card:hover {
+  border-color: var(--line-2);
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.25);
+  transform: translateY(-1px);
+  text-decoration: none;
+}
+.card h4 {
+  font: 700 1rem/1.35 var(--sans);
+  color: var(--ink);
+  margin: 0 0 0.35rem;
+}
+.card p {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin: 0;
+}
+
+.quote {
+  margin: 0 0 1.6rem;
+  padding: 0 0 0 1.2rem;
+  border-left: 3px solid var(--ink);
+}
+.quote p {
+  font: 400 1.24rem/1.55 var(--serif);
+  color: var(--ink);
+  margin: 0;
+}
+.quote cite {
+  display: block;
+  font: 500 0.8rem/1.5 var(--mono);
+  color: var(--ink-3);
+  font-style: normal;
+  margin-top: 0.5rem;
+}
+
+/* ─── on this page ────────────────────────────────────────────────────────── */
+
+.toc {
+  position: sticky;
+  top: 6.5rem;
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+  padding-top: 1.6rem;
+  font-size: 0.9rem;
+}
+.toctitle {
+  display: block;
+  font: 700 0.7rem/1 var(--mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 0.7rem;
+}
+.toc ul {
+  list-style: none;
+  margin: 0 0 1.2rem;
+  padding: 0;
+  border-left: 1px solid var(--line);
+}
+.toc li a {
+  display: block;
+  padding: 0.3rem 0.7rem;
+  margin-left: -1px;
+  border-left: 1px solid transparent;
+  color: var(--ink-3);
+  text-decoration: none;
+  line-height: 1.4;
+}
+.toc li a:hover {
+  color: var(--ink);
+  border-left-color: var(--line-2);
+}
+.tocedit {
+  font: 600 0.74rem/1.4 var(--mono);
+  color: var(--ink-3);
+  text-decoration: none;
+}
+.tocedit:hover {
+  color: var(--ink);
+}
+
+/* The same contents, inline, for viewports where the right column is gone. */
+.tocInline {
+  display: none;
+  margin: 0 0 1.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 0.75rem 1rem;
+}
+.tocInline summary {
+  font: 700 0.74rem/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.tocInline ul {
+  list-style: none;
+  margin: 0.7rem 0 0;
+  padding: 0;
+}
+.tocInline li a {
+  display: block;
+  padding: 0.28rem 0;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+.tocInline li a:hover {
+  color: var(--ink);
+}
+
+/* ─── pager ───────────────────────────────────────────────────────────────── */
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 3.5rem;
+  padding-top: 1.6rem;
+  border-top: 1px solid var(--line);
+}
+.pagerprev,
+.pagernext {
+  display: block;
+  max-width: 48%;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  text-decoration: none;
+  transition: border-color 0.15s, box-shadow 0.2s;
+}
+.pagernext {
+  text-align: right;
+  margin-left: auto;
+}
+.pagerprev:hover,
+.pagernext:hover {
+  border-color: var(--line-2);
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.25);
+  text-decoration: none;
+}
+.pagerprev span,
+.pagernext span {
+  display: block;
+  font: 700 0.68rem/1 var(--mono);
+  letter-spacing: 0.18em;
+  color: var(--ink-3);
+  margin-bottom: 0.35rem;
+}
+.pagerprev strong,
+.pagernext strong {
+  font: 600 1rem/1.35 var(--sans);
+  color: var(--ink);
+}
+
+/* ─── docs home ───────────────────────────────────────────────────────────── */
+
+.first {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.9rem;
+  margin: 0 0 1rem;
+}
+.firstcard {
+  display: block;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  text-decoration: none;
+  transition: border-color 0.15s, box-shadow 0.2s, transform 0.15s;
+}
+.firstcard:hover {
+  border-color: var(--line-2);
+  box-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.3);
+  transform: translateY(-2px);
+  text-decoration: none;
+}
+.firstno {
+  font: 700 0.76rem/1 var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--ink-3);
+}
+.firstcard h3 {
+  font: 600 1.15rem/1.3 var(--serif);
+  color: var(--ink);
+  margin: 0.5rem 0 0.35rem;
+}
+.firstcard p {
+  font-size: 0.96rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin: 0 0 0.7rem;
+}
+.firstcard code {
+  font: 500 0.8rem/1 var(--mono);
+  color: var(--ink-2);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.28rem 0.45rem;
+}
+
+.catblock {
+  margin-bottom: 2.2rem;
+}
+.catblurb {
+  color: var(--ink-3);
+  font-size: 1rem;
+  margin: 0 0 0.9rem;
+}
+.catlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.catlist li {
+  border-bottom: 1px solid var(--line);
+}
+.catlist a {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.8rem 0.4rem;
+  text-decoration: none;
+}
+.catlist a:hover {
+  background: var(--panel);
+  text-decoration: none;
+}
+.catname {
+  font: 700 1rem/1.4 var(--sans);
+  color: var(--ink);
+}
+.catsum {
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.catmeta {
+  font: 500 0.72rem/1 var(--mono);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* ─── responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .toc {
+    display: none;
+  }
+  .tocInline {
+    display: block;
+  }
+  .article {
+    max-width: 74ch;
+  }
+}
+
+@media (max-width: 1000px) {
+  .catlist a {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.2rem;
+  }
+  .catmeta {
+    margin-top: 0.15rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 1rem 1.2rem 4rem;
+  }
+  .navtoggle {
+    display: inline-block;
+    margin: 0.4rem 0 0.2rem;
+  }
+  .sidebar {
+    display: none;
+  }
+  /* Not a fixed overlay: an inline panel keeps the page scrollable behind it
+     and cannot trap focus or strand the user in a drawer that will not close. */
+  .sidebarOpen {
+    display: block;
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding: 1rem 0 1.4rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .article {
+    padding-top: 0.8rem;
+  }
+}

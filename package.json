@@ -23,7 +23,11 @@
     "cli:test": "cd cli && go vet ./... && go test ./...",
     "eval": "tsx --tsconfig evals/tsconfig.json evals/cli.ts",
     "seed:demo": "pnpm --filter @specd/api seed:demo",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "site:build": "tsx scripts/site/build.ts",
+    "site:typecheck": "tsc -p scripts/site/tsconfig.json",
+    "site:serve": "pnpm site:build && node scripts/site/serve.mjs",
+    "site:check": "pnpm site:build && node scripts/site/check-links.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

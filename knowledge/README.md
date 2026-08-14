@@ -44,6 +44,7 @@ everything else is a consequence of it.
 - [0016 — grounding runs are queued rows, and an abandoned one is failed](decisions/0016-onboarding-runs-are-queued.md)
 - [0017 — the knowledge engine answers over MCP](decisions/0017-the-engine-answers-over-mcp.md)
 - [0018 — the working agreements ship as a plugin](decisions/0018-working-agreements-ship-as-a-plugin.md)
+- [0019 — the documentation is data, rendered twice](decisions/0019-the-docs-are-data-rendered-twice.md)
 
 New decisions join this list in the PR that adds them — the map rides the
 change like everything else.

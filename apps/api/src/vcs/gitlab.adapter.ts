@@ -2,7 +2,9 @@ import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
   VcsError,
+  reviewHint,
   type ChangeResult,
+  type OpenedReview,
   type ProposedChange,
   type RepoFile,
   type RepoSnapshot,
@@ -225,22 +227,22 @@ export class GitLabAdapter implements VcsAdapter {
     return {
       branch: change.branch,
       url: mr.url,
-      reviewHint: `${mr.existing ? 'Updated' : 'Opened'} MR !${mr.iid} on ${repo.name}. Merging is adopting.`,
+      reviewHint: reviewHint('MR', repo.name, mr),
       filesWritten: change.files.length,
     };
   }
 
   /**
-   * Open an MR for `branch`, or hand back the one already open for it —
-   * shared by `propose` and the build station, mirroring
-   * `GitHubAdapter.openPullRequest`. A re-run must update the open MR rather
-   * than fail on it, so an existing one is returned rather than treated as an
-   * error.
+   * Open an MR for `branch`, or update the one already open for it — shared by
+   * `propose` and the build station, mirroring `GitHubAdapter.openPullRequest`
+   * down to rewriting the description, which describes one run and not the
+   * next. A re-run must update the open MR rather than fail on it, so an
+   * existing one is brought up to date rather than treated as an error.
    */
   async openMergeRequest(
     name: string,
     mr: { branch: string; base: string; title: string; body: string },
-  ): Promise<{ url: string; iid: number; existing: boolean }> {
+  ): Promise<OpenedReview> {
     const id = encodeURIComponent(name);
     try {
       const created = await this.api<{ web_url: string; iid: number }>(`/projects/${id}/merge_requests`, {
@@ -252,7 +254,7 @@ export class GitLabAdapter implements VcsAdapter {
           description: mr.body,
         }),
       });
-      return { url: created.web_url, iid: created.iid, existing: false };
+      return { url: created.web_url, number: created.iid, existing: false, descriptionStale: false };
     } catch (err) {
       // GitLab refuses a second open MR for the same source/target — finding
       // it is the correct outcome, not a fallback.
@@ -260,10 +262,20 @@ export class GitLabAdapter implements VcsAdapter {
         `/projects/${id}/merge_requests?source_branch=${encodeURIComponent(mr.branch)}&state=opened`,
       ).catch(() => []);
 
-      if (open.length > 0) {
-        return { url: open[0]!.web_url, iid: open[0]!.iid, existing: true };
-      }
-      throw err;
+      const found = open[0];
+      if (!found) throw err;
+
+      // Best-effort, as on GitHub: the branch is pushed and the MR exists, so
+      // this is the one call in the sequence not worth failing a run over.
+      const descriptionStale = await this.api(`/projects/${id}/merge_requests/${found.iid}`, {
+        method: 'PUT',
+        body: JSON.stringify({ title: mr.title, description: mr.body }),
+      }).then(
+        () => false,
+        () => true,
+      );
+
+      return { url: found.web_url, number: found.iid, existing: true, descriptionStale };
     }
   }
 

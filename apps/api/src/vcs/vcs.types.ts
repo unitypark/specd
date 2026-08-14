@@ -84,6 +84,41 @@ export class VcsError extends Error {
   }
 }
 
+/** What opening a review actually did, once a re-run is a normal thing to do. */
+export interface OpenedReview {
+  url: string;
+  /** `#number` on GitHub, `!iid` on GitLab — the same thing to a reader. */
+  number: number;
+  /** One was already open for this branch and we updated it in place. */
+  existing: boolean;
+  /**
+   * The description on the host no longer matches the branch. Only ever true
+   * for an existing review whose rewrite failed: one we just opened carries
+   * the description we opened it with.
+   */
+  descriptionStale: boolean;
+}
+
+/**
+ * The one sentence a person gets when a run ends, in the four places that end
+ * one. Kept together because the third case is easy to forget: a re-run whose
+ * description could not be rewritten has updated the branch under a reviewer
+ * without updating what the page tells them the branch contains, and silence
+ * there reads as "this page is current".
+ */
+export function reviewHint(
+  kind: 'PR' | 'MR',
+  repoName: string,
+  opened: Pick<OpenedReview, 'number' | 'existing' | 'descriptionStale'>,
+): string {
+  const ref = `${kind} ${kind === 'PR' ? '#' : '!'}${opened.number}`;
+  const verb = opened.existing ? 'Updated' : 'Opened';
+  const caveat = opened.descriptionStale
+    ? ' Its description could not be rewritten and still describes the previous run.'
+    : '';
+  return `${verb} ${ref} on ${repoName}.${caveat} Merging is adopting.`;
+}
+
 /**
  * Root files worth reading in full during a scan — small, high-signal, cheap.
  * This is the first tier of the scan; `scan-targets.ts` adds the rest (CI,

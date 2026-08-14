@@ -151,3 +151,44 @@ close the open MR and open a new one instead of updating it in place. It does
 not *fail*, which is why it is not part of this fix, but what GitLab does to an
 open MR whose source branch is deleted has not been checked against a live
 instance. Worth confirming before re-grounding is offered as a routine action.
+
+## Update — 2026-08-14: the description goes with the branch
+
+The re-run above updated the branch and left the description alone, because
+`openPullRequest` returned the open PR exactly as it found it. That is a
+half-update, and the half it skipped is the half a reviewer reads.
+
+Both descriptions are written about one run and no other. `renderSetupPrBody`
+states a file count, an UNVERIFIED count, the detected stack, and one of two
+paragraphs depending on whether a model drafted anything at all. `buildPrBody`
+states a commit count and whether verify passed — and it is documented as
+existing to prevent exactly one misreading: *"a reviewer told 'passed' when
+nothing ran has been misled."* A re-run left that sentence in place over a
+branch where verify had since failed, which is the misreading it was written to
+stop, arrived at from the other direction.
+
+So `openPullRequest` and `openMergeRequest` now rewrite the title and body of
+the review they find (`PATCH /pulls/:n`, `PUT /merge_requests/:iid`). The two
+adapters keep agreeing, which was the point of the previous update.
+
+The rewrite is deliberately **best-effort**. The branch is already published and
+the review already exists; failing a run at its last and least consequential
+call is the shape of failure the previous update removed, and reintroducing it
+here for a description would be a poor trade. It is not swallowed either — the
+adapters return `descriptionStale` and the review hint says so in the sentence
+the wizard prints:
+
+    Updated PR #3 on acme/aurora-api. Its description could not be rewritten
+    and still describes the previous run. Merging is adopting.
+
+That sentence had been assembled by hand in four places and has grown a third
+case, so it now lives once, in `reviewHint()` in `vcs.types.ts`.
+
+`GitLabAdapter` also had no test file. It has one now, covering
+`openMergeRequest` directly rather than through `propose` — which is the honest
+way to test it while the `UNVERIFIED` note above still stands, since `propose`
+deletes the branch and takes the open MR with it. The already-open path there
+belongs to the build station, which pushes.
+
+Still `UNVERIFIED`, unchanged by this: what GitLab does to an open MR whose
+source branch is deleted.

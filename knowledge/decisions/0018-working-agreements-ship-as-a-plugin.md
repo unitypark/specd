@@ -50,11 +50,16 @@ repository, with the repository as its own marketplace.
   and accepts the answer: Claude Code sets `stop_hook_active` on the retry, so a
   considered "nothing to document" ends the turn. Conflating a prompt with a
   gate teaches people to disable both.
-- **Only the approved verdict is cached.** `Write` and `Edit` fire constantly and
-  `specd spec status` is an HTTP round trip, so an approval is remembered for a
-  minute. A *block* is re-checked every time — approving a spec has to unblock
-  the next edit, not leave someone waiting out a TTL for work they were just
-  cleared to do.
+- **Every verdict except the block is cached.** `Write` and `Edit` fire
+  constantly and `specd spec status` is an HTTP round trip, so the answer is
+  remembered for a minute and the call is bounded at five seconds. Caching the
+  *failures* matters as much as caching the pass: when the API host resolves
+  but drops packets, an uncached failure adds the client's full timeout to
+  every keystroke, silently, because the hook exits 0 and prints nothing — the
+  same "hook people uninstall" outcome as blocking wrongly, reached by a
+  quieter road. Only exit 3 stays uncached, because approving a spec has to
+  unblock the next edit rather than leave someone waiting out a TTL for work
+  they were just cleared to do.
 - **The plugin shells out to the CLI; it never re-implements it.** One contract,
   and the exit codes stay the source of truth. Exit 3 was designed so CI could
   gate a build on approval ([[0011-specd-develops-specd]] runs that loop); the

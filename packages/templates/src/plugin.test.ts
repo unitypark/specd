@@ -71,6 +71,7 @@ describe('the plugin manifests', () => {
 describe('the gate hook', () => {
   let dir: string;
   let binDir: string;
+  const caches: string[] = [];
 
   const run = (branch: string, stub: string | null, env: Record<string, string> = {}) => {
     execFileSync('git', ['switch', '-C', branch], { cwd: dir, stdio: 'ignore' });
@@ -85,9 +86,9 @@ describe('the gate hook', () => {
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ''}`,
-        // A fresh cache per case: the hook remembers an approved verdict for a
-        // minute, which would otherwise let one case answer the next.
-        TMPDIR: mkdtempSync(join(tmpdir(), 'specd-hook-cache-')),
+        // A fresh cache per case: the hook remembers a verdict for a minute,
+        // which would otherwise let one case answer the next.
+        TMPDIR: cache(),
         ...env,
       },
     });
@@ -107,7 +108,16 @@ describe('the gate hook', () => {
     );
   });
 
-  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const cache = () => {
+    const made = mkdtempSync(join(tmpdir(), 'specd-hook-cache-'));
+    caches.push(made);
+    return made;
+  };
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+    for (const c of caches) rmSync(c, { recursive: true, force: true });
+  });
 
   it('blocks an edit when the server says the spec is not approved', () => {
     const res = run('spec/crm-1-add-widget', '#!/bin/sh\nexit 3\n');
@@ -118,9 +128,13 @@ describe('the gate hook', () => {
   it('passes the ticket key through, hyphen and all', () => {
     // The key is CRM-1, not CRM: specBranchName() lowercases a key that already
     // contains a hyphen, so splitting on the first one loses the number.
-    const res = run('spec/crm-1-add-widget', '#!/bin/sh\necho "$@" >&2\nexit 3\n');
-    expect(res.stderr).toContain('CRM-1');
-    expect(res.stderr).not.toContain('spec status crm\n');
+    // The hook sends the CLI's output to /dev/null, so the stub records its
+    // arguments to a file instead. This asserts what was *asked of the server*,
+    // not what was printed: splitting on the first hyphen would ask about
+    // "CRM", which is a different ticket or none at all.
+    const log = join(dir, 'args.txt');
+    run('spec/crm-1-add-widget', `#!/bin/sh\necho "$*" > ${log}\nexit 3\n`);
+    expect(readFileSync(log, 'utf8').trim()).toBe('spec status CRM-1');
   });
 
   it('lets an approved spec through', () => {
@@ -199,6 +213,46 @@ describe('the docs-ride-the-change hook', () => {
     expect(run().status).toBe(2);
     // stop_hook_active means this already fired and the agent chose to stop.
     expect(run(true).status).toBe(0);
+  });
+
+  it('counts a knowledge doc that has not been committed yet', () => {
+    // Found in review. A new ADR or as-built record is untracked until someone
+    // runs `git add`, and that is the most common way rule 3 gets satisfied —
+    // so a hook blind to untracked files nags exactly the person who wrote it.
+    execFileSync('git', ['switch', '-q', 'main'], { cwd: dir });
+    execFileSync('git', ['switch', '-qC', 'spec/crm-3-untracked'], { cwd: dir });
+    commit({ 'src/third.ts': 'export const third = 3;\n' }, 'add third');
+    expect(run().status).toBe(2);
+
+    mkdirSync(join(dir, 'knowledge', 'decisions'), { recursive: true });
+    writeFileSync(join(dir, 'knowledge/decisions/0019-x.md'), '# 0019 — X\n');
+    expect(run().status).toBe(0);
+  });
+
+  it('works in a repository whose trunk is not called main', () => {
+    const other = mkdtempSync(join(tmpdir(), 'specd-master-'));
+    try {
+      execFileSync('git', ['init', '-q', '-b', 'master'], { cwd: other });
+      writeFileSync(join(other, 'README.md'), '# fixture\n');
+      execFileSync('git', ['add', '-A'], { cwd: other });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'], {
+        cwd: other,
+      });
+      execFileSync('git', ['switch', '-qC', 'spec/crm-4-widget'], { cwd: other });
+      writeFileSync(join(other, 'src.ts'), 'export const a = 1;\n');
+      execFileSync('git', ['add', '-A'], { cwd: other });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'work'], {
+        cwd: other,
+      });
+      const res = spawnSync('sh', [docsRide], {
+        cwd: other,
+        encoding: 'utf8',
+        input: JSON.stringify({ stop_hook_active: false }),
+      });
+      expect(res.status).toBe(2);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
   });
 
   it('has no opinion about branches that are not spec work', () => {

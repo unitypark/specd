@@ -26,16 +26,29 @@ case "$branch" in
   *) exit 0 ;;
 esac
 
-# Compare against wherever this branch left the trunk. Without a base there is
-# nothing meaningful to diff, so say nothing.
-base=$(git merge-base HEAD origin/main 2>/dev/null) ||
-  base=$(git merge-base HEAD main 2>/dev/null) || exit 0
+# Compare against wherever this branch left the trunk. Ask the remote what its
+# default branch is before guessing: a repo on master, develop or trunk would
+# otherwise match none of the guesses and this hook would exit 0 forever
+# without ever saying it had stopped working.
+trunk=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+base=''
+for ref in "$trunk" origin/main main origin/master master; do
+  [ -n "$ref" ] || continue
+  base=$(git merge-base HEAD "$ref" 2>/dev/null) && [ -n "$base" ] && break
+  base=''
+done
+# No trunk to compare against — nothing meaningful to say.
 [ -n "$base" ] || exit 0
 
 changed=$(
   git diff --name-only "$base" HEAD 2>/dev/null
   git diff --name-only 2>/dev/null
   git diff --cached --name-only 2>/dev/null
+  # Untracked files count. A brand-new ADR or an as-built record is untracked
+  # until someone runs `git add`, and that is the single most common way rule 3
+  # gets satisfied — without this the hook nags precisely the person who did
+  # write the document.
+  git ls-files --others --exclude-standard 2>/dev/null
 )
 [ -n "$changed" ] || exit 0
 

@@ -54,18 +54,35 @@ id=$(printf '%s' "$id" | tr '[:lower:]' '[:upper:]')
 command -v specd >/dev/null 2>&1 || exit 0
 
 # `specd spec status` is an HTTP round trip and Write/Edit fire constantly, so
-# cache the approved verdict briefly. Only the *allow* is cached: a block is
-# re-checked every time, so approving a spec unblocks the next edit rather than
-# leaving someone waiting out a TTL for work they were just cleared to do.
+# every verdict except the block is cached for a minute.
+#
+# Caching the *failures* matters as much as caching the pass. When the API host
+# resolves but drops packets — VPN off, proxy in the way — the client waits out
+# its 30-second timeout, and uncached that is 30 seconds added to every Write
+# and every Edit, silently, because this hook exits 0 and prints nothing. A
+# twenty-edit task becomes ten minutes of unexplained dead air, which is the
+# same "hook people uninstall" outcome as blocking wrongly, reached by a
+# quieter road.
+#
+# Only exit 3 stays uncached: approving a spec has to unblock the next edit,
+# not leave someone waiting out a TTL for work they were just cleared to do.
 cache_dir="${TMPDIR:-/tmp}/specd-gate-$(id -u 2>/dev/null || echo 0)"
 cache_key=$(printf '%s|%s' "$(git rev-parse --show-toplevel 2>/dev/null)" "$branch" |
-  cksum | cut -d' ' -f1)
+  cksum 2>/dev/null | cut -d' ' -f1)
 cache_file="$cache_dir/$cache_key"
 if [ -n "${cache_key:-}" ] && find "$cache_file" -mmin -1 2>/dev/null | grep -q .; then
   exit 0
 fi
 
-specd spec status "$id" >/dev/null 2>&1
+# Bound the wait where the tool exists. An editor hook has no business holding
+# a keystroke for the client's full network timeout.
+if command -v timeout >/dev/null 2>&1; then
+  timeout 5 specd spec status "$id" >/dev/null 2>&1
+elif command -v gtimeout >/dev/null 2>&1; then
+  gtimeout 5 specd spec status "$id" >/dev/null 2>&1
+else
+  specd spec status "$id" >/dev/null 2>&1
+fi
 code=$?
 
 if [ "$code" -eq 3 ]; then
@@ -83,8 +100,8 @@ EOF
 fi
 
 # Approved, or something we could not determine — either way, let the edit
-# through. Only the positive verdict is worth remembering.
-if [ "$code" -eq 0 ] && [ -n "${cache_key:-}" ]; then
+# through, and remember it so the next keystroke does not re-pay the round trip.
+if [ -n "${cache_key:-}" ]; then
   mkdir -p "$cache_dir" 2>/dev/null && : >"$cache_file" 2>/dev/null
 fi
 exit 0

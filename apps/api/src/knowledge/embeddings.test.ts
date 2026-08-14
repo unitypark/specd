@@ -3,6 +3,7 @@ import type { Config } from '../config.js';
 import {
   EmbeddingService,
   HashEmbeddingProvider,
+  OpenAiCompatibleEmbeddingProvider,
   VoyageEmbeddingProvider,
 } from './embeddings.js';
 
@@ -115,5 +116,123 @@ describe('voyage provider', () => {
     const bodies = stubFetch();
     await new EmbeddingService(configWith('voyage', 'vk-test')).embedQuery('how does auth work');
     expect(bodies[0]?.input_type).toBe('query');
+  });
+});
+
+describe('an OpenAI-compatible endpoint', () => {
+  const serve = (handler: (body: unknown) => { status?: number; json?: unknown; text?: string }) => {
+    const calls: { url: string; headers: Record<string, string>; body: unknown }[] = [];
+    const fetchMock = async (url: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      calls.push({
+        url: String(url),
+        headers: (init?.headers ?? {}) as Record<string, string>,
+        body,
+      });
+      const res = handler(body);
+      return {
+        ok: (res.status ?? 200) < 400,
+        status: res.status ?? 200,
+        json: async () => res.json,
+        text: async () => res.text ?? '',
+      } as Response;
+    };
+    return { calls, fetchMock };
+  };
+
+  const vectors = (dim: number) => (body: unknown) => ({
+    json: {
+      data: (body as { input: string[] }).input.map((_, index) => ({
+        index,
+        embedding: Array.from({ length: dim }, (_, i) => (i === 0 ? 1 : 0)),
+      })),
+    },
+  });
+
+  it('posts to /embeddings on the configured base url', async () => {
+    const { calls, fetchMock } = serve(vectors(1024));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new OpenAiCompatibleEmbeddingProvider(
+      'http://localhost:11434/v1/',
+      'nomic-embed-text',
+      '',
+    );
+    await provider.embed(['hello']);
+    // The trailing slash in the configured url must not produce a double one.
+    expect(calls[0]!.url).toBe('http://localhost:11434/v1/embeddings');
+    expect(calls[0]!.body).toMatchObject({ model: 'nomic-embed-text' });
+    vi.unstubAllGlobals();
+  });
+
+  it('sends no Authorization header when there is no key', async () => {
+    // A local server usually needs none, and an empty bearer token makes some
+    // of them reject the request outright.
+    const { calls, fetchMock } = serve(vectors(1024));
+    vi.stubGlobal('fetch', fetchMock);
+    await new OpenAiCompatibleEmbeddingProvider('http://localhost:11434/v1', 'm', '').embed(['x']);
+    expect(calls[0]!.headers.Authorization).toBeUndefined();
+
+    await new OpenAiCompatibleEmbeddingProvider('http://localhost:11434/v1', 'm', 'k').embed(['x']);
+    expect(calls[1]!.headers.Authorization).toBe('Bearer k');
+    vi.unstubAllGlobals();
+  });
+
+  it('refuses a model whose vectors do not fit the index, and says which', async () => {
+    // pgvector columns are fixed-width, so a mismatch otherwise fails on
+    // insert — mid-run, after the slow half of indexing is already done.
+    const { fetchMock } = serve(vectors(768));
+    vi.stubGlobal('fetch', fetchMock);
+    // nomic-embed-text is 768: the obvious first choice, and the wrong one.
+    const provider = new OpenAiCompatibleEmbeddingProvider(
+      'http://localhost:11434/v1',
+      'nomic-embed-text',
+      '',
+    );
+    await expect(provider.assertUsable()).rejects.toThrow(/768-dimension/);
+    await expect(provider.assertUsable()).rejects.toThrow(/nomic-embed-text/);
+    vi.unstubAllGlobals();
+  });
+
+  it('accepts a model that fits', async () => {
+    const { fetchMock } = serve(vectors(1024));
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new OpenAiCompatibleEmbeddingProvider('http://localhost:11434/v1', 'm', '');
+    await expect(provider.assertUsable()).resolves.toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it('reports the endpoint failing rather than returning empty vectors', async () => {
+    // Silently degrading here would leave every chunk holding a wrong vector,
+    // with retrieval still "working" and nothing logged.
+    const { fetchMock } = serve(() => ({ status: 500, text: 'model not found' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      new OpenAiCompatibleEmbeddingProvider('http://localhost:11434/v1', 'm', '').embed(['x']),
+    ).rejects.toThrow(/failed \(500\).*model not found/s);
+    vi.unstubAllGlobals();
+  });
+
+  it('gives the index a different fingerprint from the hash embedder', () => {
+    // Two indexes built with different embedders hold vectors from different
+    // spaces; the fingerprint is what forces a re-embed instead of mixing them.
+    const local = new EmbeddingService({
+      embeddingProvider: 'openai',
+      embeddingBaseUrl: 'http://localhost:11434/v1',
+      embeddingModel: 'mxbai-embed-large',
+      embeddingApiKey: '',
+    } as unknown as Config);
+    const hash = new EmbeddingService({ embeddingProvider: 'hash' } as unknown as Config);
+    expect(local.fingerprint).not.toBe(hash.fingerprint);
+    expect(local.name).toBe('openai-compatible');
+  });
+
+  it('refuses to start with no endpoint configured', () => {
+    expect(
+      () =>
+        new EmbeddingService({
+          embeddingProvider: 'openai',
+          embeddingBaseUrl: '',
+        } as unknown as Config),
+    ).toThrow(/SPECD_EMBEDDING_BASE_URL/);
   });
 });

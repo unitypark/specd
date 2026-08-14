@@ -5,6 +5,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { Config } from './config.js';
+import { EmbeddingService } from './knowledge/embeddings.js';
 
 /**
  * Load the monorepo-root `.env` before `Config` reads `process.env` — `pnpm
@@ -41,6 +42,12 @@ async function bootstrap(): Promise<void> {
     }),
   );
   app.enableShutdownHooks();
+
+  // Settle the embedder before serving. A model whose vectors do not fit the
+  // pgvector column otherwise fails on insert, halfway through the first index
+  // run, after the slow part is already done — and the error there names a
+  // column, not the model anyone would need to change.
+  await app.get(EmbeddingService).assertUsable();
 
   await app.listen(config.port);
 

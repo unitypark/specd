@@ -90,7 +90,13 @@ export function AppShell({
         <Link href="/projects" className="applogo">
           {/* currentColor: the mark inherits .applogo's ink, no tinting. */}
           <Logo size={20} />
-          spec<i>d</i>
+          {/* The word is one flex item, not two. Left bare, `spec` and
+              `<i>d</i>` are separate children of an inline-flex box, so its
+              0.45rem gap — meant for the space between the mark and the
+              word — landed inside the word as well and spelled "spec d". */}
+          <span>
+            spec<i>d</i>
+          </span>
         </Link>
         {crumb && <span className="crumb">{crumb}</span>}
         {pills}

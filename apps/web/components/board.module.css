@@ -26,8 +26,13 @@
    * scrolling inside instead. The subtraction is the shell's chrome above (top
    * bar, body padding, project tabs) plus its 4rem page padding below, so the
    * cap lands at the fold rather than pushing the window into a scroll.
+   *
+   * Whatever the page stacks between the tabs and the board declares its own
+   * height in --board-offset (the project page's summary strip does), so the
+   * cap keeps landing on the fold instead of hanging below it by exactly the
+   * height of the thing that was added.
    */
-  max-height: calc(100vh - 12rem);
+  max-height: calc(100vh - 12rem - var(--board-offset, 0px));
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;

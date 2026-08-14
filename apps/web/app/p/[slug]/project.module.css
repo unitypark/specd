@@ -23,55 +23,89 @@
   border-bottom-color: var(--accent);
 }
 
-/* The page runs wide for the board's sake; four stat tiles stretched across
-   all of it become billboards. Held at the measure they had before. */
-.kpis {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 0.8rem;
-  margin-bottom: 1.2rem;
-  max-width: 72rem;
-}
-.kpi {
+/*
+ * The project's numbers, on one line above the board.
+ *
+ * They were four tiles and a meter card on a tab of their own; stacked above
+ * a board they would have cost most of a screen and pushed the lanes under
+ * the fold, which is the opposite of what merging the two was for. Held to a
+ * single row so the board still opens at full height — the labels do the work
+ * the tiles used to do, at a size that reads as furniture rather than as the
+ * page's subject.
+ */
+.summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  padding: 0.9rem 1rem;
+  padding: 0.6rem 0.95rem;
+  margin-bottom: 0.85rem;
+}
+/*
+ * The board sizes itself against the viewport, so anything stacked above it
+ * has to declare its own height or the lanes hang past the fold by exactly
+ * that much. This is .summary's row: 1.15rem of content, 1.2rem of padding,
+ * its border and its margin.
+ */
+.boardtab {
+  --board-offset: 3.4rem;
+}
+
+.stat {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
 }
 .v {
-  font: 600 1.7rem/1 var(--serif);
+  font: 600 1.15rem/1 var(--serif);
   color: var(--ink);
 }
 .l {
-  font: 500 0.868rem/1.4 var(--mono);
+  font: 500 0.83rem/1 var(--mono);
   letter-spacing: 0.06em;
   color: var(--ink-3);
-  margin-top: 0.35rem;
 }
 
+/* Pushed to the far end: it is the one number that is a limit rather than a
+   count, and reading it next to "knowledge health" invited adding them up. */
 .spend {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
-  padding: 1rem 1.1rem;
-  max-width: 30rem;
-}
-.spendhead {
   display: flex;
-  justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 0.5rem;
+  gap: 0.4rem;
+  margin-left: auto;
 }
 .amt {
-  font: 600 1.3rem/1 var(--serif);
+  font: 600 1.15rem/1 var(--serif);
+  color: var(--ink);
 }
 .cap {
-  font: 500 0.862rem/1 var(--mono);
+  font: 500 0.83rem/1 var(--mono);
   color: var(--ink-3);
 }
-.spendnote {
-  font-size: 0.902rem;
-  color: var(--ink-3);
-  margin: 0.6rem 0 0;
-  line-height: 1.6;
+.spendmeter {
+  flex: none;
+  width: 5.5rem;
+  /* The meter is a bar, not a letter — baseline alignment would hang it off
+     the text's baseline instead of sitting it in the middle of the row. */
+  align-self: center;
+  margin-left: 0.15rem;
+}
+
+/*
+ * Narrow enough that the five groups no longer fit on one line. Two changes,
+ * and they go together: the spend stops being pushed to the far end (pinned
+ * right on a line of its own, it reads as a stray second row rather than the
+ * end of the first), and the strip declares the taller height it now has, so
+ * the board below still stops at the fold instead of overshooting it by a row.
+ */
+@media (max-width: 1000px) {
+  .spend {
+    margin-left: 0;
+  }
+  .boardtab {
+    --board-offset: 5.1rem;
+  }
 }

@@ -309,6 +309,17 @@
 }
 
 .cta {
+  /*
+   * Centred by the box, not by the text. Both buttons sit in flex rows that
+   * stretch them — the hero's .ctas, a pricing card's column — and a plain
+   * anchor stretched taller or wider than its label leaves that label pinned
+   * to the top-left of the box it is supposedly inside. (`inline-flex`
+   * blockifies to `flex` when it is itself a flex item, so the pricing card's
+   * full-width button stays full-width.)
+   */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font: 750 0.95rem/1 var(--sans);
   padding: 0.72rem 1.3rem;
   border-radius: 6px;
@@ -329,6 +340,12 @@
   text-decoration: none;
 }
 .ghost {
+  /* Same reason as .cta above, and this is the one it actually showed on:
+     the hero pairs a 0.74rem ghost with a 0.95rem primary, so the ghost is
+     stretched a good 0.5rem taller than its own label needs. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font: 650 0.74rem/1 var(--sans);
   padding: 0.55rem 1rem;
   border-radius: 6px;

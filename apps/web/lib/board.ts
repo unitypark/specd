@@ -44,20 +44,6 @@ export const COLUMN_STATUS: Record<string, SpecStatus | null> = {
   done: 'delivered',
 };
 
-/**
- * What each lane is waiting for, shown when the lane is empty. A dash tells a
- * reader nothing; "nothing waiting on a reviewer" tells them the queue is
- * clear, which is the actual news.
- */
-export const COLUMN_EMPTY: Record<string, string> = {
-  backlog: 'No tickets yet. Add the business ask in plain language.',
-  draft: 'No drafts. Generate a spec from a backlog ticket.',
-  review: 'Nothing waiting on a reviewer.',
-  approved: 'Nothing stamped and ready to build.',
-  building: 'No builds in flight.',
-  done: 'Nothing delivered yet.',
-};
-
 export interface DroppableCard {
   key: string;
   spec: { status: string } | null;

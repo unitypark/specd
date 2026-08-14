@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COLUMN_EMPTY,
   COLUMN_STATUS,
   NO_FILTERS,
   UNASSIGNED,
@@ -123,10 +122,6 @@ describe('dropCheck', () => {
     // column" at runtime — a silent dead column rather than a loud failure.
     expect(Object.keys(COLUMN_STATUS).sort()).toEqual([...COLUMNS].sort());
     expect(COLUMN_STATUS.backlog).toBeNull();
-  });
-
-  it('gives every column something to say when it is empty', () => {
-    expect(Object.keys(COLUMN_EMPTY).sort()).toEqual([...COLUMNS].sort());
   });
 });
 

@@ -141,6 +141,25 @@ Resolution states: `resolved`, `unresolved`, `dangling_anchor`. Producer tiers: 
 
 <!-- /generated:graph-vocabulary -->
 
+### The index-run digest
+
+Every index run writes one row to `knowledge_index_runs` describing what it
+changed: docs added, changed, removed and re-linked, links resolved and broken,
+and the health score before and after. It is written **inside the run's own
+transaction**, so a run that rolls back — the shrink guard refusing a listing
+that would gut the index, say — leaves no digest claiming work that never
+landed.
+
+Every number was already computed by the run and then discarded. The question
+it answers is the one a reviewer asks after a merge and previously could not:
+not *how healthy is the knowledge base* but *what did that change in it*.
+
+`healthBefore` is null on a project's first run and must render as unmeasured
+rather than as zero — 0 would read as a collapse from a perfect score, which is
+the same distinction `freshness` already draws. The table is capped at the most
+recent 100 runs per project: it is written on every merge, and the durable
+history is git and `knowledge/specs/`.
+
 ### Precedents
 
 `KnowledgeService.findPrecedents()` is a second lookup over the same chunks,

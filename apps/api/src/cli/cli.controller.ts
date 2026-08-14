@@ -29,6 +29,8 @@ class SearchDto {
 
 class DocPathDto {
   @IsString() @MinLength(1) path!: string;
+  /** Optional: the same path exists once per repository in a multi-repo project. */
+  @IsOptional() @IsString() repo?: string;
 }
 
 class CitationDto {
@@ -163,18 +165,22 @@ export class CliController {
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user);
-    const doc = await this.knowledge.getDocByPath(project.id, dto.path);
+    const doc = await this.knowledge.getDocByPath(project.id, dto.path, dto.repo);
     if (!doc) throw new NotFoundException(`No indexed knowledge doc at "${dto.path}"`);
     const links = await this.knowledge.docLinks(project.id, doc.id);
     return {
       path: doc.path,
+      // Which repository this came from. A path does not identify a document
+      // in a multi-repo project, and a caller that searched, saw one repo and
+      // then fetched by path deserves to be told when it got another.
+      repoName: doc.repo_name,
       kind: doc.kind,
       title: doc.title,
       content: doc.content,
-      hasUnverified: doc.hasUnverified,
-      isStub: doc.isStub,
-      docUpdatedAt: doc.docUpdatedAt,
-      indexedAt: doc.indexedAt,
+      hasUnverified: doc.has_unverified,
+      isStub: doc.is_stub,
+      docUpdatedAt: doc.doc_updated_at,
+      indexedAt: doc.indexed_at,
       ...links,
     };
   }

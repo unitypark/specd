@@ -63,8 +63,10 @@ type rpcResponse struct {
 
 // JSON-RPC reserves -32601 for an unknown method and -32602 for bad params.
 const (
+	rpcInvalidRequest = -32600
 	rpcMethodNotFound = -32601
 	rpcInvalidParams  = -32602
+	rpcInternalError  = -32603
 )
 
 // isNotification reports whether a request wants no reply. A notification has
@@ -122,7 +124,7 @@ var mcpTools = []mcpTool{
 			"query": str("What you want to know, in words. Natural language beats keywords."),
 			"limit": map[string]any{
 				"type":        "integer",
-				"description": "How many passages to return (1-30, default 12).",
+				"description": "How many ranked passages to retrieve (1-30, default 12). A few more may follow them: linked documents and referenced source code are appended on top.",
 				"minimum":     1,
 				"maximum":     30,
 			},
@@ -490,6 +492,16 @@ type mcpServer struct {
 // handle answers one request. It returns nil for a notification, which is the
 // caller's signal to write nothing at all.
 func (s *mcpServer) handle(req rpcRequest) *rpcResponse {
+	// A notification carries no id and must draw no reply — for ANY method, not
+	// only ones we do not implement. JSON-RPC lets a client send `ping` or any
+	// other method as a notification, and answering one with a null-id response
+	// is the unsolicited reply that makes some clients hang up. This has to sit
+	// above the switch: every case below returns unconditionally, so a check
+	// after them only ever guards the methods that fell through.
+	if req.isNotification() {
+		return nil
+	}
+
 	reply := func(result any) *rpcResponse {
 		return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: result}
 	}
@@ -576,7 +588,10 @@ func (s *mcpServer) handle(req rpcRequest) *rpcResponse {
 		}
 		text, err := resource.read(s)
 		if err != nil {
-			return fail(rpcInvalidParams, err.Error())
+			// The uri was fine; reaching the server was not. Reporting this as
+			// invalid params sends the model hunting an argument bug that does
+			// not exist.
+			return fail(rpcInternalError, err.Error())
 		}
 		return reply(map[string]any{
 			"contents": []map[string]any{
@@ -585,11 +600,6 @@ func (s *mcpServer) handle(req rpcRequest) *rpcResponse {
 		})
 	}
 
-	if req.isNotification() {
-		// notifications/initialized and friends: nothing to say, and saying
-		// anything would be a protocol violation.
-		return nil
-	}
 	return fail(rpcMethodNotFound, fmt.Sprintf("unknown method %q", req.Method))
 }
 
@@ -603,10 +613,25 @@ func (s *mcpServer) serve(in io.Reader) error {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
-			// A malformed frame is not recoverable mid-stream: the decoder's
-			// position is unknown. Report and stop, rather than emitting
-			// nonsense onto a stream the client is still parsing.
-			return fmt.Errorf("malformed JSON-RPC on stdin: %w", err)
+			// A *syntax* error leaves the decoder at an unknown position, so
+			// there is nothing safe to do but stop. A value-level mismatch is
+			// different: the decoder consumed a complete, well-formed JSON
+			// value and only failed to fit it into our struct. Killing the
+			// session there would end it over a single frame we are positioned
+			// to answer — a client on the MCP revision that required JSON-RPC
+			// batching opens with an array, and that must not be fatal.
+			var syntaxErr *json.SyntaxError
+			if errors.As(err, &syntaxErr) {
+				return fmt.Errorf("malformed JSON-RPC on stdin: %w", err)
+			}
+			if err := s.out.Encode(&rpcResponse{
+				JSONRPC: "2.0",
+				ID:      json.RawMessage("null"),
+				Error:   &rpcError{Code: rpcInvalidRequest, Message: err.Error()},
+			}); err != nil {
+				return err
+			}
+			continue
 		}
 		res := s.handle(req)
 		if res == nil {

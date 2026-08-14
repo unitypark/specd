@@ -86,10 +86,35 @@ even when asked directly, rather than that it missed the top-k of a broader
 query. Both remain "could not check", which is the distinction the four-verdict
 design exists to protect.
 
+`get_doc` takes a path, which is what an agent holds — but `knowledge_docs` is
+unique on `(repository_id, path)` and onboarding scaffolds identical filenames
+into every repo it grounds, so a path alone does not identify a document. The
+lookup orders primary-repo-first for a stable answer, accepts an optional repo
+name, and reports which repository answered.
+
 `cli/cmd/specd/mcp_test.go` is the first HTTP test in this repository —
 `api.New()` already takes an arbitrary base URL, so `httptest` needed no
 production change. The alternative was leaving the gate's behaviour over MCP
 unverified, which is not a trade worth making for consistency with an absence.
+
+Two consequences found in review, both recorded rather than designed around.
+
+`verify_citation` must never answer `unsupported` for a path that exists.
+Retrieval serves source code as citable excerpts, but `coverageFor` builds its
+`knownPaths` from `knowledge_docs` alone — so an agent citing exactly what
+`search_knowledge` handed it could be told "checked and wrong. Do not cite
+this" about a file that is really indexed. Inside a spec draft this could not
+happen, because coverage and chunks come from one retrieval and a code citation
+always matches an excerpt exactly; checking one on demand has no such
+guarantee. The verdict now falls to `unknown` when the path is indexed source
+code, which is what the fourth verdict is for.
+
+`search_knowledge` and `verify_citation` both embed their query, and an agent
+loop is the intended caller. With the default lexical embedder that is free and
+local. With `SPECD_EMBEDDING_PROVIDER=voyage` it is a paid API call per
+request, unrated and unmetered — `@Max(30)` bounds one response, not the
+request rate. No limit is imposed here; the exposure is named so that whoever
+configures a paid embedder knows what they have opened.
 
 The knowledge routes are on `CliController` rather than a knowledge controller
 because `@CliAllowed` is what makes them reachable, and moving them elsewhere

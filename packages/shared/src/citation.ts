@@ -2,18 +2,16 @@ import { citationRef, type CitationCoverage, type RetrievedChunk } from './types
 import type { CitationVerdict } from './spec.js';
 
 /**
- * Citation checking lives here, beside `renderAsBuiltMarkdown`, for the same
- * reason: more than one caller has to produce the same answer.
- *
- * The SpecAgent judges a claim's citation while it normalizes a draft. The
- * read surface judges one on demand, for an agent asking "does this still
- * hold?" before it relies on a document. If those two ever disagreed, the
- * verdict would mean nothing — a claim could be `supported` in the spec and
- * `unsupported` the moment anyone checked it. One function, one answer.
- */
-/**
  * Check one citation against what was retrieved, and against what could have
  * been retrieved.
+ *
+ * This lives beside `renderAsBuiltMarkdown` for the same reason that does:
+ * more than one caller has to produce the same answer. The SpecAgent judges a
+ * claim's citation while it normalizes a draft; the read surface judges one on
+ * demand, for an agent asking "does this still hold?" before relying on a
+ * document. If those two disagreed the verdict would mean nothing — a claim
+ * could be `supported` in the spec and `unsupported` the moment anyone checked
+ * it. One function, one answer.
  *
  * The three-way split is the point. A binary check can only ask "was this in
  * the prompt", so a real doc that simply did not make the top-k is reported

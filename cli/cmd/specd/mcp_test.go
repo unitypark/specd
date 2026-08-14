@@ -72,11 +72,56 @@ func TestInitializeAnnouncesToolsAndResources(t *testing.T) {
 // every session rather than an unlucky one.
 func TestNotificationsGetNoReply(t *testing.T) {
 	s, _ := newTestServer(t, nil)
-	for _, id := range []json.RawMessage{nil, json.RawMessage(`null`)} {
-		req := rpcRequest{JSONRPC: "2.0", ID: id, Method: "notifications/initialized"}
-		if res := s.handle(req); res != nil {
-			t.Fatalf("notification with id %q drew a reply: %+v", string(id), res)
+	// `notifications/initialized` is an unknown method, so it would pass even
+	// if the guard only caught fallthrough. `ping` and `initialize` are
+	// handled cases that return unconditionally, and JSON-RPC lets a client
+	// send any method as a notification — those are what this has to cover.
+	for _, method := range []string{"notifications/initialized", "ping", "initialize"} {
+		for _, id := range []json.RawMessage{nil, json.RawMessage(`null`)} {
+			req := rpcRequest{JSONRPC: "2.0", ID: id, Method: method}
+			if res := s.handle(req); res != nil {
+				t.Fatalf("%s as a notification drew a reply: %+v", method, res)
+			}
 		}
+	}
+}
+
+// A frame we cannot fit into a request is answered and stepped over. Ending
+// the session there would drop a client over one frame — the MCP revision that
+// required JSON-RPC batching opens with an array.
+func TestAnUndecodableFrameDoesNotEndTheSession(t *testing.T) {
+	s, out := newTestServer(t, nil)
+	in := strings.Join([]string{
+		`[{"jsonrpc":"2.0","id":1,"method":"ping"}]`,
+		`{"jsonrpc":"2.0","id":2,"method":"ping"}`,
+	}, "\n")
+	if err := s.serve(strings.NewReader(in)); err != nil {
+		t.Fatalf("serve gave up on a recoverable frame: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrote %d frames, want 2 (a refusal, then the answer):\n%s", len(lines), out.String())
+	}
+	var refusal rpcResponse
+	if err := json.Unmarshal([]byte(lines[0]), &refusal); err != nil {
+		t.Fatalf("refusal is not JSON-RPC: %q", lines[0])
+	}
+	if refusal.Error == nil || refusal.Error.Code != rpcInvalidRequest {
+		t.Fatalf("want an invalid-request error, got %+v", refusal.Error)
+	}
+	// And the frame after it was still served.
+	if !strings.Contains(lines[1], `"id":2`) {
+		t.Fatalf("the next request was not answered: %q", lines[1])
+	}
+}
+
+// Truly malformed JSON is different: the decoder's position is unknown, so
+// there is nothing safe left to read.
+func TestASyntaxErrorStopsTheSession(t *testing.T) {
+	s, _ := newTestServer(t, nil)
+	if err := s.serve(strings.NewReader(`{"jsonrpc":"2.0",,,`)); err == nil {
+		t.Fatal("want an error for unparseable input")
 	}
 }
 

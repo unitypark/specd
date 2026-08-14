@@ -18,8 +18,31 @@
 7. The final task of every spec: commit the as-built spec to
    knowledge/specs/<id>-<slug>.md in this repo's PR.
 
+## When the knowledge base does not answer you
+8. Do not invent the answer. Check knowledge/open-questions.md; if it is
+   listed there, say so in the PR or spec and ask a human. An UNVERIFIED
+   marker is a question, never a licence to fill it in from guesswork.
+9. If you learn the answer while implementing, write it into the doc it
+   belongs in and delete the open question — in the same PR (rule 3).
+
+## Ask the knowledge base, do not re-derive it
+10. Where specd's knowledge tools are available, query them before reading
+    the tree: they answer with the passage AND the string to cite it by,
+    already checked. Grepping gets you the text and none of the evidence.
+
 ## This repo
 - Name: unitypark/specd  (primary — cross-repo specs land here)
 - Stack: JavaScript · pnpm · Vitest          [detected]
 - Verify before PR: pnpm typecheck && pnpm test           [detected]
 - Conventions: knowledge/conventions.md              [generated draft]
+
+## Wiring the knowledge tools (rule 10)
+Point any MCP-capable editor at specd. It serves this project's knowledge
+base and its approved specs, and it is read-only — approval stays a
+signed-in human in the app.
+
+    { "mcpServers": { "specd": { "command": "specd", "args": ["mcp", "serve"] } } }
+
+Needs the specd CLI on your PATH and `specd login` once per machine.
+Tools: search_knowledge · get_doc · verify_citation · knowledge_health ·
+spec_status · spec_pull · list_specs

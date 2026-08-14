@@ -60,7 +60,7 @@ describe('gallery entries', () => {
 describe('galleryPack', () => {
   const nest = galleryPack(galleryEntry('nestjs')!);
 
-  it('renders the seven working agreements, not a paraphrase of them', () => {
+  it('renders the working agreements, not a paraphrase of them', () => {
     // These are the rules the whole product exists to install. A gallery that
     // showed a prettier version of them would be advertising something else.
     expect(nest.agentsMd).toContain('Knowledge first — no exceptions');

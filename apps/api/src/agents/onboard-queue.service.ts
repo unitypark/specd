@@ -189,13 +189,13 @@ export class OnboardQueueService implements OnModuleInit, OnModuleDestroy {
   private async execute(run: ClaimedRun): Promise<void> {
     if (run.wasStale) {
       // Deliberately not restarted, which is where this parts company with the
-      // index worker. Grounding ends in `adapter.propose()`: it force-resets
-      // the fixed `specd/setup` branch and then POSTs a pull request with no
-      // handling for one that is already open (unlike `openPullRequest`, which
-      // the build station needs to be re-runnable). So an executor that died
-      // after proposing would, on restart, pay for a second model call and
-      // then fail at the PR. Failing the run says what happened and leaves the
-      // repository free for a human to ground again.
+      // index worker. Restarting is no longer *fatal* — `adapter.propose()`
+      // force-resets the fixed `specd/setup` branch and updates the pull
+      // request already open for it rather than dying on GitHub's 422 — but it
+      // is not free either: a second repository read, a second model call, and
+      // a branch someone may be part-way through reviewing gets moved under
+      // them. Failing the run says what happened and leaves the repository free
+      // for a human to ground again, which is whose spend it is.
       await this.fail(
         run.id,
         'the previous attempt stopped without finishing — onboarding is not resumed ' +

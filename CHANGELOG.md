@@ -13,6 +13,26 @@ argument.
 ## [Unreleased]
 
 ### Added
+- **The knowledge engine answers over MCP** — `specd mcp serve`, seven tools and
+  three resources, read-only by construction (#95,
+  `knowledge/decisions/0017-the-engine-answers-over-mcp.md`).
+- **A Claude Code plugin** — three skills and two hooks that enforce the working
+  agreements instead of asking for them (#94,
+  `knowledge/decisions/0018-working-agreements-ship-as-a-plugin.md`), wired into
+  every repo Ground touches (#96).
+- **Precedents** — delivered specs and ADRs answer new tickets before drafting
+  starts (#97).
+- **Index-run digests** — every run records what it changed in what the project
+  knows (#101).
+- **Citations re-checked at build time**, advisory (#102), and refusable per
+  project through house rules whose overrides are recorded with a named human
+  and a reason (#103).
+- **`specd doctor`** — one command that says what is wrong, in the order you
+  would fix it (#104).
+- **A local embedding provider** — any OpenAI-compatible endpoint, so the
+  retrieval ceiling comes off without a cloud key (#105).
+- **`pnpm demo`** — a clean clone to a running, seeded specd in one command
+  (#107).
 - Grounding runs are queued rows claimed by a worker, and an abandoned run is
   failed rather than replayed (#98, `knowledge/decisions/0016-onboarding-runs-are-queued.md`).
 - Onboarding reads the repository before it drafts: commands, CI pipelines,

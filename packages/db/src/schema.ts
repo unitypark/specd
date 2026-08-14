@@ -59,6 +59,14 @@ export const projects = pgTable(
     /** Kill switch per project (§12). */
     agentsPaused: boolean('agents_paused').notNull().default(false),
     /**
+     * House rules on the gate. NULL is "no rule", never "zero" — a project
+     * that never set a floor must not suddenly be held to one, and 0 is a
+     * value someone might legitimately choose.
+     */
+    policyMaxUnverified: integer('policy_max_unverified'),
+    policyMinHealth: real('policy_min_health'),
+    policyBlockOnDrift: boolean('policy_block_on_drift').notNull().default(false),
+    /**
      * NULL = wizard draft: the row exists because connections and repos hang
      * off it, but setup never finished. The dashboard offers resume/discard
      * for these instead of listing them as real projects.
@@ -553,6 +561,37 @@ export const knowledgeDocCoupling = pgTable(
  * digest claiming work that never landed. `healthBefore` is null on a
  * project's first run: there was no before, and 0 would read as a collapse.
  */
+/**
+ * Every time a gate policy was set aside, and by whom.
+ *
+ * This is the half that makes policy worth having. A rule with no way past it
+ * gets switched off the first time it is wrong; a rule with a *silent* way past
+ * it is decoration. So an exception is a record: a named human, a reason they
+ * typed, and the rule they overrode — attributed by a database constraint, the
+ * same way an approved spec is.
+ */
+export const policyExceptions = pgTable(
+  'policy_exceptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    specId: uuid('spec_id').references(() => specs.id, { onDelete: 'set null' }),
+    runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    ticketKey: text('ticket_key').notNull(),
+    policy: text('policy').notNull(),
+    detail: text('detail').notNull(),
+    approvedByUserId: uuid('approved_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    approvedByName: text('approved_by_name').notNull(),
+    justification: text('justification').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('policy_exceptions_project_idx').on(t.projectId, t.createdAt)],
+);
+
 export const knowledgeIndexRuns = pgTable(
   'knowledge_index_runs',
   {

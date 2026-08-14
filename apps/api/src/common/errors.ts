@@ -105,3 +105,29 @@ export class AiNotConfigured extends HttpException {
     );
   }
 }
+
+/**
+ * A house rule on the gate refused this build.
+ *
+ * Distinct from `SpecNotApproved`, and the distinction matters at the point of
+ * use: that one means no human has stamped this, which nothing but a human can
+ * change. This one means a human stamped it and the project's own rule says it
+ * is still not ready — which the same human can override, on the record, by
+ * saying why. The message names the override rather than leaving someone to
+ * guess whether they are stuck.
+ */
+export class PolicyRefusedBuild extends HttpException {
+  constructor(policy: string, detail: string) {
+    super(
+      {
+        error: 'policy_refused_build',
+        message:
+          `${detail} This project's policy refuses the build. An owner or maintainer can ` +
+          'proceed anyway by recording a justification — the override is kept with the run.',
+        policy,
+        detail,
+      },
+      HttpStatus.CONFLICT,
+    );
+  }
+}

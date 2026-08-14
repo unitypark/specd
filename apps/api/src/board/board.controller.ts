@@ -56,6 +56,15 @@ class CommentDto {
   @IsString() @MinLength(1) @MaxLength(5_000) body!: string;
 }
 
+class BuildDto {
+  /**
+   * Why this build should proceed despite a house rule refusing it. Owners and
+   * maintainers only — the same people who can already start a build — and it
+   * is recorded against the spec, never applied silently.
+   */
+  @IsOptional() @IsString() @MinLength(12) justification?: string;
+}
+
 @Controller('projects/:slug/board')
 export class BoardController {
   constructor(
@@ -191,6 +200,7 @@ export class BoardController {
   async build(
     @Param('slug') slug: string,
     @Param('specId', ParseUUIDPipe) specId: string,
+    @Body() dto: BuildDto,
     @CurrentUser() user: TokenClaims,
   ) {
     const project = await this.scope(slug, user, ['owner', 'maintainer']);
@@ -198,6 +208,9 @@ export class BoardController {
       projectId: project.id,
       specId,
       actor: { userId: user.sub, name: user.name },
+      // A typed justification is the only way past a house rule, and it is
+      // kept with the run. Nothing here can override the gate itself.
+      policyOverride: dto?.justification ? { justification: dto.justification } : undefined,
     });
   }
 

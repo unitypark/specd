@@ -160,6 +160,29 @@ the same distinction `freshness` already draws. The table is capped at the most
 recent 100 runs per project: it is written on every merge, and the durable
 history is git and `knowledge/specs/`.
 
+### House rules on the gate
+
+The gate itself is binary and stays that way: approved by a named human, or
+not. On top of it a project can set a floor — `policy_max_unverified`,
+`policy_min_health`, `policy_block_on_drift` — evaluated in the build path
+beside `assertCanRun`, which is where every other pre-run refusal already lives.
+
+Two properties keep it from becoming the thing everyone switches off:
+
+- **NULL is "no rule", never zero.** A project that never set a floor is not
+  silently held to one, and 0 is a value someone might legitimately choose.
+- **Every override is a record.** A rule with no way past it gets disabled the
+  first time it is wrong; a rule with a *silent* way past it is decoration. So
+  the way past is a named human and a typed justification, written to
+  `policy_exceptions` before the work starts and attributed by the
+  `policy_exception_is_attributed` constraint — the same device that makes an
+  approved spec impossible without an approver.
+
+`PolicyRefusedBuild` is deliberately a different refusal from
+`SpecNotApproved`. That one means no human has stamped this and nothing but a
+human can change it. This one means a human did stamp it and the project's own
+rule still says no — which the same human can override, on the record.
+
 ### Citations re-checked at build time
 
 The gate is re-checked at the point of use — approval can be revoked between

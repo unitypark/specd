@@ -395,3 +395,21 @@ func (c *Client) KnowledgeHealth(project string) (*KnowledgeHealth, error) {
 	out := &KnowledgeHealth{}
 	return out, c.getJSON(path, out)
 }
+
+// ─── health ──────────────────────────────────────────────────────────────────
+
+// Health is the server's unauthenticated self-report. `doctor` reads it before
+// asking about identity, because "the server is down" and "you are not logged
+// in" are different problems and only one of them is yours to fix.
+type Health struct {
+	Status       string `json:"status"`
+	Database     string `json:"database"`
+	AI           string `json:"ai"`
+	Embeddings   string `json:"embeddings"`
+	DefaultModel string `json:"defaultModel"`
+}
+
+func (c *Client) Health() (*Health, error) {
+	out := &Health{}
+	return out, c.getJSON("/health", out)
+}

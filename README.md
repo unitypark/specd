@@ -389,7 +389,7 @@ specd open CRM-131             # open the spec in the web app
 
 Run `specd` with no arguments at a TTY and you get an interactive shell — the
 same capabilities as slash commands, arguments prompted rather than remembered
-(`/help` lists all 16). Scripts and CI keep the plain behaviour. See
+(`/help` lists them). Scripts and CI keep the plain behaviour. See
 [`docs/cli-repl.md`](docs/cli-repl.md).
 
 The CLI fetches, registers and reports. It never authors, reviews or approves —
@@ -416,6 +416,25 @@ approved** — deliberately distinct, so a pipeline can gate on approval:
 | `SPECD_TOKEN` | token override — for CI |
 | `SPECD_WEB` | web origin, used by `specd open` |
 | `SPECD_RUNNER_TOKEN` | runner token override |
+
+### Checking the setup
+
+```bash
+specd doctor          # or --json, for CI
+```
+
+specd is several services at once — an API, Postgres with an extension, a vault
+key, a web app on another origin, an optional model provider, an optional
+embedder, an optional paired runner — and when it does not work the failure
+usually surfaces as whatever broke first rather than as the cause.
+
+`doctor` reports config, server, database, embeddings, AI credential, identity
+and default project in dependency order, and **skips what an earlier failure
+makes unknowable** rather than piling on: one broken thing reads as one broken
+thing. Optional configuration is reported as a note, never a fault — no
+platform key, no default project and the built-in embedder are all supported
+ways to run specd. The embedder note names the retrieval ceiling honestly and
+says how to lift it. Exit 4 means something needs fixing.
 
 ### Serving the knowledge base to an editor
 

@@ -1186,3 +1186,25 @@
   justify-content: center;
   margin-bottom: 1.6rem;
 }
+
+/* A feature that is designed but not built. It stays on the page — the plan is
+   real — and it stops reading as something you can use today. */
+.price li.planned {
+  color: var(--ink-3);
+}
+.price li.planned::before {
+  content: '○';
+  color: var(--ink-3);
+}
+.soon {
+  margin-left: 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.34rem;
+  vertical-align: 0.06rem;
+  white-space: nowrap;
+}

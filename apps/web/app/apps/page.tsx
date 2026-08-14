@@ -17,8 +17,8 @@ export default function Apps() {
           <span className="tag">APPS</span>
           <h1 className={styles.subh1}>One pipeline, three surfaces</h1>
           <p className={styles.lede}>
-            The web app is where the gate lives; the CLI feeds your agents; mobile puts the stamp
-            in your pocket — previewed below.
+            The web app is where the gate lives; the CLI feeds your agents. Mobile would put the
+            stamp in your pocket — it is designed below, and not built.
           </p>
 
           <div className={styles.surfaces}>
@@ -54,10 +54,10 @@ export default function Apps() {
 
             <div className={styles.surface} id="mobile">
               <h3>
-                Mobile <span className={styles.preview}>PREVIEW</span>
+                Mobile <span className={styles.preview}>NOT BUILT</span>
               </h3>
               <p className={styles.lede} style={{ marginBottom: '.8rem' }}>
-                The gate in your pocket. Out of scope for v0.1 — this preview measures demand.
+                The gate in your pocket. Nothing here exists yet: it is out of scope for v0.1, and this sketch is here to measure whether anyone wants it.
               </p>
               <ul className={styles.bullets}>
                 <li>push when a spec awaits your stamp</li>

@@ -417,6 +417,38 @@ approved** — deliberately distinct, so a pipeline can gate on approval:
 | `SPECD_WEB` | web origin, used by `specd open` |
 | `SPECD_RUNNER_TOKEN` | runner token override |
 
+### Serving the knowledge base to an editor
+
+`specd mcp serve` puts the retrieval engine behind MCP, so an agent working in
+Claude Code, Cursor, Windsurf or anything else that speaks the protocol can ask
+the knowledge base instead of grepping the repository.
+
+```json
+{
+  "mcpServers": {
+    "specd": { "command": "specd", "args": ["mcp", "serve"] }
+  }
+}
+```
+
+Seven tools — `search_knowledge`, `get_doc`, `verify_citation`,
+`knowledge_health`, `spec_status`, `spec_pull`, `list_specs` — and three
+resources for ambient state: `specd://knowledge/health`,
+`specd://specs/awaiting-review`, `specd://project/summary`.
+
+Search results carry the exact `CITE-AS` string a design claim should use, plus
+how each passage was found: a direct match, a graph expansion (with the edge
+that pulled it in), or source code a doc references. `verify_citation` returns
+the same four verdicts the SpecAgent uses — `supported`, `stale`, `unsupported`,
+`unknown` — from the same function, because a citation that is supported in a
+spec and unsupported when anyone checks it makes the verdict worthless.
+
+It is **read-only, by construction rather than by convention**: the server
+carries the same CLI-audience token as every other command, and the API refuses
+those tokens on every route that is not explicitly CLI-allowed. Approving a spec
+through it is not blocked — it is impossible. See
+[ADR 0017](knowledge/decisions/0017-the-engine-answers-over-mcp.md).
+
 ## Self-hosted runners
 
 Pair a machine (`specd runner pair <code>` — code from the project's Settings),

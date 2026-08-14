@@ -893,6 +893,47 @@ describe.skipIf(!reachable)('knowledge graph (integration)', () => {
     await service.indexRepository(repo);
   });
 
+  it('never calls indexed source code fabricated (0017)', async () => {
+    // Indexed as a code node, but no knowledge doc points at it — so graph
+    // expansion can never surface it, and it is never in `knownPaths`, which
+    // `coverageFor` builds from documents alone. That is the shape the
+    // on-demand check has to get right: `unsupported` is worded "checked and
+    // wrong" at the point of use, and this file is really there.
+    files.set(
+      'apps/api/src/billing/orphan.ts',
+      ['export class OrphanService {', '  async run(id: string) {', '    return id;', '  }', '}'].join('\n'),
+    );
+    await service.indexRepository(repo);
+
+    const verdict = await service.verifyCitation(
+      projectId,
+      'apps/api/src/billing/orphan.ts#OrphanService.run',
+    );
+    expect(verdict.verdict).toBe('unknown');
+    expect(verdict.note).toContain('indexed source code');
+
+    // A path that really is nowhere still gets the honest negative.
+    const invented = await service.verifyCitation(projectId, 'apps/api/src/nope/ghost.ts#Ghost.x');
+    expect(invented.verdict).toBe('unsupported');
+
+    files.delete('apps/api/src/billing/orphan.ts');
+    await service.indexRepository(repo);
+  });
+
+  it('resolves a doc by path to one repository, deterministically (0017)', async () => {
+    files.set('knowledge/shared-name.md', '# Shared\n\nOnly copy.\n');
+    await service.indexRepository(repo);
+
+    const doc = await service.getDocByPath(projectId, 'knowledge/shared-name.md');
+    // The response has to name its repository: onboarding scaffolds identical
+    // filenames into every repo it grounds, so a path does not identify a doc.
+    expect(doc?.repo_name).toBe(repo.name);
+    expect(await service.getDocByPath(projectId, 'knowledge/shared-name.md', 'no/such-repo')).toBeNull();
+
+    files.delete('knowledge/shared-name.md');
+    await service.indexRepository(repo);
+  });
+
   it('rolls the whole run back when a step fails partway through', async () => {
     // The failure this exists to prevent: a doc's chunks are deleted before
     // its new ones are written, so a run that dies in between leaves the doc

@@ -293,3 +293,105 @@ func (c *Client) Connect(project, path, name string, primary bool) (*ConnectResu
 	out := &ConnectResult{}
 	return out, json.Unmarshal(raw, out)
 }
+
+// ─── knowledge ───────────────────────────────────────────────────────────────
+
+// Chunk is a retrieved passage with the provenance the engine attached to it.
+// CiteAs is the string a design claim would carry; it comes from the server so
+// that a citation assembled here can never disagree with the one the validator
+// checks.
+type Chunk struct {
+	CiteAs   string  `json:"citeAs"`
+	RepoName string  `json:"repoName"`
+	Path     string  `json:"path"`
+	Heading  string  `json:"heading"`
+	Text     string  `json:"text"`
+	Score    float64 `json:"score"`
+	Via      string  `json:"via"`
+	ViaEdge  string  `json:"viaEdge"`
+}
+
+type SearchResult struct {
+	Chunks       []Chunk `json:"chunks"`
+	MatchedCount int     `json:"matchedCount"`
+	// How many matching chunks were cut for budget. Reported, never hidden: a
+	// cut that reads as an absence is how an agent concludes the knowledge
+	// base has nothing to say.
+	TruncatedCount int `json:"truncatedCount"`
+}
+
+func (c *Client) SearchKnowledge(project, query string, limit int) (*SearchResult, error) {
+	path := fmt.Sprintf("/cli/projects/%s/knowledge/search?q=%s",
+		url.PathEscape(project), url.QueryEscape(query))
+	if limit > 0 {
+		path += fmt.Sprintf("&limit=%d", limit)
+	}
+	out := &SearchResult{}
+	return out, c.getJSON(path, out)
+}
+
+type DocLink struct {
+	Kind       string `json:"kind"`
+	RawTarget  string `json:"rawTarget"`
+	State      string `json:"state"`
+	TargetPath string `json:"targetPath"`
+	SourcePath string `json:"sourcePath"`
+}
+
+type KnowledgeDoc struct {
+	Path          string    `json:"path"`
+	Kind          string    `json:"kind"`
+	Title         string    `json:"title"`
+	Content       string    `json:"content"`
+	HasUnverified bool      `json:"hasUnverified"`
+	IsStub        bool      `json:"isStub"`
+	DocUpdatedAt  string    `json:"docUpdatedAt"`
+	Outbound      []DocLink `json:"outbound"`
+	Backlinks     []DocLink `json:"backlinks"`
+}
+
+func (c *Client) KnowledgeDoc(project, docPath string) (*KnowledgeDoc, error) {
+	path := fmt.Sprintf("/cli/projects/%s/knowledge/doc?path=%s",
+		url.PathEscape(project), url.QueryEscape(docPath))
+	out := &KnowledgeDoc{}
+	return out, c.getJSON(path, out)
+}
+
+// CitationCheck is the four-verdict answer: supported, stale, unsupported or
+// unknown. Note is the sentence explaining which gap to close when the verdict
+// is anything but supported.
+type CitationCheck struct {
+	Citation       string   `json:"citation"`
+	Verdict        string   `json:"verdict"`
+	Note           string   `json:"note"`
+	CheckedAgainst []string `json:"checkedAgainst"`
+}
+
+func (c *Client) VerifyCitation(project, citation string) (*CitationCheck, error) {
+	path := fmt.Sprintf("/cli/projects/%s/knowledge/verify?citation=%s",
+		url.PathEscape(project), url.QueryEscape(citation))
+	out := &CitationCheck{}
+	return out, c.getJSON(path, out)
+}
+
+type KnowledgeHealth struct {
+	Score                 float64 `json:"score"`
+	DocCount              int     `json:"docCount"`
+	StaleCount            int     `json:"staleCount"`
+	StubCount             int     `json:"stubCount"`
+	AsBuiltCount          int     `json:"asBuiltCount"`
+	BrokenLinks           int     `json:"brokenLinks"`
+	DanglingAnchors       int     `json:"danglingAnchors"`
+	OrphanDocs            int     `json:"orphanDocs"`
+	UnknownFreshnessCount int     `json:"unknownFreshnessCount"`
+	Notes                 []struct {
+		Icon string `json:"icon"`
+		Text string `json:"text"`
+	} `json:"notes"`
+}
+
+func (c *Client) KnowledgeHealth(project string) (*KnowledgeHealth, error) {
+	path := fmt.Sprintf("/cli/projects/%s/knowledge/health", url.PathEscape(project))
+	out := &KnowledgeHealth{}
+	return out, c.getJSON(path, out)
+}

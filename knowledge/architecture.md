@@ -26,7 +26,7 @@ eval`), also outside the workspace on purpose: evals grade, they never gate.
 | `apps/api` | NestJS API — auth (`src/auth/`), projects and connections, spec pipeline and agents (`src/agents/`), VCS webhooks (`src/vcs/`), knowledge engine (`src/knowledge/`) |
 | `apps/web` | Next.js — landing, wizard, dashboard, board, spec review, knowledge, runs |
 | `apps/runner` | Self-hosted runner daemon — claims dispatched jobs, heartbeats its lease, drives the local Claude Code CLI (`decisions/0004`, `0009`) |
-| `cli` | Go `specd` binary (`cmd/specd`, `internal/{api,config}`) — thin client (D13): login, spec pull, runner pairing, the REPL |
+| `cli` | Go `specd` binary (`cmd/specd`, `internal/{api,config}`) — thin client (D13): login, spec pull, runner pairing, the REPL, the MCP server (`0017`) |
 | `packages/shared` | Spec lifecycle state machine (`lifecycle.ts`), spec content + EARS (`spec.ts`), model allowlist + rate card (`models.ts`), Claude-reply parsing and shape-check (`claude-code-parse.ts`) |
 | `packages/db` | Drizzle schema (`src/schema.ts`, 20 tables) + plain-SQL migrations |
 | `packages/templates` | `AGENTS.md`, `CLAUDE.md`, `knowledge/` scaffold for onboarded repos; `evidence.ts` reads a repo's facts (commands, CI, services, config, entities) before any model call (`decisions/0015`) |
@@ -147,6 +147,13 @@ Resolution states: `resolved`, `unresolved`, `dangling_anchor`. Producer tiers: 
   reviews or approves. Enforced server-side, not by CLI politeness:
   `auth.guard.ts` rejects `aud: 'cli'` tokens on every route not explicitly
   marked CLI-allowed.
+- `specd mcp serve` inherits that boundary rather than widening it
+  ([[0017-the-engine-answers-over-mcp]]). It is a thin client over the same
+  API carrying the same `aud: 'cli'` token, so an agent cannot approve a spec
+  through it because the server cannot. The four knowledge routes it calls are
+  `@Get`s on `CliController`; `apps/api/src/cli/cli.controller.test.ts` asserts
+  `connect` stays the only non-read on that class, because the class decorator
+  applies to whatever route is added next.
 - `specd login` is a device flow requiring the web app (`/cli-login`) for
   human confirmation (`apps/api/src/auth/auth.service.ts`). The token lands
   in the OS keychain (service `specd-cli`; the runner's token in its own

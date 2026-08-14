@@ -14,6 +14,7 @@ import {
   type DbContext,
   type Repository,
 } from '@specd/db';
+import { citationRef, judgeCitation } from '@specd/shared';
 import type {
   CitationCoverage,
   KnowledgeDocKind,
@@ -1328,6 +1329,117 @@ export class KnowledgeService {
       .where(and(eq(knowledgeDocs.id, docId), eq(knowledgeDocs.projectId, projectId)))
       .limit(1);
     return row ?? null;
+  }
+
+  /**
+   * The same doc by the name it is cited under. An agent holding
+   * `knowledge/architecture.md#auth` has a path, never a uuid, and asking it
+   * to list the tree first to translate one into the other is a round trip
+   * that exists only because the API preferred its own identifiers.
+   */
+  async getDocByPath(projectId: string, path: string, repoName?: string) {
+    // `knowledge_docs` is unique on (repository_id, path), NOT on
+    // (project_id, path) — and onboarding scaffolds the same filenames into
+    // every repo it grounds, so `knowledge/architecture.md` exists once per
+    // repository. Without an order this returned whichever row Postgres
+    // happened to yield, and could return a different one on the next call.
+    //
+    // Primary first, then name, so the answer is stable and predictable; the
+    // caller can name a repository when it wants a specific one, and the
+    // response says which it got either way.
+    const rows = await this.handle.sql<
+      {
+        id: string;
+        path: string;
+        repo_name: string;
+        kind: string;
+        title: string | null;
+        content: string;
+        has_unverified: boolean;
+        is_stub: boolean;
+        doc_updated_at: Date | null;
+        indexed_at: Date | null;
+      }[]
+    >`
+      SELECT kd.id, kd.path, r.name AS repo_name, kd.kind, kd.title, kd.content,
+             kd.has_unverified, kd.is_stub, kd.doc_updated_at, kd.indexed_at
+      FROM knowledge_docs kd
+      JOIN repositories r ON r.id = kd.repository_id
+      WHERE kd.project_id = ${projectId}
+        AND kd.path = ${path}
+        AND (${repoName ?? null}::text IS NULL OR r.name = ${repoName ?? null})
+      ORDER BY r.is_primary DESC, r.name ASC
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+
+  /**
+   * Whether a path names source code this project has indexed.
+   *
+   * Citation checking knows about docs: `coverageFor` builds `knownPaths` from
+   * `knowledge_docs`, so a citation naming a *source file* is never in it. In
+   * a spec draft that never mattered — coverage and chunks come from one
+   * retrieval, so a code citation always matches an excerpt exactly. Checking
+   * one on demand has no such guarantee, and without this the strongest
+   * negative verdict lands on a file that is really there.
+   */
+  private async isIndexedCodePath(projectId: string, path: string): Promise<boolean> {
+    const [row] = await this.handle.sql<{ found: boolean }[]>`
+      SELECT true AS found FROM code_nodes
+      WHERE project_id = ${projectId} AND path = ${path}
+      LIMIT 1
+    `;
+    return Boolean(row?.found);
+  }
+
+  /**
+   * Judge one citation on demand, the way the SpecAgent judges the ones in a
+   * draft — same retrieval, same coverage, same `judgeCitation`.
+   *
+   * The verdict answers a narrower question than it looks like, and the
+   * difference is worth stating: retrieval runs *for this citation*, so
+   * `unknown` here means the corpus could not surface the passage even when
+   * asked about it directly. In a spec draft the same verdict means only that
+   * the passage did not make the top-k of a broader query. Both are "could not
+   * check", and neither is "not there" — that is what `unsupported` is for.
+   */
+  async verifyCitation(projectId: string, citation: string) {
+    const { chunks, truncatedCount } = await this.retrieve(projectId, citation, 12);
+    const coverage = await this.coverageFor(
+      projectId,
+      chunks.map((c) => c.path),
+    );
+    let judged = judgeCitation(citation, chunks, { ...coverage, truncatedCount });
+
+    // `unsupported` means "checked and wrong", and the tool says so in those
+    // words. It must never land on a file that exists: retrieval surfaces
+    // source code as citable excerpts, so an agent citing what
+    // `search_knowledge` handed it can arrive here with a path that is real
+    // and simply outside this query's retrieved set. That is `unknown` — the
+    // whole reason the fourth verdict exists.
+    if (judged.verdict === 'unsupported') {
+      const [rawPath = ''] = citation.split('#');
+      if (await this.isIndexedCodePath(projectId, rawPath.trim())) {
+        judged = {
+          citation,
+          unverified:
+            `cites "${citation}", indexed source code that this query did not surface — ` +
+            'read the file to confirm it still says this',
+          verdict: 'unknown',
+        };
+      }
+    }
+
+    return {
+      citation,
+      verdict: judged.verdict,
+      // `unverified` is the sentence the SpecAgent would have written into the
+      // spec. It says which gap to close, so it is the useful half of a
+      // verdict that is not `supported`.
+      note: judged.unverified ?? null,
+      checkedAgainst: chunks.map((c) => citationRef(c)),
+    };
   }
 
   /**

@@ -181,7 +181,7 @@ export class AuthService {
 `,
 };
 
-async function main(): Promise<void> {
+export async function seedFixtureRepository(): Promise<{ path: string; branch: string }> {
   const root = resolve(process.cwd(), '../../.specd-work/fixtures/aurora-api');
   await mkdir(root, { recursive: true });
 
@@ -213,13 +213,22 @@ async function main(): Promise<void> {
     await git.commit('Initial Aurora CRM API');
   }
 
-  console.log(`Fixture repository ready at:\n  ${root}\n`);
-  console.log('Register it with:');
-  console.log(`  POST /api/projects/<slug>/repositories`);
-  console.log(`  { "provider": "local", "name": "aurora-api", "localPath": "${root}" }`);
+  const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim() || 'main';
+  return { path: root, branch };
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+// Still runnable on its own: `pnpm db:seed` builds the fixture and says where
+// it is, for anyone wiring it up by hand rather than through `pnpm demo`.
+if (process.argv[1]?.endsWith('seed.ts')) {
+  seedFixtureRepository()
+    .then(({ path }) => {
+      console.log(`Fixture repository ready at:\n  ${path}\n`);
+      console.log('Register it with:');
+      console.log('  POST /api/projects/<slug>/repositories');
+      console.log(`  { "provider": "local", "name": "aurora-api", "localPath": "${path}" }`);
+    })
+    .catch((err: unknown) => {
+      console.error(err);
+      process.exit(1);
+    });
+}

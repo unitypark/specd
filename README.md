@@ -138,6 +138,27 @@ The loop closes on merge: delivered work re-indexes, the as-built spec lands in
 | **Go ≥ 1.25** *(optional)* | Only for building the `specd` CLI. The platform runs without it. |
 | **Claude Code CLI or an Anthropic API key** *(optional)* | Only for agent runs. Everything else — indexing, retrieval, the graph, health — works with neither. |
 
+### Just show me
+
+```bash
+git clone https://github.com/unitypark/specd.git && cd specd
+corepack enable && pnpm install
+pnpm demo
+```
+
+`pnpm demo` writes a `.env` if there isn't one, starts Postgres and **waits for
+it to actually accept connections**, applies migrations, seeds a project with a
+fixture repository already connected, and starts both dev servers — printing
+the URL and a login. Each step says what it is doing, so a failure names the
+step rather than arriving as a stack trace three steps later.
+
+It deliberately leaves the repository **ungrounded**: watching Ground read a
+real repository is the most interesting thing specd does, and pre-baking it
+would hide the demo's best moment.
+
+The steps below are the same thing done by hand, if you would rather see each
+one.
+
 ### 1 · Clone and configure
 
 ```bash

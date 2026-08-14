@@ -1,15 +1,30 @@
 # Runbook — deploy (unitypark/specd)
 
-> **Nothing deploys specd today.** There is no Dockerfile for the app, no CI
-> workflow, no hosting configuration and no environment beyond a laptop. That
-> is a statement about the repository as it stands, not a gap in this
-> document — verified by absence: `docker-compose.yml` provisions Postgres
-> only, and there is no `.github/workflows/`.
+> **Nothing deploys specd today.** There is no Dockerfile for the app, no
+> hosting configuration and no environment beyond a laptop. That is a statement
+> about the repository as it stands, not a gap in this document — verified by
+> absence: `docker-compose.yml` provisions Postgres only, and no image is built
+> anywhere. CI exists (`.github/workflows/ci.yml`) and runs the verify gate
+> against a real pgvector service, but it tests; it does not ship.
 
 So this is not "how we deploy". It is what someone standing up the first
 environment has to decide and what the code already requires of them, with the
 unknowns named as unknowns. Fill it in as those decisions get made; the
 UNVERIFIED markers are the todo list.
+
+## Evaluating specd (supported)
+
+`pnpm demo` is the supported way to get a running, seeded specd: `.env`,
+Postgres via compose, migrations, a seeded project with a fixture repository
+connected, and both dev servers. It is idempotent — re-running adopts what is
+already there.
+
+**This is an evaluation path, not a deployment.** It runs dev servers on a
+developer's machine. Everything below still stands: no platform is chosen, no
+image is built, nothing supervises the processes, nothing observes them, and no
+backup or rollback has been rehearsed. `pnpm demo` answers "can I see it
+working"; it does not answer "can I run this for a team", and this document
+will keep saying so until somebody makes those choices.
 
 ## What the code already requires
 

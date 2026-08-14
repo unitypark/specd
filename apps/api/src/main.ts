@@ -5,23 +5,9 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { Config } from './config.js';
+import { loadRootEnv } from './env.js';
 import { EmbeddingService } from './knowledge/embeddings.js';
 
-/**
- * Load the monorepo-root `.env` before `Config` reads `process.env` — `pnpm
- * dev` runs straight from the shell, and nothing else in this project
- * sources it. A missing file is not an error here: it means `Config`'s own
- * `required()` checks, which name the exact variable and say what to do
- * about it, are what the developer should see instead of a raw ENOENT.
- */
-function loadRootEnv(): void {
-  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-  try {
-    process.loadEnvFile(join(root, '.env'));
-  } catch {
-    // No .env yet (or it could not be read) — required() below says so.
-  }
-}
 
 async function bootstrap(): Promise<void> {
   loadRootEnv();

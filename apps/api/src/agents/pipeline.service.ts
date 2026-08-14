@@ -14,6 +14,7 @@ import { ProjectsService } from '../projects/projects.service.js';
 import { RepositoriesService } from '../projects/repositories.service.js';
 import { ConnectionsService } from '../projects/connections.service.js';
 import { KnowledgeService } from '../knowledge/knowledge.service.js';
+import { PolicyService } from '../projects/policy.service.js';
 import { SpecsService } from '../specs/specs.service.js';
 import { BoardService } from '../board/board.service.js';
 import { RunsService } from '../runs/runs.service.js';
@@ -65,6 +66,7 @@ export class PipelineService {
     private readonly repositories: RepositoriesService,
     private readonly connections: ConnectionsService,
     private readonly knowledge: KnowledgeService,
+    private readonly policy: PolicyService,
     private readonly specs: SpecsService,
     private readonly board: BoardService,
     private readonly runs: RunsService,
@@ -347,6 +349,8 @@ export class PipelineService {
     projectId: string;
     specId: string;
     actor: { userId: string; name: string };
+    /** A named human taking responsibility for a house rule refusing this. */
+    policyOverride?: { justification: string };
   }) {
     await this.runs.assertCanRun(input.projectId);
 
@@ -416,6 +420,12 @@ export class PipelineService {
       });
     }
 
+    // House rules, as data (2.4). The gate above is binary and stays that way;
+    // this is the floor a team chose on top of it, and unlike the gate it can
+    // be overridden — by a named human, with a typed reason, on the record.
+    const refusals = await this.policy.refusalsForBuild(input.projectId, spec, drifted);
+    if (refusals.length > 0 && !input.policyOverride) this.policy.refuse(refusals);
+
     // Advisory, deliberately: this reports, it does not refuse. A citation that
     // drifted is a reason for a human to look, and turning it into a block
     // would mean an unrelated doc edit could stop an approved spec from
@@ -432,6 +442,28 @@ export class PipelineService {
         `${drifted.length} of this spec's citations no longer stand where they did at approval`,
         'warn',
       );
+    }
+
+    if (refusals.length > 0 && input.policyOverride) {
+      // Written before the work starts: an override recorded only on success
+      // is missing exactly when someone wants to read it.
+      await this.policy.recordException({
+        projectId: input.projectId,
+        specId: spec.id,
+        runId: run.id,
+        ticketKey: spec.ticketKey,
+        refusals,
+        approvedByUserId: input.actor.userId,
+        approvedByName: input.actor.name,
+        justification: input.policyOverride.justification,
+      });
+      for (const refusal of refusals) {
+        await run.log(
+          `policy "${refusal.policy}" overridden by ${input.actor.name}: ${refusal.detail} ` +
+            `Reason given: ${input.policyOverride.justification}`,
+          'warn',
+        );
+      }
     }
 
     // Dispatch to a paired runner when there is one — it builds on its own

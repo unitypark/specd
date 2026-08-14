@@ -8,6 +8,7 @@ import { Vault } from './common/vault.js';
 import { HealthController } from './health.controller.js';
 
 import { ProjectsService } from './projects/projects.service.js';
+import { PolicyService } from './projects/policy.service.js';
 import { ProjectsController } from './projects/projects.controller.js';
 import { RepositoriesService } from './projects/repositories.service.js';
 import { ConnectionsService } from './projects/connections.service.js';
@@ -73,6 +74,7 @@ import { RunnersController } from './runners/runners.controller.js';
     Config,
     Vault,
     ProjectsService,
+    PolicyService,
     RepositoriesService,
     ConnectionsService,
     LocalGitAdapter,

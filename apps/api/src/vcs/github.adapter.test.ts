@@ -33,8 +33,10 @@ const change = {
 /**
  * Routes by `METHOD /path` rather than by call order: `propose` makes eight
  * requests and a sequence-keyed stub would say nothing about which one broke.
- * A handler returning `null` stands for a non-2xx, which is what the adapter
- * turns into a throw.
+ * A route returning `null` stands for a non-2xx, which is what the adapter
+ * turns into a throw. An unrouted request is the test's mistake rather than the
+ * adapter's, so it throws by name: answering it with an empty 200 would let a
+ * mistyped route key read as a working adapter.
  */
 function stub(routes: Record<string, unknown | null>) {
   const calls: string[] = [];
@@ -43,8 +45,9 @@ function stub(routes: Record<string, unknown | null>) {
     const key = `${init.method ?? 'GET'} ${path}`;
     calls.push(key);
 
-    const match = Object.keys(routes).find((r) => r === key);
-    const body = match === undefined ? {} : routes[match];
+    if (!Object.hasOwn(routes, key)) throw new Error(`unstubbed request: ${key}`);
+
+    const body = routes[key];
     const ok = body !== null;
 
     return {

@@ -188,8 +188,9 @@ describe.skipIf(!reachable)('onboard queue (integration)', () => {
 
     await workerWith(config).drain();
 
-    // Never re-executed: it may already have opened the setup PR, and
-    // propose() cannot be replayed over one that is already open.
+    // Never re-executed: it may already have opened the setup PR, and replaying
+    // over one costs a second repository read and a second model call to move a
+    // branch someone may already be reviewing. Safe to replay is not free.
     expect(executed).toHaveLength(0);
     const row = await runRow(runId);
     expect(row?.status).toBe('failed');

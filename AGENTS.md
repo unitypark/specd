@@ -18,6 +18,13 @@
 7. The final task of every spec: commit the as-built spec to
    knowledge/specs/<id>-<slug>.md in this repo's PR.
 
+## When the knowledge base does not answer you
+8. Do not invent the answer. Check knowledge/open-questions.md; if it is
+   listed there, say so in the PR or spec and ask a human. An UNVERIFIED
+   marker is a question, never a licence to fill it in from guesswork.
+9. If you learn the answer while implementing, write it into the doc it
+   belongs in and delete the open question — in the same PR (rule 3).
+
 ## Ask the knowledge base, do not re-derive it
 10. Where specd's knowledge tools are available, query them before reading
     the tree: they answer with the passage AND the string to cite it by,

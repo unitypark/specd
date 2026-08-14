@@ -112,7 +112,7 @@ describe('generated artifacts', () => {
       projectName: 'Aurora CRM',
     });
 
-    // Rule 8 without the config is advice; the config without rule 8 is
+    // Rule 10 without the config is advice; the config without rule 10 is
     // trivia. Landing one of the two alone is the way this stops working.
     expect(md).toContain('query them before reading');
     expect(md).toContain('"command": "specd", "args": ["mcp", "serve"]');

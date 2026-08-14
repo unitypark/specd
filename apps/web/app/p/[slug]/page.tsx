@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from '@/components/AppShell';
-import { get, post } from '@/lib/api';
+import { get } from '@/lib/api';
 import { BoardView } from '@/components/BoardView';
 import { KnowledgeView } from '@/components/KnowledgeView';
 import { AgentsView } from '@/components/AgentsView';
@@ -12,12 +12,23 @@ import styles from './project.module.css';
 
 import type { ProjectSummary } from '@/lib/types';
 
-const TABS = ['overview', 'board', 'knowledge', 'agents', 'repositories', 'settings'] as const;
+/**
+ * Overview is not a tab of its own. Its four counters and its spend meter were
+ * a screen you passed through on the way to the board — and two of the four
+ * (awaiting review, building) are lane counts the board prints anyway. Folded
+ * into a strip above the board, they are read where the work is instead of one
+ * click away from it, and the project opens on the thing people came for.
+ *
+ * `?tab=overview` from an old link no longer matches, and an unmatched tab
+ * already falls through to the default — which is now the board. No alias
+ * needed; the link lands where its owner was going.
+ */
+const TABS = ['board', 'knowledge', 'agents', 'repositories', 'settings'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ProjectPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>('board');
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,14 +72,12 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
   if (!project) {
     return (
       <AppShell crumb="Project" wide>
-        <div aria-hidden style={{ maxWidth: '52rem' }}>
-          <span className="skeleton" style={{ height: '1.4rem', width: '30%', marginBottom: '1rem' }} />
-          <span className="skeleton" style={{ height: '2.4rem', width: '60%', marginBottom: '1.2rem' }} />
-          <div style={{ display: 'flex', gap: '0.8rem' }}>
-            {[0, 1, 2, 3].map((i) => (
-              <span key={i} className="skeleton" style={{ height: '4rem', flex: 1 }} />
-            ))}
-          </div>
+        {/* Shaped like what is about to arrive — the tab strip, then the
+            summary row above the board — so the page settles rather than
+            rearranges when it does. */}
+        <div aria-hidden>
+          <span className="skeleton" style={{ height: '1.4rem', width: '22rem', marginBottom: '1.3rem' }} />
+          <span className="skeleton" style={{ height: '2.4rem', marginBottom: '0.85rem' }} />
         </div>
       </AppShell>
     );
@@ -106,45 +115,46 @@ export default function ProjectPage({ params }: { params: Promise<{ slug: string
         ))}
       </nav>
 
-      {tab === 'overview' && (
-        <>
-          <div className={styles.kpis}>
-            <div className={styles.kpi}>
-              <div className={styles.v}>{project.specsInReview}</div>
-              <div className={styles.l}>awaiting review</div>
+      {tab === 'board' && (
+        <div className={styles.boardtab}>
+          <div className={styles.summary}>
+            <div className={styles.stat}>
+              <span className={styles.v}>{project.specsInReview}</span>
+              <span className={styles.l}>awaiting review</span>
             </div>
-            <div className={styles.kpi}>
-              <div className={styles.v}>{project.specsBuilding}</div>
-              <div className={styles.l}>building</div>
+            <div className={styles.stat}>
+              <span className={styles.v}>{project.specsBuilding}</span>
+              <span className={styles.l}>building</span>
             </div>
-            <div className={styles.kpi}>
-              <div className={styles.v}>{project.repoCount}</div>
-              <div className={styles.l}>repositories</div>
+            <div className={styles.stat}>
+              <span className={styles.v}>{project.repoCount}</span>
+              <span className={styles.l}>repositories</span>
             </div>
-            <div className={styles.kpi}>
-              <div className={styles.v}>{project.knowledgeHealth}%</div>
-              <div className={styles.l}>knowledge health</div>
+            <div className={styles.stat}>
+              <span className={styles.v}>{project.knowledgeHealth}%</span>
+              <span className={styles.l}>knowledge health</span>
             </div>
-          </div>
 
-          <div className={styles.spend}>
-            <div className={styles.spendhead}>
+            {/* The sentence this strip has no room for, kept where it is still
+                reachable — a cap that silently refuses a run needs to say so
+                somewhere. */}
+            <div
+              className={styles.spend}
+              title="Caps are enforced before each run — a run that would start over budget never starts."
+            >
               <span className={styles.amt}>€{(project.spendCents / 100).toFixed(2)}</span>
               <span className={styles.cap}>
-                of €{(project.spendCapCents / 100).toFixed(2)} cap · this month
+                of €{(project.spendCapCents / 100).toFixed(2)} · this month
               </span>
+              <div className={`meter ${spendPct > 80 ? 'warn' : ''} ${styles.spendmeter}`}>
+                <i style={{ width: `${spendPct}%` }} />
+              </div>
             </div>
-            <div className={`meter ${spendPct > 80 ? 'warn' : ''}`}>
-              <i style={{ width: `${spendPct}%` }} />
-            </div>
-            <p className={styles.spendnote}>
-              Caps are enforced before each run — a run that would start over budget never starts.
-            </p>
           </div>
-        </>
-      )}
 
-      {tab === 'board' && <BoardView slug={slug} onChange={reload} />}
+          <BoardView slug={slug} onChange={reload} />
+        </div>
+      )}
       {tab === 'knowledge' && <KnowledgeView slug={slug} />}
       {tab === 'agents' && <AgentsView slug={slug} />}
       {tab === 'repositories' && <ReposView slug={slug} projectId={project.id} onChange={reload} />}

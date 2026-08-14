@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { get, post } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import {
-  COLUMN_EMPTY,
   NO_FILTERS,
   UNASSIGNED,
   assigneeOptions,
@@ -398,7 +397,10 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
       )}
 
       {/* ─── the board ───────────────────────────────────────────────────── */}
-      <div className={styles.board}>
+      {/* `dragging` rides on the board rather than on each lane: every lane
+          has to open a drop target while a card is in the air, including the
+          ones the pointer has not visited yet. */}
+      <div className={`${styles.board} ${dragging ? styles.dragging : ''}`}>
         {/* Placeholder lanes live in the same row as the real ones rather than
             in a board of their own — two `flex: 1` boards side by side would
             each take half the height, and the empty one would show as a gap
@@ -572,12 +574,15 @@ export function BoardView({ slug, onChange }: { slug: string; onChange: () => vo
                   return nodes;
                 })()}
 
-                {shown.length === 0 && !showPlaceholder && (
-                  <p className={styles.colempty}>
-                    {filtered && all.length > 0
-                      ? `${all.length} hidden by the filter`
-                      : COLUMN_EMPTY[col.key]}
-                  </p>
+                {/* An empty lane is its header and nothing else. It used to
+                    carry a line of copy explaining what belongs in it, which
+                    is a sentence you read once and then look past on every
+                    board you ever open — the lane's own name already says it.
+                    A lane emptied by the *filter* still speaks up: that one is
+                    not a description of the lane, it is the fact that there
+                    are cards here you cannot currently see. */}
+                {shown.length === 0 && !showPlaceholder && filtered && all.length > 0 && (
+                  <p className={styles.colempty}>{all.length} hidden by the filter</p>
                 )}
               </div>
             </section>

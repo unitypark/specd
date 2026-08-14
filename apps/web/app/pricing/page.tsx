@@ -102,11 +102,7 @@ export default function Pricing() {
                     </li>
                   ))}
                 </ul>
-                <Link
-                  href={t.cta.href}
-                  className={t.cta.primary ? styles.cta : styles.ghost}
-                  style={{ textAlign: 'center' }}
-                >
+                <Link href={t.cta.href} className={t.cta.primary ? styles.cta : styles.ghost}>
                   {t.cta.label}
                 </Link>
               </div>

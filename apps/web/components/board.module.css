@@ -19,15 +19,25 @@
   display: flex;
   flex-direction: column;
   /*
-   * Capped by the viewport, not stretched to it. `height` made an empty board
-   * six storeys of nothing — the box was as tall on a project with no tickets
-   * as on one with forty. With `max-height` the lanes size to their contents
-   * and the box grows with them, until it reaches the fold and the lanes start
-   * scrolling inside instead. The subtraction is the shell's chrome above (top
-   * bar, body padding, project tabs) plus its 4rem page padding below, so the
-   * cap lands at the fold rather than pushing the window into a scroll.
+   * Stretched to the viewport, not capped by it. An earlier pass used
+   * max-height so the box grew with its contents, on the argument that an
+   * empty board should not draw six storeys of nothing. What that traded for
+   * it was worse: a board with a handful of cards ended partway down the
+   * screen with a band of dead page under it, and a box whose bottom edge
+   * lands somewhere different on every project reads as unfinished long
+   * before tall lanes read as wasteful. On direct instruction, the box is the
+   * height of the fold on every project.
+   *
+   * The subtraction is the shell's chrome above (top bar, body padding,
+   * project tabs) plus its 4rem page padding below, so the box lands ON the
+   * fold rather than pushing the window into a scroll.
+   *
+   * Whatever the page stacks between the tabs and the board declares its own
+   * height in --board-offset (the project page's summary strip does), so the
+   * box keeps landing on the fold instead of hanging below it by exactly the
+   * height of the thing that was added.
    */
-  max-height: calc(100vh - 12rem);
+  height: calc(100vh - 12rem - var(--board-offset, 0px));
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -265,14 +275,19 @@
 /* ─── the board ───────────────────────────────────────────────────────────── */
 
 .board {
-  /* `1 1 auto`, deliberately not `flex: 1`. The shorthand's `0` basis would
-     hide the lanes' own height from the box, which — now that the box is
-     sized by its contents — would collapse it to a toolbar above a legend.
-     Basis `auto` lets the lanes set the height and still shrink at the cap. */
+  /* Takes the room the toolbar and the legend leave, which — now that the box
+     is the height of the fold rather than of its contents — is what gives the
+     lanes their height. Basis `auto` is harmless here and stays put: it is
+     what keeps this correct if the box is ever content-sized again. */
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  align-items: stretch;
+  /* The box is full height; the lanes are not. `stretch` made every lane as
+     tall as the tallest one — six grey columns of nothing behind a board with
+     four cards in it. Sizing each to its own contents puts the height where
+     the work is, and leaves the white box to be the thing that squares off
+     the page. */
+  align-items: flex-start;
   gap: 0.55rem;
   padding: 0.85rem;
   overflow-x: auto;
@@ -288,6 +303,11 @@
      you are not working in (below) buys the width back on any screen. */
   flex: 1 1 0;
   min-width: 11.25rem;
+  /* Content-sized now that the lanes no longer stretch — but never past the
+     board's own floor. At the cap the lane stops growing and .laneBody starts
+     scrolling inside it, which is how a full lane stays a lane instead of
+     running out of the bottom of the box. */
+  max-height: 100%;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -380,13 +400,43 @@
 
 .laneBody {
   /* The lane scrolls, not the page: the header has to stay put while you look
-     down a column, which is the whole reason a board beats a list. The floor
-     keeps an empty lane a lane rather than a sliver under its own header. */
+     down a column, which is the whole reason a board beats a list. */
   flex: 1 1 auto;
-  min-height: 6.5rem;
+  min-height: 0;
   overflow-y: auto;
   padding: 0.55rem 0.5rem 0.3rem;
   scrollbar-width: thin;
+}
+
+/*
+ * An empty lane is its header and nothing else: no floor holding a strip of
+ * grey open under it, and no rule beneath the header either — with nothing
+ * below it, that rule lands a pixel above the lane's own bottom edge and reads
+ * as a doubled line.
+ *
+ * Keyed off `:empty` rather than a class the render has to remember to set:
+ * the condition IS "this lane drew nothing", so asking the DOM keeps it true
+ * for the filter notice and the drag placeholder without either of them having
+ * to know about this rule.
+ */
+.laneBody:empty {
+  padding: 0;
+}
+.col:has(.laneBody:empty) .colhead {
+  border-bottom: none;
+}
+
+/*
+ * ...until a card is in the air. A header-only lane is a 0px drop target, and
+ * a lane you cannot drag into is a worse board than one with some empty space
+ * in it, so every lane opens a target for as long as the drag lasts.
+ */
+.dragging .laneBody:empty {
+  min-height: 5rem;
+  padding: 0.55rem 0.5rem 0.3rem;
+}
+.dragging .col:has(.laneBody:empty) .colhead {
+  border-bottom: 1px solid var(--line);
 }
 
 .colempty {

@@ -40,10 +40,12 @@ const change = {
  */
 function stub(routes: Record<string, unknown | null>) {
   const calls: string[] = [];
+  const sent: { key: string; body: unknown }[] = [];
   const fn = vi.fn(async (url: string, init: RequestInit = {}) => {
     const path = url.replace('https://api.github.com', '');
     const key = `${init.method ?? 'GET'} ${path}`;
     calls.push(key);
+    if (init.body) sent.push({ key, body: JSON.parse(String(init.body)) });
 
     if (!Object.hasOwn(routes, key)) throw new Error(`unstubbed request: ${key}`);
 
@@ -59,7 +61,7 @@ function stub(routes: Record<string, unknown | null>) {
     };
   });
   vi.stubGlobal('fetch', fn);
-  return calls;
+  return { calls, sent };
 }
 
 /** Everything `propose` needs up to the pull request itself. */
@@ -79,7 +81,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('propose', () => {
   it('opens a pull request on a repository that has none', async () => {
-    const calls = stub({
+    const { calls } = stub({
       ...upToThePr,
       [`POST /repos/${SLUG}/pulls`]: { html_url: 'https://github.com/acme/aurora-api/pull/7', number: 7 },
     });
@@ -101,12 +103,13 @@ describe('propose', () => {
     // GitHub answers 422 to a second PR for the same head. Before this was
     // handled, re-grounding a repository failed here — with the scaffold
     // already written and the branch already force-reset to the new commit.
-    const calls = stub({
+    const { calls, sent } = stub({
       ...upToThePr,
       [`POST /repos/${SLUG}/pulls`]: null,
       [`GET /repos/${SLUG}/pulls?head=acme%3Aspecd%2Fsetup&state=open`]: [
         { html_url: 'https://github.com/acme/aurora-api/pull/3', number: 3 },
       ],
+      [`PATCH /repos/${SLUG}/pulls/3`]: { number: 3 },
     });
 
     const result = await adapter().propose(repo, change);
@@ -116,10 +119,43 @@ describe('propose', () => {
     // "Opened" — the wizard prints this line verbatim.
     expect(result.reviewHint).toBe(`Updated PR #3 on ${SLUG}. Merging is adopting.`);
     expect(calls).toContain(`GET /repos/${SLUG}/pulls?head=acme%3Aspecd%2Fsetup&state=open`);
+
+    // The description goes with the branch. It states a file count, an
+    // UNVERIFIED count and whether a model drafted anything; left at the first
+    // run's text it describes a branch that is no longer there.
+    expect(sent.find((s) => s.key === `PATCH /repos/${SLUG}/pulls/3`)?.body).toEqual({
+      title: change.title,
+      body: change.body,
+    });
+  });
+
+  it('does not fail a re-run when only the description could not be rewritten', async () => {
+    // The branch is published and the PR exists; the run produced everything it
+    // set out to. Throwing at the last and least consequential call is the
+    // shape of failure that made re-grounding unusable in the first place.
+    const { calls } = stub({
+      ...upToThePr,
+      [`POST /repos/${SLUG}/pulls`]: null,
+      [`GET /repos/${SLUG}/pulls?head=acme%3Aspecd%2Fsetup&state=open`]: [
+        { html_url: 'https://github.com/acme/aurora-api/pull/3', number: 3 },
+      ],
+      [`PATCH /repos/${SLUG}/pulls/3`]: null,
+    });
+
+    const result = await adapter().propose(repo, change);
+
+    expect(result.url).toBe('https://github.com/acme/aurora-api/pull/3');
+    // …but it is not quietly swallowed either: the page a reviewer is about to
+    // open still describes the previous run, and only this line can say so.
+    expect(result.reviewHint).toBe(
+      `Updated PR #3 on ${SLUG}. Its description could not be rewritten and still ` +
+        'describes the previous run. Merging is adopting.',
+    );
+    expect(calls).toContain(`PATCH /repos/${SLUG}/pulls/3`);
   });
 
   it('resets an existing branch rather than giving up on it', async () => {
-    const calls = stub({
+    const { calls } = stub({
       ...upToThePr,
       // A branch left by an earlier run: creating the ref is refused.
       [`POST /repos/${SLUG}/git/refs`]: null,

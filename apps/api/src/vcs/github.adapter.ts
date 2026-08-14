@@ -2,7 +2,9 @@ import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
   VcsError,
+  reviewHint,
   type ChangeResult,
+  type OpenedReview,
   type ProposedChange,
   type RepoFile,
   type RepoSnapshot,
@@ -217,24 +219,32 @@ export class GitHubAdapter implements VcsAdapter {
     return {
       branch: change.branch,
       url: pr.url,
-      reviewHint: `${pr.existing ? 'Updated' : 'Opened'} PR #${pr.number} on ${slug}. Merging is adopting.`,
+      reviewHint: reviewHint('PR', slug, pr),
       filesWritten: change.files.length,
     };
   }
 
   /**
-   * Open a PR for `branch`, or hand back the one already open for it.
+   * Open a PR for `branch`, or update the one already open for it.
    *
    * Shared by both write paths, which arrive from opposite directions: the
    * build station has a real clone whose commits it pushed with git, while
    * `propose` has file contents and builds its commit through the API. Both
    * end at the same place, and for both a re-run must update the open PR
    * rather than fail on it — GitHub answers 422 to a second PR for one head.
+   *
+   * Updating includes the description, because both callers write one that
+   * describes *this* run and no other: onboarding states a file count, an
+   * UNVERIFIED count and whether a model drafted anything at all; a build
+   * states the commit count and whether verify passed. Leaving the first run's
+   * description over the second run's branch tells a reviewer verify passed
+   * when this time it did not — the exact misreading `buildPrBody` is written
+   * to prevent.
    */
   async openPullRequest(
     slug: string,
     pr: { branch: string; base: string; title: string; body: string },
-  ): Promise<{ url: string; number: number; existing: boolean }> {
+  ): Promise<OpenedReview> {
     try {
       const created = await this.api<{ html_url: string; number: number }>(
         `/repos/${slug}/pulls`,
@@ -248,7 +258,7 @@ export class GitHubAdapter implements VcsAdapter {
           }),
         },
       );
-      return { url: created.html_url, number: created.number, existing: false };
+      return { url: created.html_url, number: created.number, existing: false, descriptionStale: false };
     } catch (err) {
       // 422 is what GitHub returns when a PR for this head already exists.
       // Finding it is the correct outcome, not a fallback.
@@ -257,10 +267,22 @@ export class GitHubAdapter implements VcsAdapter {
         `/repos/${slug}/pulls?head=${encodeURIComponent(`${owner}:${pr.branch}`)}&state=open`,
       ).catch(() => []);
 
-      if (open.length > 0) {
-        return { url: open[0]!.html_url, number: open[0]!.number, existing: true };
-      }
-      throw err;
+      const found = open[0];
+      if (!found) throw err;
+
+      // Best-effort on purpose. The branch is already published and the PR
+      // already exists, so throwing here would fail a run over its last and
+      // least consequential call — the shape of failure this method was
+      // extracted to stop. The caller says so instead.
+      const descriptionStale = await this.api(`/repos/${slug}/pulls/${found.number}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: pr.title, body: pr.body }),
+      }).then(
+        () => false,
+        () => true,
+      );
+
+      return { url: found.html_url, number: found.number, existing: true, descriptionStale };
     }
   }
 

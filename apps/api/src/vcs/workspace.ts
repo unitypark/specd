@@ -8,7 +8,7 @@ import { Config } from '../config.js';
 import { GitHubAdapter } from './github.adapter.js';
 import { GitLabAdapter } from './gitlab.adapter.js';
 import { VcsService } from './vcs.service.js';
-import { VcsError } from './vcs.types.js';
+import { VcsError, reviewHint } from './vcs.types.js';
 
 export interface PublishResult {
   url: string | null;
@@ -329,12 +329,7 @@ export class WorkspaceService {
     const adapter = new GitHubAdapter(token, this.config.githubApiBase);
     try {
       const opened = await adapter.openPullRequest(repo.name, pr);
-      return {
-        url: opened.url,
-        reviewHint: opened.existing
-          ? `Updated PR #${opened.number} on ${repo.name}. Merging is adopting.`
-          : `Opened PR #${opened.number} on ${repo.name}. Merging is adopting.`,
-      };
+      return { url: opened.url, reviewHint: reviewHint('PR', repo.name, opened) };
     } catch (err) {
       // The branch is safely pushed; only the review surface is missing.
       // Failing here would throw away work that survived, over something the
@@ -361,12 +356,7 @@ export class WorkspaceService {
     const adapter = new GitLabAdapter(token, instanceUrl);
     try {
       const opened = await adapter.openMergeRequest(repo.name, pr);
-      return {
-        url: opened.url,
-        reviewHint: opened.existing
-          ? `Updated MR !${opened.iid} on ${repo.name}. Merging is adopting.`
-          : `Opened MR !${opened.iid} on ${repo.name}. Merging is adopting.`,
-      };
+      return { url: opened.url, reviewHint: reviewHint('MR', repo.name, opened) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`pushed ${pr.branch} but could not open an MR: ${message}`);

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Josefin_Sans, JetBrains_Mono } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 
 /*
@@ -15,29 +15,53 @@ import './globals.css';
  * Light weights carry the display sizes; body copy uses 400 upward, because
  * 300 at 1rem on a dark background is thin enough to shimmer.
  *
- * Self-hosted by next/font at build time — no runtime request, no layout shift.
+ * The files are in this repository, and that is the point. `next/font/google`
+ * fetches from fonts.gstatic.com *at build time*, which made every production
+ * build depend on a third party being reachable — and it twice was not, failing
+ * CI on a change that had nothing to do with the web app. A build that can fail
+ * for a reason no commit caused is a build people learn to re-run without
+ * reading, which is how a real failure gets waved through.
+ *
+ * These are the variable fonts, latin subset: one axis per file rather than a
+ * static file per weight, so five weights and two styles cost three files and
+ * about 100 KB. Both families are OFL-1.1 and the licences ship beside them.
  */
-const display = Josefin_Sans({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '600', '700'],
-  style: ['normal', 'italic'],
+const display = localFont({
+  src: [
+    { path: './fonts/JosefinSans-Variable.woff2', weight: '100 700', style: 'normal' },
+    { path: './fonts/JosefinSans-Italic-Variable.woff2', weight: '100 700', style: 'italic' },
+  ],
   variable: '--font-display',
   display: 'swap',
+  // Josefin's small x-height makes the fallback swap read as a size jump
+  // rather than a face change. Matching the metrics to a system face keeps
+  // the layout still while the real file loads.
+  adjustFontFallback: 'Arial',
+  fallback: ['Futura', 'Avenir Next', 'Century Gothic', 'sans-serif'],
 });
 
-const body = Josefin_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  style: ['normal', 'italic'],
+/*
+ * Same family, second variable so `--font-body` and `--font-display` stay
+ * separate knobs in the CSS. It costs nothing: both point at the file above,
+ * and next/font emits one @font-face per unique source.
+ */
+const body = localFont({
+  src: [
+    { path: './fonts/JosefinSans-Variable.woff2', weight: '100 700', style: 'normal' },
+    { path: './fonts/JosefinSans-Italic-Variable.woff2', weight: '100 700', style: 'italic' },
+  ],
   variable: '--font-body',
   display: 'swap',
+  adjustFontFallback: 'Arial',
+  fallback: ['Futura', 'Avenir Next', 'Century Gothic', 'sans-serif'],
 });
 
-const mono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '700'],
+const mono = localFont({
+  src: [{ path: './fonts/JetBrainsMono-Variable.woff2', weight: '100 800', style: 'normal' }],
   variable: '--font-mono',
   display: 'swap',
+  adjustFontFallback: 'Arial',
+  fallback: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
 });
 
 export const metadata: Metadata = {

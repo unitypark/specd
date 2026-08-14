@@ -49,6 +49,7 @@ var replCommands = []replCommand{
 	{name: "runner-pair", desc: "pair this machine as a self-hosted runner", argLabel: "code", run: func(a string) error { return cmdRunnerPair([]string{a}) }},
 	{name: "runner-token", desc: "print the stored runner token", run: func(string) error { return cmdRunnerToken() }},
 	{name: "open", desc: "open the spec (or project) in the browser", argLabel: "id", argIsOpt: true, run: func(a string) error { return cmdOpen(argsOf(a)) }},
+	{name: "doctor", desc: "check this machine's setup", run: func(string) error { _, err := cmdDoctor(nil); return err }},
 	{name: "exit", desc: "leave the interactive shell", run: nil},
 	{name: "quit", desc: "leave the interactive shell", run: nil},
 }

@@ -165,6 +165,7 @@ func TestExitCodesAreDistinct(t *testing.T) {
 		"error":       exitError,
 		"usage":       exitUsage,
 		"notApproved": exitNotApprove,
+		"unhealthy":   exitUnhealthy,
 	} {
 		if other, dup := seen[code]; dup {
 			t.Fatalf("%s and %s share exit code %d", name, other, code)

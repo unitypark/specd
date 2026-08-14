@@ -30,11 +30,15 @@ const version = "0.1.0"
 //	1  something went wrong
 //	2  usage error
 //	3  the spec exists but is not approved  ← the interesting one
+//	4  `doctor` found something broken
 const (
 	exitOK         = 0
 	exitError      = 1
 	exitUsage      = 2
 	exitNotApprove = 3
+	// 4  `doctor` found something broken. Distinct from 1 so a pipeline can
+	//    tell "specd is misconfigured" from "the command itself failed".
+	exitUnhealthy = 4
 )
 
 func main() {
@@ -77,6 +81,8 @@ func main() {
 		err = cmdOpen(args[1:])
 	case "mcp":
 		err = cmdMCP(args[1:])
+	case "doctor":
+		code, err = cmdDoctor(args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("specd %s\n", version)
 	case "help", "--help", "-h":
@@ -117,6 +123,7 @@ func usage() {
   specd runner token             print the stored runner token (for SPECD_RUNNER_TOKEN)
   specd open [id]                open the spec (or project) in the browser
   specd mcp serve                serve the knowledge base to an AI editor over MCP
+  specd doctor [--json]          check this machine's setup (exit 4 if broken)
 
 Flags:
   --project <slug>               override the default project

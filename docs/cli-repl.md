@@ -47,6 +47,7 @@ needed no changes at all to work here.
 | `/runner-pair` | `specd runner pair <code>` | `code` (required) |
 | `/runner-token` | `specd runner token` | |
 | `/open` | `specd open [id]` | `id` (optional) |
+| `/doctor` | `specd doctor` | |
 | `/exit`, `/quit` | leave the shell | |
 
 `/status` is deliberately **not** the same thing as the existing `spec

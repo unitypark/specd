@@ -546,6 +546,38 @@ export const knowledgeDocCoupling = pgTable(
   ],
 );
 
+/**
+ * What one index run changed in what the project knows.
+ *
+ * Written inside the run's own transaction, so a rolled-back run leaves no
+ * digest claiming work that never landed. `healthBefore` is null on a
+ * project's first run: there was no before, and 0 would read as a collapse.
+ */
+export const knowledgeIndexRuns = pgTable(
+  'knowledge_index_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** Nulled, never cascaded — a disconnected repo's history is still history. */
+    repositoryId: uuid('repository_id').references(() => repositories.id, {
+      onDelete: 'set null',
+    }),
+    repoName: text('repo_name').notNull(),
+    docsAdded: integer('docs_added').notNull().default(0),
+    docsChanged: integer('docs_changed').notNull().default(0),
+    docsRemoved: integer('docs_removed').notNull().default(0),
+    docsRelinked: integer('docs_relinked').notNull().default(0),
+    linksResolved: integer('links_resolved').notNull().default(0),
+    linksBroken: integer('links_broken').notNull().default(0),
+    healthBefore: real('health_before'),
+    healthAfter: real('health_after'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('knowledge_index_runs_project_idx').on(t.projectId, t.createdAt)],
+);
+
 export const knowledgeHealth = pgTable('knowledge_health', {
   projectId: uuid('project_id')
     .primaryKey()

@@ -401,6 +401,15 @@ export class KnowledgeService {
 
       assertNoUnexplainedShrink(stored.length, removals.length, paths.length, repo.name);
 
+      // Read before anything is written, so the digest below can say what this
+      // run moved rather than only where it ended up. Null on a project's very
+      // first run: there was no before, and reporting 0 would read as a
+      // collapse from a perfect score rather than as the absence it is.
+      const [healthRow] = await tx.sql<{ score: number }[]>`
+        SELECT score FROM knowledge_health WHERE project_id = ${repo.projectId}
+      `;
+      const healthBefore = healthRow ? Number(healthRow.score) : null;
+
       const edgesBefore = await edgeCountsBySource(tx, repo.projectId);
       /** Docs this run is entitled to remove rows from. */
       const touched = new Set<string>();
@@ -551,6 +560,51 @@ export class KnowledgeService {
         .where(eq(repositories.id, repo.id));
 
       await this.recomputeHealth(repo.projectId, tx);
+
+      // What this run changed in what the project knows.
+      //
+      // Every number here was already computed above and then discarded. It is
+      // written inside this transaction on purpose: a run that rolls back must
+      // not leave a digest claiming work that never landed.
+      const [linkCounts] = await tx.sql<{ resolved: number; broken: number }[]>`
+        SELECT
+          count(*) FILTER (WHERE resolution_state = 'resolved')::int AS resolved,
+          count(*) FILTER (WHERE resolution_state <> 'resolved')::int AS broken
+        FROM knowledge_doc_links
+        WHERE project_id = ${repo.projectId}
+      `;
+      const [healthAfterRow] = await tx.sql<{ score: number }[]>`
+        SELECT score FROM knowledge_health WHERE project_id = ${repo.projectId}
+      `;
+
+      await tx.sql`
+        INSERT INTO knowledge_index_runs (
+          project_id, repository_id, repo_name,
+          docs_added, docs_changed, docs_removed, docs_relinked,
+          links_resolved, links_broken, health_before, health_after
+        ) VALUES (
+          ${repo.projectId}, ${repo.id}, ${repo.name},
+          ${changed.filter((d) => !d.existingId).length},
+          ${changed.filter((d) => Boolean(d.existingId)).length},
+          ${removals.length}, ${relink.length},
+          ${linkCounts?.resolved ?? 0}, ${linkCounts?.broken ?? 0},
+          ${healthBefore}, ${healthAfterRow ? Number(healthAfterRow.score) : null}
+        )
+      `;
+
+      // Bounded by construction. This table is written on every merge, and a
+      // digest nobody read a hundred runs ago is not worth keeping — the
+      // as-built record and git carry the durable history.
+      await tx.sql`
+        DELETE FROM knowledge_index_runs
+        WHERE project_id = ${repo.projectId}
+          AND id NOT IN (
+            SELECT id FROM knowledge_index_runs
+            WHERE project_id = ${repo.projectId}
+            ORDER BY created_at DESC
+            LIMIT 100
+          )
+      `;
     });
 
     // Drift, from whatever history is available: `git log` for a repo with a
@@ -1823,6 +1877,39 @@ export class KnowledgeService {
         unknown_freshness_count = EXCLUDED.unknown_freshness_count,
         notes = EXCLUDED.notes,
         computed_at = now()
+    `;
+  }
+
+  /**
+   * The recent index runs, newest first — what each one changed in what the
+   * project knows.
+   *
+   * The question this answers is the one a reviewer asks after a merge and
+   * could not previously ask at all: not "how healthy is the knowledge base"
+   * but "what did that change in it". `healthBefore` is null for a project's
+   * first run, and callers must render that as unmeasured rather than as zero.
+   */
+  async indexRuns(projectId: string, limit = 10) {
+    return this.handle.sql<
+      {
+        repo_name: string;
+        docs_added: number;
+        docs_changed: number;
+        docs_removed: number;
+        docs_relinked: number;
+        links_resolved: number;
+        links_broken: number;
+        health_before: number | null;
+        health_after: number | null;
+        created_at: Date;
+      }[]
+    >`
+      SELECT repo_name, docs_added, docs_changed, docs_removed, docs_relinked,
+             links_resolved, links_broken, health_before, health_after, created_at
+      FROM knowledge_index_runs
+      WHERE project_id = ${projectId}
+      ORDER BY created_at DESC
+      LIMIT ${limit}
     `;
   }
 

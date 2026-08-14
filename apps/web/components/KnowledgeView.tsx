@@ -47,10 +47,43 @@ const ICONS: Record<string, string> = {
   research: '🔬',
 };
 
+type IndexRun = {
+  repo_name: string;
+  docs_added: number;
+  docs_changed: number;
+  docs_removed: number;
+  docs_relinked: number;
+  links_resolved: number;
+  links_broken: number;
+  health_before: number | null;
+  health_after: number | null;
+  created_at: string;
+};
+
+/**
+ * A run in a sentence, naming only what it actually did.
+ *
+ * Printing every counter including its zeroes ("0 added, 0 changed, 0 removed")
+ * is how a list of runs becomes unreadable and stops being scanned — most runs
+ * touch one thing, and the one that touched five should look different at a
+ * glance.
+ */
+function describeRun(run: IndexRun): string {
+  const parts = [
+    run.docs_added && `${run.docs_added} added`,
+    run.docs_changed && `${run.docs_changed} changed`,
+    run.docs_removed && `${run.docs_removed} removed`,
+    run.docs_relinked && `${run.docs_relinked} re-linked`,
+  ].filter(Boolean);
+  if (parts.length === 0) return 'No document changed';
+  return parts.join(' · ');
+}
+
 export function KnowledgeView({ slug }: { slug: string }) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [grounding, setGrounding] = useState<{ avgCitations: number; avgUnverified: number; sample: number } | null>(null);
+  const [indexRuns, setIndexRuns] = useState<IndexRun[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
@@ -76,12 +109,13 @@ export function KnowledgeView({ slug }: { slug: string }) {
   }
 
   const load = useCallback(async () => {
-    const res = await get<{ docs: Doc[]; health: Health; grounding: typeof grounding }>(
+    const res = await get<{ docs: Doc[]; health: Health; grounding: typeof grounding; indexRuns: IndexRun[] }>(
       `/projects/${slug}/knowledge`,
     );
     setDocs(res.docs);
     setHealth(res.health);
     setGrounding(res.grounding);
+    setIndexRuns(res.indexRuns ?? []);
   }, [slug]);
 
   useEffect(() => {
@@ -244,6 +278,34 @@ export function KnowledgeView({ slug }: { slug: string }) {
 
         <div className="card">
           <div className="head">
+            <span>What the last index runs changed</span>
+          </div>
+          <div className="pad small">
+            {indexRuns.length === 0 ? (
+              <p>Nothing indexed yet. The first run happens when a setup PR merges.</p>
+            ) : (
+              <ul className="runs">
+                {indexRuns.map((run, i) => (
+                  <li key={`${run.created_at}-${i}`}>
+                    <b>{describeRun(run)}</b> in {run.repo_name}
+                    <span className="when">
+                      {' · '}
+                      {new Date(run.created_at).toLocaleString()}
+                      {/* Unmeasured is not zero: a project's first run has no
+                          before, and rendering 0 would read as a collapse. */}
+                      {run.health_before === null
+                        ? ' · first run, no earlier score'
+                        : ` · health ${run.health_before.toFixed(0)}% → ${(run.health_after ?? 0).toFixed(0)}%`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="head">
             <span>Grounding quality · last {grounding?.sample ?? 0} specs</span>
           </div>
           <div className="pad small">
@@ -258,6 +320,21 @@ export function KnowledgeView({ slug }: { slug: string }) {
       </div>
 
       <style jsx>{`
+        .runs {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+        }
+        .runs li {
+          padding: 0.35rem 0;
+          border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.18));
+        }
+        .runs li:last-child {
+          border-bottom: none;
+        }
+        .when {
+          opacity: 0.7;
+        }
         .grid {
           display: grid;
           grid-template-columns: 1.4fr 1fr;

@@ -369,12 +369,14 @@ export class ProjectsController {
   ) {
     const project = await this.projects.bySlug(slug);
     await this.projects.requireRole(user.sub, project.id, ['owner', 'maintainer', 'reviewer']);
-    const [docs, health, grounding] = await Promise.all([
+    const [docs, health, grounding, indexRuns] = await Promise.all([
       this.knowledge.listDocs(project.id, repositoryId),
       this.knowledge.health(project.id),
       this.knowledge.groundingQuality(project.id),
+      // What the recent runs changed, not only where they ended up.
+      this.knowledge.indexRuns(project.id, 5),
     ]);
-    return { docs, health, grounding };
+    return { docs, health, grounding, indexRuns };
   }
 
   /**

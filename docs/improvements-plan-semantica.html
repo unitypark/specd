@@ -277,16 +277,27 @@
 </header>
 
 <div class="tldr">
-  <h2>Status — updated 2026-08-13</h2>
-  <p><b>Phase 1 is delivered in full</b> — <b>#95</b> the MCP server, <b>#94</b> the Claude Code
-  plugin, <b>#96</b> Ground wiring both into every repo it grounds. <b>#97</b> delivers 2.1,
-  precedent retrieval, and <b>#100</b> closes 3.4 and 3.5. Three ADRs came out of it: <b>0017</b>
-  the engine over MCP, <b>0018</b> the working agreements as a plugin, plus the citation-judging
-  move into <code>packages/shared</code> that 0017 records. The research and this plan are
-  <b>#93</b>.</p>
-  <p><b>Still open: 2.2, 2.3, 2.4, 3.1, 3.2, 3.3.</b> 2.3 waits on #95 — it needs
-  <code>judgeCitation</code> in <code>packages/shared</code>, which that PR moves there — and the
-  MCP <code>list_precedents</code> tool waits on both #95 and #97.</p>
+  <h2>Delivered — updated 2026-08-14</h2>
+  <p><b>Every item in this plan is now merged.</b> Phase 1: <b>#95</b> the MCP server,
+  <b>#94</b> the Claude Code plugin, <b>#96</b> Ground wiring both into every repo it
+  grounds. Phase 2: <b>#97</b> precedents, <b>#101</b> the index-run digest, <b>#102</b>
+  build-time citation re-verification, <b>#103</b> policy as data. Phase 3: <b>#104</b>
+  <code>specd doctor</code>, <b>#105</b> a local embedding provider, <b>#107</b>
+  <code>pnpm demo</code>, and <b>#100</b> the pricing-page honesty gap with the cadence
+  scaffolding. The research and this plan are <b>#93</b>.</p>
+  <p>Two ADRs came out of it — <b>0017</b> the engine over MCP and <b>0018</b> the working
+  agreements as a plugin — plus the citation-judging move into <code>packages/shared</code>
+  and two migrations (<code>0017_knowledge_index_runs</code>,
+  <code>0018_gate_policy</code>). The API suite went from 382 to <b>443</b> tests.</p>
+  <p><b>Three items changed shape under review, and the reasons are the useful part.</b>
+  Precedent retrieval did not work at all on its only production call path — the lexical
+  predicate ANDed every term of a whole ticket — and every test passed because every test
+  passed a tidy phrase rather than the query the caller actually sends.
+  <code>verify_citation</code> was reporting specd's own indexed source files as
+  fabricated, which is precisely the failure the four-verdict design exists to prevent.
+  And <code>pnpm demo</code> ships no Dockerfile: <code>deploy.md</code> says no platform
+  or image has been chosen, and answering that question sideways would have made the
+  document wrong.</p>
   <hr style="border:none;border-top:1px solid var(--line);margin:18px 0;">
   <h2 style="margin-top:0;">The short version <span style="text-transform:none;letter-spacing:0;color:var(--ink-3);font-family:var(--sans);font-size:13px;">(as written)</span></h2>
   <p><b>Three benchmarks now, one repeated finding.</b> specd built a citation-grade retrieval engine —
@@ -561,7 +572,7 @@
     </div>
 
     <div class="item">
-      <div class="head"><h4>2.2 — The index-run digest: what changed in what we know</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #101</span> 2.2 — The index-run digest: what changed in what we know</h4>
         <div class="chips"><span class="chip">sem</span><span class="chip">impact: med-high</span><span class="chip">effort: S-M</span></div></div>
       <p>Semantica snapshots whole graphs into SQLite with checksums to be able to say "nodes added, edges
       removed, here's the diff" — machinery it needs because it has no git. specd's index run already
@@ -576,7 +587,7 @@
     </div>
 
     <div class="item">
-      <div class="head"><h4>2.3 — Re-verify citations where the gate is re-checked</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #102</span> 2.3 — Re-verify citations where the gate is re-checked</h4>
         <div class="chips"><span class="chip">sem</span><span class="chip">audit</span><span class="chip okc">impact: high</span><span class="chip">effort: S-M</span></div></div>
       <p>Semantica's temporal-validity instinct — a fact is valid <i>for a window</i>, and queries must not
       serve expired facts — applied at specd's most important moment. A spec approved Monday can build
@@ -590,7 +601,7 @@
     </div>
 
     <div class="item">
-      <div class="head"><h4>2.4 — Policy as data on the gate, with exceptions that leave a trace</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #103</span> 2.4 — Policy as data on the gate, with exceptions that leave a trace</h4>
         <div class="chips"><span class="chip">sem</span><span class="chip">impact: med</span><span class="chip">effort: M</span></div></div>
       <p>The gate is binary today; projects will want house rules — and semantica's PolicyEngine has the one
       detail worth stealing whole: non-compliance can be recorded as an <b>exception with an approver and a
@@ -609,7 +620,7 @@
     <header><span class="pnum">Phase 3</span><h3>Adoption &amp; honesty</h3><span class="ptag">the funnel, then the copy</span></header>
 
     <div class="item">
-      <div class="head"><h4>3.1 — <code>specd doctor</code></h4>
+      <div class="head"><h4><span class="chip shipped">shipped #104</span> 3.1 — <code>specd doctor</code></h4>
         <div class="chips"><span class="chip">sem</span><span class="chip">impact: med</span><span class="chip">effort: S</span></div></div>
       <p>One command that verifies the whole rig and says what is wrong in order: DB reachable, pgvector
       present, migrations current, JWT/vault keys set, AI mode resolvable (the preflight endpoint already
@@ -622,7 +633,7 @@
     </div>
 
     <div class="item">
-      <div class="head"><h4>3.2 — One command to a running, seeded specd</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #107</span> 3.2 — One command to a running, seeded specd</h4>
         <div class="chips"><span class="chip">audit</span><span class="chip okc">impact: high</span><span class="chip">effort: M</span></div></div>
       <p>Semantica's funnel is <code>pip install</code> → five minutes → dashboard. specd's is a wizard at
       the end of a manual rig. Ship <code>docker compose --profile demo up</code>: API + web + Postgres,
@@ -635,7 +646,7 @@
     </div>
 
     <div class="item">
-      <div class="head"><h4>3.3 — A real embedding option that stays local-first</h4>
+      <div class="head"><h4><span class="chip shipped">shipped #105</span> 3.3 — A real embedding option that stays local-first</h4>
         <div class="chips"><span class="chip">audit</span><span class="chip">impact: med-high</span><span class="chip">effort: S-M</span></div></div>
       <p>The README names the ceiling itself: the default embedder is a lexical hash, so both retrieval arms
       measure similar signals until a key is configured. Add one OpenAI-compatible local endpoint provider

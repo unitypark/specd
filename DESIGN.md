@@ -163,6 +163,12 @@ Josefin is a geometric Art Deco face — circular bowls, high-waisted joins, a
 long ascender over a short body. It carries the theatrical register the palette
 already implies.
 
+Both families are **vendored** into `apps/web/app/fonts/` as latin-subset
+variable files and loaded with `next/font/local`. `next/font/google` downloads
+at build time, which made every production build depend on fonts.gstatic.com
+being reachable — and twice it was not, failing CI on changes that had nothing
+to do with the web app. Both are OFL-1.1 and the licences sit beside the files.
+
 ### The x-height tax
 
 Josefin's small x-height is the source of its character and the thing that has

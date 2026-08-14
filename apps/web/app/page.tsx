@@ -28,6 +28,22 @@ const STEPS = [
   },
 ];
 
+/*
+ * The hero's numbers. Unlike METRICS below — which are openly labelled as a
+ * fictional pilot — every one of these is reproducible from this repository:
+ * the first three are `pnpm eval` output, the fourth is an invariant with a
+ * test and a database CHECK constraint behind it.
+ */
+const HERO_STATS: [string, string, string][] = [
+  ['99.5%', 'F1 · Go symbol extraction', 'graded by go/parser over the Go stdlib — 316k declarations'],
+  ['100%', 'retrieval recall', 'on the labelled question set · 0.861 MRR'],
+  ['4', 'citation verdicts', 'supported · unsupported · unknown · stale'],
+  ['0', 'unapproved agent changes', 'enforced in the state machine and a database constraint'],
+];
+
+/** What specd sits between, named plainly. */
+const PLUGS = ['GitHub', 'GitLab', 'Jira', 'Claude Code', 'Cursor', 'MCP', 'Postgres'];
+
 const METRICS = [
   ['2.1', ' days', 'TICKET → APPROVED SPEC', 'median cycle: draft plus one review round'],
   ['84', '%', 'FIRST-PASS PR ACCEPTANCE', 'merged without rework — the spec caught it earlier'],
@@ -63,11 +79,30 @@ export default function Preview() {
     <main className={styles.page}>
       <LandingNav />
 
-      {/* 1 · HERO — unchanged, it already works. */}
+      {/*
+        1 · HERO.
+        Restructured on the anatomy the reference page (graphify.com) uses, in
+        this order: capability chips, the claim, how it works in one sentence,
+        two actions plus a quiet third, the one command, then numbers and the
+        things it plugs into. The point of the shape is that a visitor who
+        reads only the top 700px still learns what specd is, what it costs to
+        try, and what backs the claim.
+
+        Every number in the strip is one this repository can produce on
+        demand — `pnpm eval` writes them to evals/results/. The invented pilot
+        metrics further down the page are labelled as invented; the hero is
+        not the place for those.
+      */}
       <section className={`${landing.heroband} ${styles.heroCharcoal}`}>
         <div className={landing.hero}>
           <div>
-            <p className="tag">FAIR-CODE • SPEC-DRIVEN • ONE-STOP SETUP</p>
+            {/* Two chips rather than one line with a separator: a mid-string
+                dot strands itself at the end of a line when the pair wraps,
+                which is every phone. */}
+            <p className={styles.eyebrow}>
+              <span>Spec-driven delivery</span>
+              <span>Human-approved by design</span>
+            </p>
             <h1 className={landing.h1}>
               <span>Software,</span>
               <span>built</span>
@@ -76,12 +111,16 @@ export default function Preview() {
               </span>
             </h1>
             <p className={landing.sub}>
-              One setup builds your knowledge base, briefs a custom agent with your full context,
-              and gates every change behind a <b>human-approved spec</b>.
+              specd grounds a knowledge base in your own repositories, drafts every ticket into a
+              spec with a <b>citation behind each claim</b>, and gates it behind a{' '}
+              <b>named human</b> — so the agent builds what you approved, and nothing else.
             </p>
             <div className={landing.ctas}>
               <Link href="/setup" className={landing.cta}>
                 Start your setup
+              </Link>
+              <Link href="/docs" className={styles.heroSecondary}>
+                Read the docs
               </Link>
               <AuthLink
                 className={landing.ghost}
@@ -90,11 +129,54 @@ export default function Preview() {
               />
             </div>
             <p className={landing.trust}>
-              one fixed pipeline · your git stays the source of truth · agents open PRs, never push
+              MIT licensed · Postgres is the only runtime dependency · agents open PRs, never push
             </p>
+
+            {/* The one command, shown rather than described. A visitor
+                evaluating a developer tool wants to know what trying it costs
+                before they want to know what it does. */}
+            <div className={styles.install}>
+              <span className={styles.installcap}>TRY IT LOCALLY</span>
+              <code>
+                <b>git clone</b> https://github.com/unitypark/specd.git
+                {'\n'}
+                <b>pnpm install</b> && <b>pnpm demo</b>
+              </code>
+              <span className={styles.installnote}>
+                Postgres, the API and the web app — one command, on your machine.
+              </span>
+            </div>
           </div>
           <div>
             <CompoundingLoop />
+          </div>
+        </div>
+
+        <div className={styles.proof}>
+          <div className={styles.proofin}>
+            <dl className={styles.stats}>
+              {HERO_STATS.map(([value, label, note]) => (
+                <div key={label}>
+                  <dt>{value}</dt>
+                  <dd>
+                    <b>{label}</b>
+                    <span>{note}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className={styles.proofnote}>
+              Extraction and retrieval scores come from <code>pnpm eval</code>, graded against
+              independent oracles and committed under <code>evals/results/</code>.
+            </p>
+            <div className={styles.plugs}>
+              <span>Plugs into</span>
+              <ul>
+                {PLUGS.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
       </section>

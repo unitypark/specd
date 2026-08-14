@@ -30,6 +30,14 @@ eval`), also outside the workspace on purpose: evals grade, they never gate.
 | `packages/shared` | Spec lifecycle state machine (`lifecycle.ts`), spec content + EARS (`spec.ts`), model allowlist + rate card (`models.ts`), Claude-reply parsing and shape-check (`claude-code-parse.ts`) |
 | `packages/db` | Drizzle schema (`src/schema.ts`, 20 tables) + plain-SQL migrations |
 | `packages/templates` | `AGENTS.md`, `CLAUDE.md`, `knowledge/` scaffold for onboarded repos; `evidence.ts` reads a repo's facts (commands, CI, services, config, entities) before any model call (`decisions/0015`) |
+| `scripts/site` | Static-site generator for the published documentation — renders `apps/web/lib/docs` to HTML for GitHub Pages (`decisions/0019`). Outside the workspace, like `evals/`: it is run by root scripts (`pnpm site:build`) and imports the docs modules through `tsx`. |
+
+One source, two renderers. The product documentation is authored as data in
+`apps/web/lib/docs/` and rendered by `apps/web/components/DocBlocks.tsx` (React,
+serving `/docs`) **and** `scripts/site/render.ts` (HTML, serving the Pages
+site). Nothing under `lib/docs/` may import outside itself — the generator loads
+it with no bundler and no React, so an aliased import would break the published
+site while leaving typecheck and tests green (`decisions/0019`).
 
 File counts are deliberately not recorded here — they rot faster than roles.
 Roles above were verified in source on 2026-08-11: `apps/api/src` is NestJS

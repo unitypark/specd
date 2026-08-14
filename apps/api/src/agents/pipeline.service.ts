@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   BUILDABLE_STATUSES,
+  citationDrift,
   isModelId,
   slugify,
   specBranchName,
+  type CitationDrift,
   type ModelId,
   type SpecView,
 } from '@specd/shared';
@@ -373,6 +375,26 @@ export class PipelineService {
       .map((c) => `[${c.path}${c.heading ? `#${c.heading}` : ''}]\n${c.text.slice(0, 1_500)}`)
       .join('\n\n---\n\n');
 
+    // The gate is re-checked at the point of use; the evidence never was.
+    // A spec approved on Monday can build on Friday against a knowledge base
+    // that merged on Wednesday, so a claim can arrive here citing a section
+    // that has since been rewritten or overtaken by the code it describes.
+    //
+    // This reuses the retrieval above rather than checking each citation on
+    // its own — same chunks, same coverage, same judgement the SpecAgent made
+    // at drafting, for the cost of one more query instead of one per claim.
+    const drifted = citationDrift(
+      spec.content.design,
+      chunks,
+      {
+        ...(await this.knowledge.coverageFor(
+          input.projectId,
+          chunks.map((c) => c.path),
+        )),
+        truncatedCount: 0,
+      },
+    );
+
     const run = await this.runs.start({
       projectId: input.projectId,
       kind: 'build',
@@ -394,6 +416,24 @@ export class PipelineService {
       });
     }
 
+    // Advisory, deliberately: this reports, it does not refuse. A citation that
+    // drifted is a reason for a human to look, and turning it into a block
+    // would mean an unrelated doc edit could stop an approved spec from
+    // building. Making it refusable is a per-project policy decision (2.4).
+    for (const claim of drifted) {
+      await run.log(
+        `  citation drifted since approval: ${claim.citation} was ${claim.was}, now ${claim.now}` +
+          (claim.note ? ` — ${claim.note}` : ''),
+        'warn',
+      );
+    }
+    if (drifted.length > 0) {
+      await run.log(
+        `${drifted.length} of this spec's citations no longer stand where they did at approval`,
+        'warn',
+      );
+    }
+
     // Dispatch to a paired runner when there is one — it builds on its own
     // machine with its own git credentials (D9). A `local` repository has no
     // remote another machine could clone, so it always stays in-process:
@@ -409,6 +449,7 @@ export class PipelineService {
           projectName: project.name,
           knowledgeExcerpts,
           model,
+          drifted,
         });
 
         if (prepared.remote) {
@@ -463,6 +504,7 @@ export class PipelineService {
       projectName: project.name,
       knowledgeExcerpts,
       model,
+      drifted,
       run,
     });
 
@@ -479,6 +521,7 @@ export class PipelineService {
   private async executeBuild(input: {
     repo: Awaited<ReturnType<RepositoriesService['get']>>;
     spec: SpecView;
+    drifted: CitationDrift[];
     projectName: string;
     knowledgeExcerpts: string;
     model: ModelId;

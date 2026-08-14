@@ -8,6 +8,7 @@ import {
   renderAsBuiltMarkdown,
   slugify,
   specBranchName,
+  type CitationDrift,
   type ModelId,
   type SpecTask,
   type SpecView,
@@ -51,6 +52,8 @@ export interface PreparedBuild {
   asBuiltPath: string;
   asBuiltCommitMessage: string;
   verifyCommand: string | null;
+  /** Citations that no longer stand where they did at approval (advisory). */
+  drifted?: CitationDrift[];
   tasks: PreparedBuildTask[];
   /** Null for `local` repositories, which only ever build on the API host. */
   remote: { cloneUrl: string; baseBranch: string } | null;
@@ -112,6 +115,7 @@ export class BuildAgent {
     projectName: string;
     knowledgeExcerpts: string;
     model: ModelId;
+    drifted?: CitationDrift[];
   }): Promise<PreparedBuild> {
     const { repo, spec, model } = input;
 
@@ -132,6 +136,7 @@ export class BuildAgent {
       model,
       branch,
       asBuiltPath: asBuilt,
+      drifted: input.drifted ?? [],
       asBuiltCommitMessage: `${spec.ticketKey}: file as-built spec\n\nCloses the loop — this spec now grounds the next one.`,
       verifyCommand: typeof stack.verifyCommand === 'string' ? stack.verifyCommand : null,
       remote: await this.workspaces.remoteFor(repo),
@@ -286,7 +291,13 @@ export class BuildAgent {
       // never pushed is a build that produced nothing.
       const published = await workspace.publish({
         title: `${spec.ticketKey}: ${spec.title}`,
-        body: buildPrBody(spec, { commits, verifyPassed, verifyCommand, asBuilt }),
+        body: buildPrBody(spec, {
+        commits,
+        verifyPassed,
+        verifyCommand,
+        asBuilt,
+        drifted: plan.drifted ?? [],
+      }),
       });
 
       await run.log(`branch ${branch} ready · ${commits} commit(s) · ${published.reviewHint}`);
@@ -455,6 +466,7 @@ export function buildPrBody(
     verifyPassed: boolean | null;
     verifyCommand: string | null;
     asBuilt: string;
+    drifted?: CitationDrift[];
   },
 ): string {
   const verify =
@@ -471,6 +483,22 @@ export function buildPrBody(
     ? `Approved by **${spec.approvedBy}**${spec.approvedAt ? ` on ${new Date(spec.approvedAt).toISOString().slice(0, 10)}` : ''}.`
     : 'No approval is recorded for this spec.';
 
+  // Named where the reviewer is, not only in a run log they would have to go
+  // and find. The spec was approved against evidence; if that evidence moved
+  // in between, the person merging this is the last one who can notice.
+  const drift = (meta.drifted ?? []).length
+    ? [
+        '',
+        `> **${meta.drifted!.length} citation(s) no longer stand where they did at approval.**`,
+        '> The spec was approved against evidence that has since changed. This did not',
+        '> block the build — it is here so it reaches a human before the merge does.',
+        '',
+        ...meta.drifted!.map(
+          (d) => `> - \`${d.citation}\` — was \`${d.was}\`, now \`${d.now}\`${d.note ? `: ${d.note}` : ''}`,
+        ),
+      ]
+    : [];
+
   return [
     `Built from **${spec.ticketKey} v${spec.version}** — ${spec.title}`,
     '',
@@ -479,6 +507,7 @@ export function buildPrBody(
     `- ${meta.commits} commit(s), one per task`,
     `- As-built spec filed at \`${meta.asBuilt}\``,
     `- ${verify}`,
+    ...drift,
     '',
     '---',
     '',

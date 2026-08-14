@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { looksUnrunnable } from './build.agent.js';
+import { buildPrBody, looksUnrunnable } from './build.agent.js';
 
 /**
  * "Your tests failed" and "I could not run your tests" are different signals.
@@ -42,5 +42,60 @@ describe('verify outcome classification', () => {
 
   it('does not fire on empty output', () => {
     expect(looksUnrunnable('')).toBe(false);
+  });
+});
+
+describe('the PR body when evidence moved', () => {
+  const spec = {
+    ticketKey: 'CRM-1',
+    title: 'Add a widget',
+    version: 2,
+    status: 'building',
+    approvedBy: 'Theo',
+    approvedAt: '2026-08-01T00:00:00.000Z',
+    content: {
+      requirements: [],
+      design: [],
+      tasks: [],
+      outOfScope: [],
+      openQuestions: [],
+    },
+  } as unknown as Parameters<typeof buildPrBody>[0];
+
+  it('says nothing when every citation still stands', () => {
+    const body = buildPrBody(spec, {
+      commits: 3,
+      verifyPassed: true,
+      verifyCommand: 'pnpm test',
+      asBuilt: 'knowledge/specs/CRM-1-add-widget.md',
+      drifted: [],
+    });
+    expect(body).not.toContain('no longer stand');
+  });
+
+  it('names drifted citations where the reviewer is, not only in the run log', () => {
+    // The person merging is the last one who can notice that the spec was
+    // approved against evidence which has since changed.
+    const body = buildPrBody(spec, {
+      commits: 3,
+      verifyPassed: true,
+      verifyCommand: 'pnpm test',
+      asBuilt: 'knowledge/specs/CRM-1-add-widget.md',
+      drifted: [
+        {
+          claim: 'Auth is JWT.',
+          citation: 'knowledge/architecture.md#auth',
+          was: 'supported',
+          now: 'unsupported',
+          note: 'no such section',
+        },
+      ],
+    });
+    expect(body).toContain('1 citation(s) no longer stand');
+    expect(body).toContain('knowledge/architecture.md#auth');
+    expect(body).toContain('was `supported`, now `unsupported`');
+    // Advisory, and it says so — otherwise a reader assumes the build was
+    // gated on this and that somebody already decided it was fine.
+    expect(body).toContain('did not');
   });
 });

@@ -160,6 +160,30 @@ the same distinction `freshness` already draws. The table is capped at the most
 recent 100 runs per project: it is written on every merge, and the durable
 history is git and `knowledge/specs/`.
 
+### Citations re-checked at build time
+
+The gate is re-checked at the point of use — approval can be revoked between
+the click and the build. The *evidence* was not: it was judged once, at
+drafting, and never again. A spec approved on Monday can build on Friday
+against a knowledge base that merged on Wednesday, citing a section that has
+since been rewritten or overtaken by the code it describes.
+
+`citationDrift()` re-judges every claim that carries both a citation and a
+recorded verdict, reusing the retrieval the build station already performs — so
+it costs one more query rather than one per claim, and it reaches the same
+judgement `judgeCitation` made at drafting.
+
+Three deliberate limits:
+
+- **Only degradation is reported.** A claim that was `unknown` and is now
+  `supported` needs nobody's attention; the reviewer accepted the weaker state.
+- **A claim with no recorded verdict is skipped**, not guessed at. Specs drafted
+  before verdicts existed would otherwise all read as having drifted, forever.
+- **It is advisory.** It reports in the run log and in the PR body, where the
+  person merging can still act on it; it does not refuse the build, because an
+  unrelated doc edit should not stop an approved spec from being built. Making
+  it refusable is a per-project policy decision, not a default.
+
 ### Precedents
 
 `KnowledgeService.findPrecedents()` is a second lookup over the same chunks,

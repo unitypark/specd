@@ -127,3 +127,60 @@ function stalenessOf(
     verdict: 'stale',
   };
 }
+
+/** One claim whose evidence no longer stands where it did at approval. */
+export interface CitationDrift {
+  claim: string;
+  citation: string;
+  /** The verdict recorded when a human approved this spec. */
+  was: CitationVerdict;
+  /** What the same citation judges to now. */
+  now: CitationVerdict;
+  /** The sentence explaining the new verdict, for whoever has to act on it. */
+  note: string | null;
+}
+
+/**
+ * Which of an approved spec's citations no longer stand.
+ *
+ * A spec approved on Monday can build on Friday against a knowledge base that
+ * merged on Wednesday. The gate is re-checked at the point of use — approval
+ * can be revoked between click and build — but the *evidence* was checked once,
+ * at drafting, and never again. So a design claim can arrive at the build
+ * station citing a section that has since been rewritten, deleted, or overtaken
+ * by the code it describes, and nothing says so.
+ *
+ * Only degradation is reported. A claim that was `unknown` at approval and is
+ * `supported` now needs nobody's attention; the reviewer already accepted the
+ * weaker state. And a claim with no recorded verdict is skipped rather than
+ * guessed at — specs drafted before verdicts existed would otherwise all read
+ * as having drifted.
+ */
+export function citationDrift(
+  design: { text: string; citation?: string; verdict?: CitationVerdict }[],
+  chunks: RetrievedChunk[],
+  coverage: CitationCoverage,
+): CitationDrift[] {
+  // Best to worst. A move down this list is what "drifted" means.
+  const rank: Record<CitationVerdict, number> = {
+    supported: 0,
+    stale: 1,
+    unknown: 2,
+    unsupported: 3,
+  };
+
+  const drifted: CitationDrift[] = [];
+  for (const claim of design) {
+    if (!claim.citation || !claim.verdict) continue;
+    const judged = judgeCitation(claim.citation, chunks, coverage);
+    if (rank[judged.verdict] <= rank[claim.verdict]) continue;
+    drifted.push({
+      claim: claim.text,
+      citation: claim.citation,
+      was: claim.verdict,
+      now: judged.verdict,
+      note: judged.unverified ?? null,
+    });
+  }
+  return drifted;
+}

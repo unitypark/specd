@@ -344,11 +344,24 @@ and citable as `path#Class.method`.
 
 **Nothing pretends.** The default embedder is a deterministic local hash — no
 second API key, works offline, and the README-level truth is that it is
-lexical: the full-text arm carries relevance until you point
-`SPECD_EMBEDDING_PROVIDER=voyage` at a real model (misconfiguring it fails
-loudly rather than degrading silently). Truncation is announced only when real
-matches were cut. A doc with no commit date reports freshness *unmeasured*,
-not fresh.
+lexical: the full-text arm carries relevance until you point the index at a
+real model. Two ways to do that, and misconfiguring either fails loudly rather
+than degrading silently:
+
+```bash
+SPECD_EMBEDDING_PROVIDER=voyage   VOYAGE_API_KEY=...          # hosted
+SPECD_EMBEDDING_PROVIDER=openai   SPECD_EMBEDDING_BASE_URL=http://localhost:11434/v1
+```
+
+The second is any OpenAI-compatible `/v1/embeddings` endpoint — Ollama, LM
+Studio, llama.cpp, vLLM — so the ceiling comes off **without a cloud key and
+without a repository's knowledge leaving the machine**. The model must produce
+1024-dimension vectors to fit the pgvector column; the API probes the endpoint
+at startup and refuses a mismatch by name, rather than failing on an insert
+halfway through the first index run.
+
+Truncation is announced only when real matches were cut. A doc with no commit
+date reports freshness *unmeasured*, not fresh.
 
 ## Evals
 

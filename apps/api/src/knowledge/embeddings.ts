@@ -114,6 +114,98 @@ export class VoyageEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
+/**
+ * Any OpenAI-compatible `/v1/embeddings` endpoint.
+ *
+ * This is the one that lifts the ceiling the README names. The built-in hash
+ * embedder is lexical by construction, so both retrieval arms measure similar
+ * signals and no amount of tuning gets past it — and the only way out was a
+ * cloud API key, which a local-first product should not have to require.
+ * Ollama, LM Studio, llama.cpp and vLLM all speak this shape, so pointing
+ * SPECD_EMBEDDING_BASE_URL at localhost buys real semantic retrieval without
+ * a repository's knowledge leaving the machine.
+ *
+ * Symmetric, unlike Voyage: this API has no `input_type`, so a query and a
+ * document are encoded the same way. That is a property of the endpoint, not a
+ * simplification here — pretending otherwise would mean sending a parameter
+ * these servers reject.
+ */
+export class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
+  readonly name = 'openai-compatible';
+  /**
+   * Whatever the server returns, discovered on the first call rather than
+   * configured. Embedding dimensions vary per model (768 for
+   * nomic-embed-text, 1024 for mxbai-embed-large, 1536 for
+   * text-embedding-3-small — only the middle one fits this index), and a
+   * number typed into an env var is a number
+   * that will eventually be wrong — silently, because a mismatched vector is
+   * still a vector.
+   */
+  private discovered: number | null = null;
+
+  constructor(
+    private readonly baseUrl: string,
+    readonly model: string,
+    private readonly apiKey: string,
+  ) {}
+
+  get dimensions(): number {
+    // Before the first call, report the column width the schema was built
+    // with. `assertUsable()` is what actually settles this.
+    return this.discovered ?? EMBEDDING_DIM;
+  }
+
+  /**
+   * Ask the endpoint for one vector, and refuse now if it cannot serve this
+   * index.
+   *
+   * pgvector columns are fixed-width. A model whose vectors do not fit the
+   * column fails on insert, mid-run, after the slow half of indexing is done —
+   * so the check happens at startup where the error can name the model, the
+   * width it returned, and the width this index needs.
+   */
+  async assertUsable(): Promise<void> {
+    const [probe] = await this.embed(['specd embedding probe'], 'query');
+    if (!probe) throw new Error(`${this.model} at ${this.baseUrl} returned no embedding.`);
+    if (probe.length !== EMBEDDING_DIM) {
+      throw new Error(
+        `${this.model} at ${this.baseUrl} returns ${probe.length}-dimension vectors, but this ` +
+          `index stores ${EMBEDDING_DIM}. Choose a ${EMBEDDING_DIM}-dimension model ` +
+          '(nomic-embed-text is one), or rebuild the index for the width you want.',
+      );
+    }
+    this.discovered = probe.length;
+  }
+
+  async embed(texts: string[], _input: EmbeddingInput = 'document'): Promise<number[][]> {
+    const out: number[][] = [];
+    for (let i = 0; i < texts.length; i += 96) {
+      const batch = texts.slice(i, i + 96);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      // A local server usually needs no key, and sending an empty bearer token
+      // makes some of them reject the request outright.
+      if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
+
+      const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/embeddings`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: this.model, input: batch }),
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          `Embedding request to ${this.baseUrl} failed (${res.status}): ${await res.text()}`,
+        );
+      }
+
+      const body = (await res.json()) as { data: { embedding: number[]; index: number }[] };
+      const sorted = [...(body.data ?? [])].sort((a, b) => a.index - b.index);
+      out.push(...sorted.map((d) => l2normalize(d.embedding)));
+    }
+    return out;
+  }
+}
+
 @Injectable()
 export class EmbeddingService {
   private readonly provider: EmbeddingProvider;
@@ -131,6 +223,21 @@ export class EmbeddingService {
         );
       }
       this.provider = new VoyageEmbeddingProvider(config.voyageApiKey);
+    } else if (config.embeddingProvider === 'openai') {
+      // Same discipline as Voyage above: an operator who asked for a real
+      // embedder gets it or gets an error. Quietly serving hash vectors from a
+      // misconfigured endpoint is the failure that hides longest.
+      if (!config.embeddingBaseUrl) {
+        throw new Error(
+          'SPECD_EMBEDDING_PROVIDER=openai requires SPECD_EMBEDDING_BASE_URL ' +
+            '(e.g. http://localhost:11434/v1 for Ollama).',
+        );
+      }
+      this.provider = new OpenAiCompatibleEmbeddingProvider(
+        config.embeddingBaseUrl,
+        config.embeddingModel,
+        config.embeddingApiKey,
+      );
     } else {
       this.provider = new HashEmbeddingProvider();
     }
@@ -138,6 +245,17 @@ export class EmbeddingService {
 
   get name(): string {
     return this.provider.name;
+  }
+
+  /**
+   * Settle anything the provider could only learn by asking. Called at
+   * startup so a wrong model fails where the message can be read, rather
+   * than on an insert halfway through the first index run.
+   */
+  async assertUsable(): Promise<void> {
+    if (this.provider instanceof OpenAiCompatibleEmbeddingProvider) {
+      await this.provider.assertUsable();
+    }
   }
 
   get dimensions(): number {

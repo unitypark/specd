@@ -32,8 +32,23 @@ export class Config {
 
   readonly embeddingProvider = (process.env.SPECD_EMBEDDING_PROVIDER ?? 'hash') as
     | 'hash'
-    | 'voyage';
+    | 'voyage'
+    | 'openai';
   readonly voyageApiKey = process.env.VOYAGE_API_KEY ?? '';
+
+  /**
+   * Any OpenAI-compatible `/v1/embeddings` endpoint — Ollama, LM Studio,
+   * llama.cpp, vLLM, or OpenAI itself. The URL is the whole configuration:
+   * pointing it at localhost is what lets a local-first install lift its
+   * retrieval ceiling without sending a repository's knowledge anywhere.
+   */
+  readonly embeddingBaseUrl =
+    process.env.SPECD_EMBEDDING_BASE_URL ?? 'http://localhost:11434/v1';
+  // 1024 dimensions, because that is the width of the pgvector column. A
+  // model of any other size is refused at startup rather than at insert.
+  readonly embeddingModel = process.env.SPECD_EMBEDDING_MODEL ?? 'mxbai-embed-large';
+  /** Empty is normal for a local server; a hosted one will need it. */
+  readonly embeddingApiKey = process.env.SPECD_EMBEDDING_API_KEY ?? '';
 
   /**
    * Local mode writes to paths the user registered. Confining every write to a

@@ -2,6 +2,7 @@ import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
   VcsError,
+  describeNonJsonBody,
   describeTransportFailure,
   reviewHint,
   type ChangeResult,
@@ -78,7 +79,16 @@ export class GitHubAdapter implements VcsAdapter {
       const body = await res.text();
       throw new VcsError(`GitHub ${init.method ?? 'GET'} ${path} → ${res.status}: ${body.slice(0, 300)}`);
     }
-    return (await res.json()) as T;
+
+    // As in the GitLab adapter: an unguarded `res.json()` turns an SSO portal's
+    // login page — served at 200 in front of an Enterprise Server — into a
+    // SyntaxError, which is not an HttpException and reaches a user as a 500.
+    const body = await res.text();
+    try {
+      return JSON.parse(body) as T;
+    } catch {
+      throw new VcsError(describeNonJsonBody(`${hostOf(this.apiBase)}${path.split('?')[0]}`, body));
+    }
   }
 
   /** `owner/repo`, which is what we store as the repository name. */

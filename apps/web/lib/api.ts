@@ -100,7 +100,28 @@ export async function api<T = unknown>(
   }
 
   if (init.raw) return text as T;
-  return text ? (JSON.parse(text) as T) : (undefined as T);
+  if (!text) return undefined as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // A 2xx whose body is not JSON did not come from this API. Something
+    // answered in its place — a dev server on the same port, a proxy, an SSO
+    // portal serving its login page at 200. `JSON.parse` reports that as
+    // "Unexpected token '<', \"<!DOCTYPE \"...", which describes the first
+    // character of the problem and none of the rest of it.
+    throw new ApiError(
+      res.status,
+      `${BASE}${path} answered ${res.status} with ${looksLikeHtml(text) ? 'an HTML page' : 'a non-JSON body'} ` +
+        'instead of JSON, so it is not specd\'s API answering. Check that the API is running and ' +
+        `that NEXT_PUBLIC_API points at it (currently ${BASE}).`,
+    );
+  }
+}
+
+function looksLikeHtml(body: string): boolean {
+  const head = body.trimStart().slice(0, 200).toLowerCase();
+  return head.startsWith('<!doctype') || head.startsWith('<html');
 }
 
 export const get = <T>(path: string) => api<T>(path);

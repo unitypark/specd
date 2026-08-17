@@ -3,6 +3,7 @@ import {
   IGNORED_DIRS,
   VcsError,
   describeApiBase404,
+  describeNonJsonBody,
   describeTransportFailure,
   normalizeInstanceUrl,
   reviewHint,
@@ -98,12 +99,27 @@ export class GitLabAdapter implements VcsAdapter {
       );
     }
 
-    // From here on a 404 means what it says: this instance is a GitLab, so a
-    // missing project is a missing project.
-    this.reachedApi = true;
-
     // 204 (branch delete) has no body.
-    return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+    if (res.status === 204) {
+      this.reachedApi = true;
+      return undefined as T;
+    }
+
+    // Parsed here rather than with `res.json()` so a body that is not JSON
+    // becomes a VcsError naming the cause. Unguarded it throws a SyntaxError,
+    // which is not an HttpException and so reaches a user as an opaque 500 or
+    // a parser complaining about a doctype — the same shape of failure the
+    // transport guard above exists to prevent.
+    const body = await res.text();
+    try {
+      const parsed = JSON.parse(body) as T;
+      // From here on a 404 means what it says: this instance answered as a
+      // GitLab API, so a missing project is a missing project.
+      this.reachedApi = true;
+      return parsed;
+    } catch {
+      throw new VcsError(describeNonJsonBody(`${this.origin}/api/v4${path.split('?')[0]}`, body));
+    }
   }
 
   /** `namespace/project`, which is what we store as the repository name. */
@@ -161,7 +177,12 @@ export class GitLabAdapter implements VcsAdapter {
       if (!res.ok) {
         throw new VcsError(`GitLab GET repository/tree → ${res.status}: ${(await res.text()).slice(0, 300)}`);
       }
-      out.push(...((await res.json()) as { path: string; type: string; id: string }[]));
+      const body = await res.text();
+      try {
+        out.push(...(JSON.parse(body) as { path: string; type: string; id: string }[]));
+      } catch {
+        throw new VcsError(describeNonJsonBody(`${this.origin}/api/v4/projects/${id}/repository/tree`, body));
+      }
       page = res.headers.get('x-next-page') ?? '';
     }
 

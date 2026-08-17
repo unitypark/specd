@@ -1,3 +1,11 @@
+import {
+  describeNonJsonBody,
+  describeTransportFailure,
+  normalizeServiceUrl,
+} from '../common/http-failures.js';
+
+export { describeNonJsonBody, describeTransportFailure };
+
 /**
  * The VCS boundary. Everything above this line — the onboarding agent, the
  * spec pipeline, the Learn step — is provider-agnostic; the adapters below it
@@ -144,48 +152,19 @@ export function reviewHint(
 /**
  * A self-managed instance URL, in a shape `fetch` will accept.
  *
- * Everything here exists because `fetch` rejects with a bare `TypeError` on a
- * URL it cannot parse, and a `TypeError` is not an `HttpException` — so it
- * reaches the client as "Internal server error", which tells someone who typed
- * their host without a scheme precisely nothing.
- *
- * `gitlab.example.com` is what people type, and it is not a URL: WHATWG reads
- * the host as a *scheme*. Rather than refuse it, assume https — that is what
- * was meant every time, and a self-managed GitLab served over plain http is
- * still reachable by typing `http://` explicitly.
+ * The generic normalizer with a `VcsError` bound to it — the VCS callers all
+ * want the same typed failure, and repeating the wrap at each call site is how
+ * one of them ends up throwing something else.
  */
 export function normalizeInstanceUrl(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) throw new VcsError('No instance URL was given.');
-
-  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-
-  let url: URL;
-  try {
-    url = new URL(candidate);
-  } catch {
-    throw new VcsError(
-      `"${raw}" is not a URL specd can reach. Give the instance's origin, e.g. ` +
-        'https://gitlab.example.com — or leave it blank for gitlab.com.',
-    );
-  }
-
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new VcsError(
-      `"${raw}" uses ${url.protocol.replace(':', '')}, and specd speaks only http and https. ` +
-        'Give the instance\'s origin, e.g. https://gitlab.example.com.',
-    );
-  }
-
-  // The path is KEPT, and that is not an oversight. GitLab supports being
-  // served from a relative URL root — `external_url 'https://host/gitlab'` —
-  // where the API really is at `{origin}/gitlab/api/v4`. Reducing this to the
-  // origin would be a convenience for someone pasting a project URL bought by
-  // breaking every subpath-hosted instance, and only one of those two is a
-  // deployment somebody chose. A pasted project URL instead 404s at the API
-  // base, which `describeApiBase404` explains.
-  const path = url.pathname.replace(/\/+$/, '');
-  return `${url.origin}${path}`;
+  return normalizeServiceUrl(raw, (message) =>
+    new VcsError(
+      message.replace(
+        "Give the service's origin, e.g. https://example.com.",
+        "Give the instance's origin, e.g. https://gitlab.example.com — or leave it blank for gitlab.com.",
+      ),
+    ),
+  );
 }
 
 /**
@@ -213,64 +192,6 @@ export function describeApiBase404(instanceUrl: string): string {
         `GitLab's own root, drop it and use ${new URL(instanceUrl).origin}. Keep it only if GitLab ` +
         'itself is served from that subpath.'
       : ' Check this is a GitLab instance and that the host is right.')
-  );
-}
-
-/**
- * Why a request never reached the host, phrased for the person who configured
- * it. `fetch` reports every transport failure as `TypeError: fetch failed`
- * with the real reason on `cause.code`, and a self-managed instance is where
- * every one of these actually happens: behind a VPN, on an internal DNS name,
- * behind a certificate the machine does not trust.
- */
-export function describeTransportFailure(err: unknown, host: string): string | null {
-  if (!(err instanceof TypeError)) return null;
-
-  const code = (err.cause as { code?: string } | undefined)?.code ?? '';
-  const detail =
-    {
-      ENOTFOUND: `${host} does not resolve from the machine specd runs on. Check the hostname, and whether this machine needs to be on your VPN.`,
-      EAI_AGAIN: `${host} could not be resolved right now — a DNS failure rather than a wrong name. Check the machine's network.`,
-      ECONNREFUSED: `${host} refused the connection. The host resolves, so check the port and that the instance is actually serving there.`,
-      ETIMEDOUT: `${host} did not answer in time — typically a firewall or a VPN that is not connected.`,
-      UNABLE_TO_VERIFY_LEAF_SIGNATURE: `${host} presented a certificate this machine does not trust. Self-managed instances behind an internal CA need that CA installed where specd runs (NODE_EXTRA_CA_CERTS).`,
-      DEPTH_ZERO_SELF_SIGNED_CERT: `${host} presented a self-signed certificate. Install its CA where specd runs (NODE_EXTRA_CA_CERTS) rather than disabling verification.`,
-      SELF_SIGNED_CERT_IN_CHAIN: `${host} presented a self-signed certificate in its chain. Install its CA where specd runs (NODE_EXTRA_CA_CERTS).`,
-      CERT_HAS_EXPIRED: `${host} presented an expired certificate.`,
-    }[code] ?? `${host} could not be reached (${code || err.message}).`;
-
-  return `Could not reach ${host}. ${detail}`;
-}
-
-/**
- * A 2xx that is not JSON, explained.
- *
- * The status said yes and the body is a web page, which on a corporate host
- * has one overwhelmingly common cause: an SSO or access portal sitting in
- * front of the instance, answering an unauthenticated-looking request with its
- * login page at 200 rather than a 401. `JSON.parse` on that produces
- * "Unexpected token '<', \"<!DOCTYPE \"...", which names the symptom and
- * nothing else.
- */
-export function describeNonJsonBody(url: string, body: string): string {
-  const head = body.trimStart().slice(0, 200).toLowerCase();
-  const isHtml = head.startsWith('<!doctype') || head.startsWith('<html') || head.startsWith('<?xml');
-
-  if (!isHtml) {
-    return (
-      `${url} answered with something that is not JSON: ` +
-      `"${body.trimStart().slice(0, 120).replace(/\s+/g, ' ')}". ` +
-      'Check the instance URL points at the API root.'
-    );
-  }
-
-  return (
-    `${url} answered with an HTML page rather than JSON. ` +
-    'That is usually an SSO or access portal in front of the instance: it serves its own ' +
-    'login page at 200, so the request never reached the API. specd talks to the API ' +
-    'directly with a token, and cannot complete a browser sign-in — the instance has to be ' +
-    'reachable from this machine without one, or the token has to be accepted by whatever ' +
-    'sits in front of it.'
   );
 }
 

@@ -1,6 +1,7 @@
 import { createPrivateKey, type KeyObject } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { SignJWT } from 'jose';
+import { fetchOrExplain, readJsonOrExplain } from '../common/http-failures.js';
 import { Config } from '../config.js';
 import { VcsError } from './vcs.types.js';
 
@@ -96,7 +97,7 @@ export class GitHubAppService {
     if (cached && cached.expiresAt > Date.now() + 120_000) return cached.token;
 
     const jwt = await this.appJwt();
-    const res = await fetch(
+    const res = await fetchOrExplain(
       `${this.config.githubApiBase}/app/installations/${installationId}/access_tokens`,
       {
         method: 'POST',
@@ -106,6 +107,7 @@ export class GitHubAppService {
           'X-GitHub-Api-Version': '2022-11-28',
         },
       },
+      { host: hostOf(this.config.githubApiBase), wrap: (m, cause) => new VcsError(m, cause) },
     );
 
     if (!res.ok) {
@@ -115,7 +117,10 @@ export class GitHubAppService {
       );
     }
 
-    const body = (await res.json()) as { token: string; expires_at: string };
+    const body = await readJsonOrExplain<{ token: string; expires_at: string }>(res, {
+      url: `${this.config.githubApiBase}/app/installations/${installationId}/access_tokens`,
+      wrap: (m, cause) => new VcsError(m, cause),
+    });
     const expiresAt = new Date(body.expires_at).getTime();
     this.cache.set(installationId, { token: body.token, expiresAt });
     this.logger.log(`minted installation token for ${installationId}, expires ${body.expires_at}`);
@@ -184,6 +189,15 @@ export const PLACEHOLDER_WEBHOOK_URL = 'https://example.com/specd-webhook-not-co
  * Could GitHub reach this URL? Loopback, private ranges and made-up TLDs
  * cannot be delivered to, and GitHub rejects a manifest that claims otherwise.
  */
+/** The origin of an API base, for an error message. Falls back to the raw value. */
+function hostOf(apiBase: string): string {
+  try {
+    return new URL(apiBase).origin;
+  } catch {
+    return apiBase;
+  }
+}
+
 export function isPubliclyReachable(rawUrl: string): boolean {
   let host: string;
   try {

@@ -15,6 +15,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { fetchOrExplain, readJsonOrExplain } from '../common/http-failures.js';
 import { Config } from '../config.js';
 import { Public, type RequestWithUser } from '../auth/auth.guard.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
@@ -185,10 +186,20 @@ export class GitHubController {
   async created(@Query('code') code: string | undefined, @Res() res: Response) {
     if (!code) throw new BadRequestException('GitHub did not send a code');
 
-    const response = await fetch(`${this.config.githubApiBase}/app-manifests/${code}/conversions`, {
-      method: 'POST',
-      headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-    });
+    const response = await fetchOrExplain(
+      `${this.config.githubApiBase}/app-manifests/${code}/conversions`,
+      {
+        method: 'POST',
+        headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+      },
+      {
+        host: this.config.githubApiBase,
+        // A BadRequest rather than a VcsError: this route renders HTML for a
+        // browser mid-redirect from GitHub, and a 500 there is a blank page at
+        // the end of a flow somebody cannot restart without a new code.
+        wrap: (message) => new BadRequestException(message),
+      },
+    );
 
     if (!response.ok) {
       throw new BadRequestException(
@@ -197,13 +208,16 @@ export class GitHubController {
       );
     }
 
-    const app = (await response.json()) as {
+    const app = await readJsonOrExplain<{
       id: number;
       slug: string;
       pem?: string;
       webhook_secret?: string | null;
       html_url: string;
-    };
+    }>(response, {
+      url: `${this.config.githubApiBase}/app-manifests/…/conversions`,
+      wrap: (message) => new BadRequestException(message),
+    });
 
     // Printing `undefined` into someone's .env would be worse than useless: an
     // unset secret rejects every delivery, and they would be hunting a value

@@ -12,6 +12,12 @@
  * rather than clearly.
  */
 
+import {
+  fetchOrExplain,
+  normalizeServiceUrl,
+  readJsonOrExplain,
+} from '../common/http-failures.js';
+
 export class JiraError extends Error {
   constructor(
     message: string,
@@ -47,6 +53,8 @@ export class JiraAdapter {
   readonly provider = 'jira';
   private readonly base: string;
   private readonly auth: string;
+  /** The site origin, for error messages — `base` has the API path glued on. */
+  private readonly origin: string;
 
   constructor(
     readonly siteUrl: string,
@@ -57,20 +65,29 @@ export class JiraAdapter {
     if (!email || !apiToken) {
       throw new JiraError('Jira is connected but no credential is available. Reconnect it in project settings.');
     }
-    this.base = `${siteUrl.replace(/\/+$/, '')}/rest/api/3`;
+    // Normalized rather than merely de-slashed: a site URL typed without a
+    // scheme is not a URL, and `fetch` answers that with a TypeError whose
+    // message is about parsing — which used to be handed to the user as
+    // "Jira rejected that credential", blaming the one thing that was fine.
+    this.origin = normalizeServiceUrl(siteUrl, (message) => new JiraError(message));
+    this.base = `${this.origin}/rest/api/3`;
     this.auth = Buffer.from(`${email}:${apiToken}`, 'utf8').toString('base64');
   }
 
   private async api<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${this.base}${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Basic ${this.auth}`,
-        Accept: 'application/json',
-        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(init.headers ?? {}),
+    const res = await fetchOrExplain(
+      `${this.base}${path}`,
+      {
+        ...init,
+        headers: {
+          Authorization: `Basic ${this.auth}`,
+          Accept: 'application/json',
+          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(init.headers ?? {}),
+        },
       },
-    });
+      { host: this.origin, wrap: (message) => new JiraError(message) },
+    );
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -82,8 +99,12 @@ export class JiraAdapter {
       throw new JiraError(`Jira ${init.method ?? 'GET'} ${path} → ${res.status}: ${explanation}`, res.status);
     }
 
-    // 204 on transitions and some comment operations.
-    return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+    // 204 on transitions and some comment operations — handled inside, because
+    // an empty body is not a broken one.
+    return readJsonOrExplain<T>(res, {
+      url: `${this.base}${path.split('?')[0]}`,
+      wrap: (message) => new JiraError(message),
+    });
   }
 
   /**

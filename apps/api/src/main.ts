@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
+import { UnhandledExceptionFilter } from './common/unhandled-exception.filter.js';
 import { Config } from './config.js';
 import { loadRootEnv } from './env.js';
 import { EmbeddingService } from './knowledge/embeddings.js';
@@ -27,6 +28,10 @@ async function bootstrap(): Promise<void> {
       transform: true,
     }),
   );
+  // An error nobody wrapped still answers 500, but with an id that is also in
+  // the log next to its stack. "Internal server error" alone has cost three
+  // round trips with a user to diagnose.
+  app.useGlobalFilters(new UnhandledExceptionFilter());
   app.enableShutdownHooks();
 
   // Settle the embedder before serving. A model whose vectors do not fit the

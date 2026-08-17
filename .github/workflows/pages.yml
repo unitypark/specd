@@ -86,7 +86,7 @@ jobs:
       - name: Check every local link resolves
         run: node scripts/site/check-links.mjs
 
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 

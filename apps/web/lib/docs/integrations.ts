@@ -204,8 +204,15 @@ curl -H "Authorization: Bearer $TOKEN" \\
             ['`refused the connection`', 'The host resolves; the port is wrong, or nothing is serving there.'],
             ['`did not answer in time`', 'Typically a firewall, or a VPN that is not connected.'],
             ['`presented a certificate this machine does not trust`', 'An internal CA — point `NODE_EXTRA_CA_CERTS` at it where specd runs, rather than disabling verification.'],
+            ['`answered with an HTML page rather than JSON`', 'An SSO or access portal intercepted the API call and served its login page at 200. The request never reached GitLab.'],
             ['`→ 401`', 'The instance answered. The token is the problem, not the network.'],
           ],
+        },
+        {
+          k: 'note',
+          tone: 'warn',
+          title: 'An access portal in front of the API is the one specd cannot work around',
+          text: 'specd speaks the GitLab API directly with a token; it cannot complete a browser sign-in. If a portal answers `/api/v4` with its own login page, no token specd holds will help. The fixes are environmental: reach the instance by a path the portal does not intercept, have the portal admit requests carrying `PRIVATE-TOKEN`, or run specd where the API is directly reachable.',
         },
         { k: 'h2', text: 'Webhook trust' },
         {

@@ -138,8 +138,9 @@ describe('a configured review credential', () => {
         return {
           ok: true,
           status: 201,
+          text: async () =>
+            JSON.stringify({ web_url: 'https://gitlab.example.com/acme/services/aurora-api/-/merge_requests/7', iid: 7 }),
           json: async () => ({ web_url: 'https://gitlab.example.com/acme/services/aurora-api/-/merge_requests/7', iid: 7 }),
-          text: async () => '',
         };
       }),
     );
@@ -172,11 +173,15 @@ describe('a configured review credential', () => {
         return {
           ok: true,
           status: 201,
+          text: async () =>
+            JSON.stringify({
+              web_url: 'https://gitlab.example.com/acme/services/aurora-api/-/merge_requests/7',
+              iid: 7,
+            }),
           json: async () => ({
             web_url: 'https://gitlab.example.com/acme/services/aurora-api/-/merge_requests/7',
             iid: 7,
           }),
-          text: async () => '',
         };
       }),
     );

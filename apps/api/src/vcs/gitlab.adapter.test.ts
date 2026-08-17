@@ -184,12 +184,8 @@ describe('a nested group on a self-managed instance', () => {
       'fetch',
       vi.fn(async (url: string) => {
         seen.push(url);
-        return {
-          ok: true,
-          status: 201,
-          json: async () => ({ web_url: `${INSTANCE}/${PROJECT}/-/merge_requests/3`, iid: 3 }),
-          text: async () => '',
-        };
+        const body = JSON.stringify({ web_url: `${INSTANCE}/${PROJECT}/-/merge_requests/3`, iid: 3 });
+        return { ok: true, status: 201, text: async () => body, json: async () => JSON.parse(body) };
       }),
     );
 
@@ -213,7 +209,8 @@ describe('a nested group on a self-managed instance', () => {
       'fetch',
       vi.fn(async (url: string) => {
         seen.push(url);
-        return { ok: true, status: 200, json: async () => ({ username: 'jpark', name: 'J Park' }), text: async () => '' };
+        const body = JSON.stringify({ username: 'jpark', name: 'J Park' });
+        return { ok: true, status: 200, text: async () => body, json: async () => JSON.parse(body) };
       }),
     );
 
@@ -222,6 +219,83 @@ describe('a nested group on a self-managed instance', () => {
       name: 'J Park',
     });
     expect(seen[0]).toBe(`${INSTANCE}/api/v4/user`);
+  });
+});
+
+describe('a 200 that is not JSON', () => {
+  /**
+   * The reported symptom: `Unexpected token '<', "<!DOCTYPE "... is not valid
+   * JSON`. An access portal in front of a corporate instance answers an
+   * API request with its own login page at 200, so `res.ok` is true and
+   * `res.json()` throws a SyntaxError — not an HttpException, so it reached a
+   * user as an opaque failure naming a doctype.
+   */
+  const loginPage =
+    '<!DOCTYPE html><html><head><title>Sign in</title></head><body>SSO</body></html>';
+
+  it('names the portal rather than the parser', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, text: async () => loginPage, json: async () => ({}) })),
+    );
+
+    await expect(new GitLabAdapter('tok', 'https://gitlab.example.com').verify()).rejects.toThrow(
+      /HTML page rather than JSON.*SSO or access portal/is,
+    );
+  });
+
+  it('is a VcsError, so the controller answers 400 and not 500', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, text: async () => loginPage, json: async () => ({}) })),
+    );
+
+    await expect(
+      new GitLabAdapter('tok', 'https://gitlab.example.com').listRepositories(),
+    ).rejects.toBeInstanceOf(VcsError);
+  });
+
+  it('quotes a short non-HTML body instead of guessing at a portal', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, text: async () => 'upstream connect error', json: async () => ({}) })),
+    );
+
+    await expect(new GitLabAdapter('tok', 'https://gitlab.example.com').verify()).rejects.toThrow(
+      /not JSON: "upstream connect error"/,
+    );
+  });
+
+  it('leaves a 204 alone — no body is not a broken body', async () => {
+    // Branch deletion answers 204 with an empty body, and parsing '' fails
+    // exactly the way a login page does. `propose` is the public path that
+    // deletes a branch, so it is what proves the empty case still passes.
+    const bodies: Record<string, { status: number; body: string }> = {
+      'GET /projects/acme%2Fapi': { status: 200, body: '{"default_branch":"main"}' },
+      'DELETE /projects/acme%2Fapi/repository/branches/specd%2Fsetup': { status: 204, body: '' },
+      'POST /projects/acme%2Fapi/repository/commits': { status: 201, body: '{"id":"abc"}' },
+      'POST /projects/acme%2Fapi/merge_requests': {
+        status: 201,
+        body: '{"web_url":"https://gitlab.example.com/acme/api/-/merge_requests/1","iid":1}',
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        const key = `${init.method ?? 'GET'} ${url.replace('https://gitlab.example.com/api/v4', '')}`;
+        const hit = bodies[key];
+        if (!hit) throw new Error(`unstubbed: ${key}`);
+        return { ok: true, status: hit.status, text: async () => hit.body, json: async () => JSON.parse(hit.body || '{}') };
+      }),
+    );
+
+    const change = await new GitLabAdapter('tok', 'https://gitlab.example.com').propose(
+      { name: 'acme/api' } as RepoTarget,
+      { branch: 'specd/setup', title: 'setup', body: 'body', files: [{ path: 'a.md', content: '#\n' }] },
+    );
+
+    expect(change.url).toBe('https://gitlab.example.com/acme/api/-/merge_requests/1');
   });
 });
 

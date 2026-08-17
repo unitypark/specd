@@ -82,7 +82,23 @@ back as a sentence naming the cause, rather than as "Internal server error":
 | `refused the connection` | The host resolves; the port is wrong, or nothing is serving there. |
 | `did not answer in time` | Typically a firewall, or a VPN that is not connected. |
 | `presented a certificate this machine does not trust` | An internal CA. Point `NODE_EXTRA_CA_CERTS` at it where specd runs — do not disable verification. |
+| `answered with an HTML page rather than JSON` | An SSO or access portal sits in front of the instance and served its login page at **200**. See below. |
 | `→ 401` | The instance answered. The token is the problem, not the network. |
+
+**An access portal in front of the API.** This is the one failure specd cannot
+work around. A portal that intercepts `/api/v4` and answers with a sign-in page
+means the request never reached GitLab, so no token specd holds can help: it
+speaks the API directly and cannot complete a browser sign-in. The symptom used
+to be `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` — a JSON parser
+describing the first character of a web page.
+
+What actually resolves it is environmental, not configuration:
+
+- reach the instance from a network path the portal does not intercept (often
+  the VPN itself, rather than the public hostname);
+- or have the portal admit the token — many pass a request through when it
+  carries `PRIVATE-TOKEN` and the client is exempted;
+- or run specd where the API is directly reachable.
 
 **3. Find and add a repository.** The picker reads live from the token —
 specd cannot see anything it was not granted:

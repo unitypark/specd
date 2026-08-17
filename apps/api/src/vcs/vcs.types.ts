@@ -243,6 +243,38 @@ export function describeTransportFailure(err: unknown, host: string): string | n
 }
 
 /**
+ * A 2xx that is not JSON, explained.
+ *
+ * The status said yes and the body is a web page, which on a corporate host
+ * has one overwhelmingly common cause: an SSO or access portal sitting in
+ * front of the instance, answering an unauthenticated-looking request with its
+ * login page at 200 rather than a 401. `JSON.parse` on that produces
+ * "Unexpected token '<', \"<!DOCTYPE \"...", which names the symptom and
+ * nothing else.
+ */
+export function describeNonJsonBody(url: string, body: string): string {
+  const head = body.trimStart().slice(0, 200).toLowerCase();
+  const isHtml = head.startsWith('<!doctype') || head.startsWith('<html') || head.startsWith('<?xml');
+
+  if (!isHtml) {
+    return (
+      `${url} answered with something that is not JSON: ` +
+      `"${body.trimStart().slice(0, 120).replace(/\s+/g, ' ')}". ` +
+      'Check the instance URL points at the API root.'
+    );
+  }
+
+  return (
+    `${url} answered with an HTML page rather than JSON. ` +
+    'That is usually an SSO or access portal in front of the instance: it serves its own ' +
+    'login page at 200, so the request never reached the API. specd talks to the API ' +
+    'directly with a token, and cannot complete a browser sign-in — the instance has to be ' +
+    'reachable from this machine without one, or the token has to be accepted by whatever ' +
+    'sits in front of it.'
+  );
+}
+
+/**
  * Root files worth reading in full during a scan — small, high-signal, cheap.
  * This is the first tier of the scan; `scan-targets.ts` adds the rest (CI,
  * workspace manifests, schemas, docs, entry points) under per-tier caps.

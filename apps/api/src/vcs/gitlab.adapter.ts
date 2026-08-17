@@ -2,6 +2,9 @@ import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
   VcsError,
+  describeApiBase404,
+  describeTransportFailure,
+  normalizeInstanceUrl,
   reviewHint,
   type ChangeResult,
   type OpenedReview,
@@ -37,33 +40,68 @@ import {
 export class GitLabAdapter implements VcsAdapter {
   readonly provider = 'gitlab';
   private readonly apiBase: string;
+  /** The instance root, for error messages — `apiBase` has `/api/v4` glued on. */
+  private readonly origin: string;
+  /** Has any call to this instance succeeded? Decides what a 404 means. */
+  private reachedApi = false;
 
   constructor(
     private readonly token: string,
-    readonly instanceUrl = 'https://gitlab.com',
+    instanceUrl = 'https://gitlab.com',
   ) {
     if (!token) {
       throw new VcsError('GitLab is connected but no token is available. Reconnect it in project settings.');
     }
-    this.apiBase = `${instanceUrl.replace(/\/+$/, '')}/api/v4`;
+    // Normalized here as well as at the point it is stored, because a
+    // connection saved before that existed still has whatever was typed, and
+    // this class is the last place that can turn it into something `fetch`
+    // will accept rather than a 500.
+    this.origin = normalizeInstanceUrl(instanceUrl);
+    this.apiBase = `${this.origin}/api/v4`;
+  }
+
+  /** The instance this adapter talks to, normalized. */
+  get instanceUrl(): string {
+    return this.origin;
   }
 
   private async api<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${this.apiBase}${path}`, {
-      ...init,
-      headers: {
-        'PRIVATE-TOKEN': this.token,
-        'Content-Type': 'application/json',
-        ...(init.headers ?? {}),
-      },
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.apiBase}${path}`, {
+        ...init,
+        headers: {
+          'PRIVATE-TOKEN': this.token,
+          'Content-Type': 'application/json',
+          ...(init.headers ?? {}),
+        },
+      });
+    } catch (err) {
+      // `fetch` rejects with a TypeError when the request never reached the
+      // host at all. Left alone it escapes as an opaque 500, which is the
+      // least useful thing to tell someone whose instance is behind a VPN.
+      const explained = describeTransportFailure(err, this.origin);
+      if (explained) throw new VcsError(explained, err);
+      throw err;
+    }
 
     if (!res.ok) {
       const body = await res.text();
+      // A 404 straight off the API base is a wrong instance URL far more often
+      // than a missing resource, and "404" alone sends people to check their
+      // token — the one thing that is not the problem.
+      if (res.status === 404 && !this.reachedApi) {
+        throw new VcsError(describeApiBase404(this.origin));
+      }
       throw new VcsError(
         `GitLab ${init.method ?? 'GET'} ${path} → ${res.status}: ${body.slice(0, 300)}`,
       );
     }
+
+    // From here on a 404 means what it says: this instance is a GitLab, so a
+    // missing project is a missing project.
+    this.reachedApi = true;
+
     // 204 (branch delete) has no body.
     return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
   }
@@ -280,6 +318,18 @@ export class GitLabAdapter implements VcsAdapter {
   }
 
   /** Repo picker source (§6 step 2, §11): what the token can see, searchable. */
+  /**
+   * Prove the token, and say who it belongs to.
+   *
+   * Called at connect time so a bad token fails in the wizard, where a person
+   * is looking at it, rather than later inside a run — the same role
+   * `JiraAdapter.verify()` plays, and the same reason.
+   */
+  async verify(): Promise<{ username: string; name: string }> {
+    const me = await this.api<{ username: string; name: string }>('/user');
+    return { username: me.username, name: me.name };
+  }
+
   async listRepositories(
     search?: string,
   ): Promise<{ id: string; fullName: string; defaultBranch: string; namespace: string }[]> {

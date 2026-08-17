@@ -14,6 +14,7 @@ import { RepositoriesService } from './projects/repositories.service.js';
 import { ConnectionsService } from './projects/connections.service.js';
 
 import { LocalGitAdapter } from './vcs/local-git.adapter.js';
+import { LocalReviewService } from './vcs/local-review.service.js';
 import { VcsService } from './vcs/vcs.service.js';
 import { GitHubAppService } from './vcs/github-app.service.js';
 import { GitHubWebhookService } from './vcs/github-webhook.service.js';
@@ -78,6 +79,7 @@ import { RunnersController } from './runners/runners.controller.js';
     RepositoriesService,
     ConnectionsService,
     LocalGitAdapter,
+    LocalReviewService,
     VcsService,
     GitHubAppService,
     GitHubWebhookService,

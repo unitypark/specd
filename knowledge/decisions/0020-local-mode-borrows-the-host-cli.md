@@ -84,3 +84,38 @@ and re-building a spec are both normal things to do.
   repository the user registered and to the remote that repository already
   points at, with the user's own credentials. It does not acquire a token, a
   webhook, or an account.
+
+## Amendment, 2026-08-17 — a named host may be given a token
+
+Property 2 above says specd will not guess a self-managed host's software from
+its URL. That was right, and it left a hole: a repository on a self-managed
+GitLab reached the end of every local-mode run with a branch and no review,
+because `detectHost` answered null and `glab` is not on most corporate
+machines. The fix people asked for is the obvious one — *"I have a token, use
+it"* — and the reasoning above does not forbid it. **Guessing** the host is
+what was refused. Being **told** the host is not a guess.
+
+So a local-mode project may now carry an optional review credential:
+`settings.reviewProvider` plus a token on the `vcs` connection it already owns
+(no migration — that row's `encrypted_secret` and `settings.instanceUrl` were
+both unused for `provider: 'local'`). When present, `openLocalReview` opens the
+review through `GitLabAdapter.openMergeRequest` / `GitHubAdapter.openPullRequest`
+instead of a CLI, and the host restriction lifts, because there is nothing left
+to infer.
+
+What this deliberately does **not** become is a second VCS connection:
+
+- The token opens a review. It never reads a file, lists a tree, clones, or
+  pushes — the machine's own git does the push, exactly as before. Local mode
+  still reads and writes the repository on disk.
+- It is optional and absent by default. A project without it behaves as this
+  decision originally specified, down to the wording of the hint.
+- It is proved at connect time (`verify()` on either adapter, mirroring
+  `JiraAdapter.verify()`), so a wrong token fails in the wizard rather than as
+  a merge request that never appears.
+
+The honest cost: local mode's promise narrows from "specd holds no credential
+for your host" to "specd holds no credential for your host unless you give it
+one, and then only to open reviews". That is a real change to the sentence, and
+it is why the credential is opt-in, single-purpose, and named as such in the
+UI rather than folded into the repository form.

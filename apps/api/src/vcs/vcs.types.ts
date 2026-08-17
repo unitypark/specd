@@ -45,6 +45,28 @@ export interface RepoTarget {
   localPath: string | null;
   externalId: string | null;
   defaultBranch: string;
+  /**
+   * The project this repository belongs to. Carried because local mode's
+   * review credential lives on the project's connection, and `propose()` is
+   * handed a target rather than a `Repository` row it could read it from.
+   */
+  projectId?: string;
+}
+
+/**
+ * A credential local mode may use to open a review, and nothing else.
+ *
+ * Deliberately not the same thing as a VCS *connection*: a local-mode project
+ * reads and writes its repository on disk, so this token never fetches a file,
+ * never scans a tree and never pushes — the machine's own git does that. It
+ * opens the pull or merge request and stops. That narrowness is what makes it
+ * safe to add to the mode whose promise is that specd holds nothing.
+ */
+export interface LocalReviewCredential {
+  provider: 'github' | 'gitlab';
+  token: string;
+  /** The instance root. gitlab.com / api.github.com when not self-managed. */
+  instanceUrl: string | null;
 }
 
 export interface VcsAdapter {
@@ -117,6 +139,107 @@ export function reviewHint(
     ? ' Its description could not be rewritten and still describes the previous run.'
     : '';
   return `${verb} ${ref} on ${repoName}.${caveat} Merging is adopting.`;
+}
+
+/**
+ * A self-managed instance URL, in a shape `fetch` will accept.
+ *
+ * Everything here exists because `fetch` rejects with a bare `TypeError` on a
+ * URL it cannot parse, and a `TypeError` is not an `HttpException` — so it
+ * reaches the client as "Internal server error", which tells someone who typed
+ * their host without a scheme precisely nothing.
+ *
+ * `gitlab.example.com` is what people type, and it is not a URL: WHATWG reads
+ * the host as a *scheme*. Rather than refuse it, assume https — that is what
+ * was meant every time, and a self-managed GitLab served over plain http is
+ * still reachable by typing `http://` explicitly.
+ */
+export function normalizeInstanceUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new VcsError('No instance URL was given.');
+
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new VcsError(
+      `"${raw}" is not a URL specd can reach. Give the instance's origin, e.g. ` +
+        'https://gitlab.example.com — or leave it blank for gitlab.com.',
+    );
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new VcsError(
+      `"${raw}" uses ${url.protocol.replace(':', '')}, and specd speaks only http and https. ` +
+        'Give the instance\'s origin, e.g. https://gitlab.example.com.',
+    );
+  }
+
+  // The path is KEPT, and that is not an oversight. GitLab supports being
+  // served from a relative URL root — `external_url 'https://host/gitlab'` —
+  // where the API really is at `{origin}/gitlab/api/v4`. Reducing this to the
+  // origin would be a convenience for someone pasting a project URL bought by
+  // breaking every subpath-hosted instance, and only one of those two is a
+  // deployment somebody chose. A pasted project URL instead 404s at the API
+  // base, which `describeApiBase404` explains.
+  const path = url.pathname.replace(/\/+$/, '');
+  return `${url.origin}${path}`;
+}
+
+/**
+ * The 404 a wrong instance URL produces, explained.
+ *
+ * Reaching a real host that answers 404 to `/api/v4/...` means one of two
+ * things, and they look identical from here: the URL carries a path that is
+ * not GitLab's root (a project URL pasted out of the address bar), or the
+ * instance is not a GitLab. Both are worth saying, because a bare "404" sends
+ * someone to check their token, which is the one thing that is fine.
+ */
+export function describeApiBase404(instanceUrl: string): string {
+  const path = (() => {
+    try {
+      return new URL(instanceUrl).pathname.replace(/\/+$/, '');
+    } catch {
+      return '';
+    }
+  })();
+
+  return (
+    `${instanceUrl} answered, but has no GitLab API at ${instanceUrl}/api/v4.` +
+    (path
+      ? ` The instance URL includes the path "${path}" — if that is a group or project rather than ` +
+        `GitLab's own root, drop it and use ${new URL(instanceUrl).origin}. Keep it only if GitLab ` +
+        'itself is served from that subpath.'
+      : ' Check this is a GitLab instance and that the host is right.')
+  );
+}
+
+/**
+ * Why a request never reached the host, phrased for the person who configured
+ * it. `fetch` reports every transport failure as `TypeError: fetch failed`
+ * with the real reason on `cause.code`, and a self-managed instance is where
+ * every one of these actually happens: behind a VPN, on an internal DNS name,
+ * behind a certificate the machine does not trust.
+ */
+export function describeTransportFailure(err: unknown, host: string): string | null {
+  if (!(err instanceof TypeError)) return null;
+
+  const code = (err.cause as { code?: string } | undefined)?.code ?? '';
+  const detail =
+    {
+      ENOTFOUND: `${host} does not resolve from the machine specd runs on. Check the hostname, and whether this machine needs to be on your VPN.`,
+      EAI_AGAIN: `${host} could not be resolved right now — a DNS failure rather than a wrong name. Check the machine's network.`,
+      ECONNREFUSED: `${host} refused the connection. The host resolves, so check the port and that the instance is actually serving there.`,
+      ETIMEDOUT: `${host} did not answer in time — typically a firewall or a VPN that is not connected.`,
+      UNABLE_TO_VERIFY_LEAF_SIGNATURE: `${host} presented a certificate this machine does not trust. Self-managed instances behind an internal CA need that CA installed where specd runs (NODE_EXTRA_CA_CERTS).`,
+      DEPTH_ZERO_SELF_SIGNED_CERT: `${host} presented a self-signed certificate. Install its CA where specd runs (NODE_EXTRA_CA_CERTS) rather than disabling verification.`,
+      SELF_SIGNED_CERT_IN_CHAIN: `${host} presented a self-signed certificate in its chain. Install its CA where specd runs (NODE_EXTRA_CA_CERTS).`,
+      CERT_HAS_EXPIRED: `${host} presented an expired certificate.`,
+    }[code] ?? `${host} could not be reached (${code || err.message}).`;
+
+  return `Could not reach ${host}. ${detail}`;
 }
 
 /**

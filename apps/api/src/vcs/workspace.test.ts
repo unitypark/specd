@@ -6,6 +6,7 @@ import type { Repository } from '@specd/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Config } from '../config.js';
 import type { VcsService } from './vcs.service.js';
+import type { LocalReviewService } from './local-review.service.js';
 import { WorkspaceService } from './workspace.js';
 
 /**
@@ -20,9 +21,11 @@ describe('WorkspaceService.create — local', () => {
   const git = (...args: string[]) =>
     execFileSync('git', args, { cwd: root, encoding: 'utf8' as const });
 
-  const service = new WorkspaceService(null as unknown as VcsService, {
-    localOpenPr: false,
-  } as Config);
+  const service = new WorkspaceService(
+    null as unknown as VcsService,
+    { localOpenPr: false } as Config,
+    { credentialFor: async () => null } as unknown as LocalReviewService,
+  );
 
   const repo = () => ({ provider: 'local', name: 'acme/api', localPath: root }) as Repository;
 

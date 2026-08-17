@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import type { SimpleGit } from 'simple-git';
+import { GitHubAdapter } from './github.adapter.js';
+import { GitLabAdapter } from './gitlab.adapter.js';
+import type { LocalReviewCredential } from './vcs.types.js';
 
 /**
  * Turning a local-mode branch into a real pull or merge request.
@@ -73,41 +76,146 @@ export async function openLocalReview(input: {
   base: string;
   title: string;
   body: string;
+  /** Configured for the project, if any. Takes precedence over the host CLI. */
+  credential?: LocalReviewCredential | null;
 }): Promise<LocalReview> {
-  const { git, cwd, branch, base, title, body } = input;
+  const { git, cwd, branch, base, title, body, credential } = input;
 
-  const host = detectHost(input.remoteUrl);
-  if (!host) {
-    return { url: null, note: 'its `origin` is not a host specd can open a review on' };
-  }
-
-  const bin = host.kind === 'github' ? 'gh' : 'glab';
-  if (!(await hostCliReady(host.kind, cwd))) {
+  // A configured credential settles what the host is, which is the thing
+  // `detectHost` refuses to guess. So a self-managed instance is reachable
+  // through this path and only this path.
+  const kind: HostKind | null = credential?.provider ?? detectHost(input.remoteUrl)?.kind ?? null;
+  if (!kind) {
     return {
       url: null,
-      note: `\`${bin}\` is not on PATH here, or is not signed in — specd holds no token of its own in local mode, so it had nothing else to open one with`,
+      note:
+        'its `origin` is not github.com or gitlab.com, and no review credential is configured — ' +
+        'specd will not guess what software a self-managed host runs',
     };
   }
 
+  const bin = kind === 'github' ? 'gh' : 'glab';
+  const viaCli = !credential;
+  if (viaCli && !(await hostCliReady(kind, cwd))) {
+    return {
+      url: null,
+      note: `\`${bin}\` is not on PATH here, or is not signed in — and this project has no review credential, so specd had nothing to open one with`,
+    };
+  }
+
+  // The push is git's, with the machine's own credentials, in every case. The
+  // token below opens the review and does nothing else — it never fetches a
+  // file, scans a tree, or writes a commit.
   try {
     await git.push('origin', branch);
   } catch (err) {
     return { url: null, note: `pushing to origin failed (${short(err)})` };
   }
 
-  const created = await createReview(host.kind, { cwd, branch, base, title, body });
-  if (created) return { url: created, note: `pushed and opened ${label(host.kind)}` };
+  if (credential) {
+    return openWithToken(credential, { remoteUrl: input.remoteUrl, branch, base, title, body });
+  }
+
+  const created = await createReview(kind, { cwd, branch, base, title, body });
+  if (created) return { url: created, note: `pushed and opened ${label(kind)}` };
 
   // A review for this branch may already be open — a second setup run is a
   // normal thing to do, and both CLIs refuse to create a duplicate. Finding
   // the existing one is the correct outcome, not a fallback.
-  const existing = await findReview(host.kind, { cwd, branch });
-  if (existing) return { url: existing, note: `pushed; ${label(host.kind)} was already open` };
+  const existing = await findReview(kind, { cwd, branch });
+  if (existing) return { url: existing, note: `pushed; ${label(kind)} was already open` };
 
   return {
     url: null,
-    note: `pushed the branch, but \`${bin}\` could not open ${label(host.kind)}`,
+    note: `pushed the branch, but \`${bin}\` could not open ${label(kind)}`,
   };
+}
+
+/**
+ * Open the review over the provider's API with the project's own token.
+ *
+ * Both adapters already know how to open one *or* update the one that is
+ * already open for the branch, which is what a re-run needs — so this is
+ * genuinely just picking which of them to call.
+ */
+async function openWithToken(
+  credential: LocalReviewCredential,
+  pr: { remoteUrl: string; branch: string; base: string; title: string; body: string },
+): Promise<LocalReview> {
+  const path = projectPathFromRemote(pr.remoteUrl, credential.instanceUrl);
+  if (!path) {
+    return {
+      url: null,
+      note: `pushed the branch, but could not read a project path out of \`origin\` (${pr.remoteUrl})`,
+    };
+  }
+
+  try {
+    const opened =
+      credential.provider === 'gitlab'
+        ? await new GitLabAdapter(credential.token, credential.instanceUrl ?? undefined).openMergeRequest(
+            path,
+            { branch: pr.branch, base: pr.base, title: pr.title, body: pr.body },
+          )
+        : await new GitHubAdapter(
+            credential.token,
+            credential.instanceUrl ? `${credential.instanceUrl}/api/v3` : undefined,
+          ).openPullRequest(path, {
+            branch: pr.branch,
+            base: pr.base,
+            title: pr.title,
+            body: pr.body,
+          });
+
+    const what = label(credential.provider);
+    return {
+      url: opened.url,
+      note: opened.existing
+        ? `pushed; ${what} was already open and was brought up to date`
+        : `pushed and opened ${what} with this project's token`,
+    };
+  } catch (err) {
+    return { url: null, note: `pushed the branch, but opening a review failed (${short(err)})` };
+  }
+}
+
+/**
+ * The `namespace/project` path a remote URL points at.
+ *
+ * Handles the three spellings git uses and, when the instance is served from
+ * a subpath, removes it — `https://host/gitlab/group/project.git` is the
+ * project `group/project` on the GitLab at `https://host/gitlab`, and passing
+ * the subpath through would address a project that does not exist.
+ */
+export function projectPathFromRemote(remoteUrl: string, instanceRoot?: string | null): string | null {
+  const trimmed = remoteUrl.trim().replace(/\.git\/?$/, '');
+
+  // scp-like syntax (`git@host:group/project`) is not a URL, so it is matched
+  // rather than parsed. Everything else goes through URL.
+  const scp = trimmed.match(/^[^/]+@([^:]+):(.+)$/);
+  let path = scp
+    ? scp[2]!
+    : (() => {
+        try {
+          return new URL(trimmed).pathname;
+        } catch {
+          return '';
+        }
+      })();
+
+  if (instanceRoot) {
+    const root = (() => {
+      try {
+        return new URL(instanceRoot).pathname.replace(/\/+$/, '');
+      } catch {
+        return '';
+      }
+    })();
+    if (root && path.startsWith(root)) path = path.slice(root.length);
+  }
+
+  path = path.replace(/^\/+|\/+$/g, '');
+  return path.includes('/') ? path : null;
 }
 
 function label(kind: HostKind): string {

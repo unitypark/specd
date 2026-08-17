@@ -1,10 +1,10 @@
+import { fetchOrExplain } from '../common/http-failures.js';
 import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
   VcsError,
   describeApiBase404,
   describeNonJsonBody,
-  describeTransportFailure,
   normalizeInstanceUrl,
   reviewHint,
   type ChangeResult,
@@ -67,24 +67,18 @@ export class GitLabAdapter implements VcsAdapter {
   }
 
   private async api<T>(path: string, init: RequestInit = {}): Promise<T> {
-    let res: Response;
-    try {
-      res = await fetch(`${this.apiBase}${path}`, {
+    const res = await fetchOrExplain(
+      `${this.apiBase}${path}`,
+      {
         ...init,
         headers: {
           'PRIVATE-TOKEN': this.token,
           'Content-Type': 'application/json',
           ...(init.headers ?? {}),
         },
-      });
-    } catch (err) {
-      // `fetch` rejects with a TypeError when the request never reached the
-      // host at all. Left alone it escapes as an opaque 500, which is the
-      // least useful thing to tell someone whose instance is behind a VPN.
-      const explained = describeTransportFailure(err, this.origin);
-      if (explained) throw new VcsError(explained, err);
-      throw err;
-    }
+      },
+      { host: this.origin, wrap: (message, cause) => new VcsError(message, cause) },
+    );
 
     if (!res.ok) {
       const body = await res.text();
@@ -169,10 +163,11 @@ export class GitLabAdapter implements VcsAdapter {
     let page = '1';
 
     for (let i = 0; i < 50 && page; i++) {
-      const res = await fetch(
+      const res = await fetchOrExplain(
         `${this.apiBase}/projects/${id}/repository/tree` +
           `?recursive=true&per_page=100&page=${page}&ref=${encodeURIComponent(ref)}`,
         { headers: { 'PRIVATE-TOKEN': this.token } },
+        { host: this.origin, wrap: (message, cause) => new VcsError(message, cause) },
       );
       if (!res.ok) {
         throw new VcsError(`GitLab GET repository/tree → ${res.status}: ${(await res.text()).slice(0, 300)}`);

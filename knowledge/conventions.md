@@ -68,6 +68,37 @@ cross-package imports go through the `@specd/*` workspace names, which is why
   headless loop (`apps/api/src/e2e-loop.ts`).
 - Postgres is on **5433** on the host (non-default, to avoid clashing with local installs). It is the only runtime dependency — Redis was removed with the unused queue (`decisions/0008-remove-unused-queue.md`).
 
+## Talking to somebody else's server
+
+Every outbound HTTP call goes through `apps/api/src/common/http-failures.ts`.
+`fetchOrExplain` and `readJsonOrExplain` are the only sanctioned way, and a
+test walks `apps/api/src` asserting that module is the **only** file calling
+`fetch` directly. Adding a bare `fetch` is what re-opens the bug this rule
+exists for, so the test is the review.
+
+The rule exists because two failures produce no HTTP status and are not
+`HttpException`s, so Nest's default filter turns both into `Internal server
+error`:
+
+| Failure | What it really is | What the user needs told |
+| --- | --- | --- |
+| `TypeError: fetch failed` | The request never left the machine | VPN, DNS, port, or an untrusted internal CA (`NODE_EXTRA_CA_CERTS`) |
+| `SyntaxError: Unexpected token '<'` | A 2xx whose body is a web page | An SSO/access portal answered instead of the API |
+
+Three of these reached users before the rule existed. Two more rules follow
+from them:
+
+- **An adapter throws its own typed error and nothing else.** `VcsError`,
+  `JiraError`. A controller catches that type; anything untyped escaping it is
+  the bug.
+- **204 and an empty body are not broken bodies.** Parsing `''` fails exactly
+  the way a login page does, so every call site that forgot reported a portal
+  on a successful branch deletion. `readJsonOrExplain` handles it centrally.
+
+An error nobody wrapped still answers 500, but `UnhandledExceptionFilter` gives
+it a short reference id that is also in the log beside the stack — so the next
+one costs a message rather than a session.
+
 ## Writing conventions the product itself enforces
 
 These apply to generated content and to knowledge docs in this repo:

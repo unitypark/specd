@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { EMBEDDING_DIM } from '@specd/db';
 import { Config } from '../config.js';
+import { fetchOrExplain, readJsonOrExplain } from '../common/http-failures.js';
 
 /**
  * Whether the text being embedded is corpus material or someone's question.
@@ -85,28 +86,35 @@ export class VoyageEmbeddingProvider implements EmbeddingProvider {
     // Voyage caps batch size; 96 keeps every request comfortably inside it.
     for (let i = 0; i < texts.length; i += 96) {
       const batch = texts.slice(i, i + 96);
-      const res = await fetch('https://api.voyageai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
+      const res = await fetchOrExplain(
+        'https://api.voyageai.com/v1/embeddings',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: this.model,
+            input: batch,
+            // Voyage is asymmetric: a question and the passage answering it are
+            // encoded differently, and embedding a query as a document throws
+            // that away. The default is 'document' because that is the bulk.
+            input_type: input,
+            output_dimension: this.dimensions,
+          }),
         },
-        body: JSON.stringify({
-          model: this.model,
-          input: batch,
-          // Voyage is asymmetric: a question and the passage answering it are
-          // encoded differently, and embedding a query as a document throws
-          // that away. The default is 'document' because that is the bulk.
-          input_type: input,
-          output_dimension: this.dimensions,
-        }),
-      });
+        { host: 'https://api.voyageai.com', wrap: (message) => new Error(message) },
+      );
 
       if (!res.ok) {
         throw new Error(`Voyage embeddings failed (${res.status}): ${await res.text()}`);
       }
 
-      const body = (await res.json()) as { data: { embedding: number[]; index: number }[] };
+      const body = await readJsonOrExplain<{ data: { embedding: number[]; index: number }[] }>(res, {
+        url: 'https://api.voyageai.com/v1/embeddings',
+        wrap: (message) => new Error(message),
+      });
       const sorted = [...body.data].sort((a, b) => a.index - b.index);
       out.push(...sorted.map((d) => l2normalize(d.embedding)));
     }
@@ -186,11 +194,25 @@ export class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
       // makes some of them reject the request outright.
       if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
 
-      const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/embeddings`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ model: this.model, input: batch }),
-      });
+      // The default points at a local Ollama, which is very often simply not
+      // running — the most likely transport failure in the whole codebase, and
+      // the one whose bare TypeError says least.
+      const res = await fetchOrExplain(
+        `${this.baseUrl.replace(/\/$/, '')}/embeddings`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ model: this.model, input: batch }),
+        },
+        {
+          host: this.baseUrl,
+          wrap: (message) =>
+            new Error(
+              `${message} This is the embedding provider (SPECD_EMBEDDING_BASE_URL); ` +
+                'start it, or point that variable somewhere else.',
+            ),
+        },
+      );
 
       if (!res.ok) {
         throw new Error(
@@ -198,7 +220,10 @@ export class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         );
       }
 
-      const body = (await res.json()) as { data: { embedding: number[]; index: number }[] };
+      const body = await readJsonOrExplain<{ data: { embedding: number[]; index: number }[] }>(res, {
+        url: `${this.baseUrl.replace(/\/$/, '')}/embeddings`,
+        wrap: (message) => new Error(message),
+      });
       const sorted = [...(body.data ?? [])].sort((a, b) => a.index - b.index);
       out.push(...sorted.map((d) => l2normalize(d.embedding)));
     }

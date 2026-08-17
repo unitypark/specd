@@ -1,9 +1,9 @@
+import { fetchOrExplain } from '../common/http-failures.js';
 import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
   VcsError,
   describeNonJsonBody,
-  describeTransportFailure,
   reviewHint,
   type ChangeResult,
   type OpenedReview,
@@ -53,9 +53,9 @@ export class GitHubAdapter implements VcsAdapter {
   }
 
   private async api<T>(path: string, init: RequestInit = {}): Promise<T> {
-    let res: Response;
-    try {
-      res = await fetch(`${this.apiBase}${path}`, {
+    const res = await fetchOrExplain(
+      `${this.apiBase}${path}`,
+      {
         ...init,
         headers: {
           Accept: 'application/vnd.github+json',
@@ -64,16 +64,9 @@ export class GitHubAdapter implements VcsAdapter {
           'Content-Type': 'application/json',
           ...(init.headers ?? {}),
         },
-      });
-    } catch (err) {
-      // As in the GitLab adapter: a request that never reached the host
-      // rejects with a TypeError, which is not an HttpException and so
-      // reaches the caller as an opaque 500. Rare against api.github.com,
-      // routine against an Enterprise Server behind a VPN.
-      const explained = describeTransportFailure(err, hostOf(this.apiBase));
-      if (explained) throw new VcsError(explained, err);
-      throw err;
-    }
+      },
+      { host: hostOf(this.apiBase), wrap: (message, cause) => new VcsError(message, cause) },
+    );
 
     if (!res.ok) {
       const body = await res.text();

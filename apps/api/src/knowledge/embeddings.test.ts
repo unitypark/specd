@@ -94,11 +94,16 @@ describe('voyage provider', () => {
     vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
       const body = JSON.parse(init.body);
       bodies.push(body);
+      const payload = {
+        data: body.input.map((_: string, index: number) => ({ embedding: [1, 0, 0], index })),
+      };
       return {
         ok: true,
-        json: async () => ({
-          data: body.input.map((_: string, index: number) => ({ embedding: [1, 0, 0], index })),
-        }),
+        status: 200,
+        // `text` as well as `json`: the provider reads the body as text so a
+        // login page becomes an explanation rather than a SyntaxError.
+        text: async () => JSON.stringify(payload),
+        json: async () => payload,
       };
     });
     return bodies;
@@ -134,7 +139,7 @@ describe('an OpenAI-compatible endpoint', () => {
         ok: (res.status ?? 200) < 400,
         status: res.status ?? 200,
         json: async () => res.json,
-        text: async () => res.text ?? '',
+        text: async () => res.text ?? (res.json === undefined ? '' : JSON.stringify(res.json)),
       } as Response;
     };
     return { calls, fetchMock };

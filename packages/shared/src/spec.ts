@@ -107,9 +107,27 @@ export function countUnverified(content: SpecContent): number {
   return content.design.filter((c) => c.unverified).length;
 }
 
-/** Branch name a coding agent must use (AGENTS.md rule 6). */
+/**
+ * Branch name a coding agent must use (AGENTS.md rule 6).
+ *
+ * The key keeps the case the board shows it in — `spec/E-101-add-csv-export`,
+ * not `spec/e-101-…` — so the branch, the PR title and the ticket a human is
+ * looking at all spell the id the same way. Matching back to a spec is done
+ * case-insensitively (`specForBranch`), so branches built before this stayed
+ * matchable.
+ */
 export function specBranchName(ticketKey: string, slug: string): string {
-  return `spec/${ticketKey.toLowerCase()}-${slug}`;
+  return `spec/${ticketKey.toUpperCase()}-${slug}`;
+}
+
+/**
+ * PR/MR title for a spec's branch: `[E-101] - Add CSV export`.
+ *
+ * The id comes first and bracketed because that is what a reviewer scans a PR
+ * list for, and what a tracker's PR-linking picks up.
+ */
+export function specPrTitle(ticketKey: string, title: string): string {
+  return `[${ticketKey.toUpperCase()}] - ${title}`;
 }
 
 /** Where the as-built spec lands in the primary repo (D8). */

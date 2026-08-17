@@ -120,7 +120,18 @@ describe('propose review hint against a real repository', () => {
   let dir = '';
   const git = (...args: string[]) =>
     execFileSync('git', args, { cwd: dir, encoding: 'utf8' as const });
-  const adapter = new LocalGitAdapter({ localRepoRoot: null } as Config);
+  // PR opening off: this suite is about the hint a repository gets when there
+  // is no review surface, and leaving it on would have the test shell out to
+  // whichever `gh` happens to be signed in on the machine running it.
+  const adapter = new LocalGitAdapter({ localRepoRoot: null, localOpenPr: false } as Config);
+
+  const propose = (branch: string) =>
+    adapter.propose({ name: 'hint', localPath: dir } as RepoTarget, {
+      branch,
+      title: 'setup',
+      body: 'body',
+      files: [{ path: 'knowledge/README.md', content: '# k\n' }],
+    });
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'specd-hint-'));
@@ -136,18 +147,32 @@ describe('propose review hint against a real repository', () => {
 
   it('points at the PR path when origin is a known host, in the same hint', async () => {
     git('remote', 'add', 'origin', 'git@github.com:owner/repo.git');
-    const target: RepoTarget = { name: 'hint', localPath: dir };
-    const change = await adapter.propose(target, {
-      branch: 'specd/setup',
-      title: 'setup',
-      body: 'body',
-      files: [{ path: 'knowledge/README.md', content: '# k\n' }],
-    });
+    const change = await propose('specd/setup');
     expect(change.url).toBeNull();
     expect(change.reviewHint).toContain('git diff main..specd/setup');
     expect(change.reviewHint).toContain('git push -u origin specd/setup');
     expect(change.reviewHint).toContain(
       'https://github.com/owner/repo/compare/main...specd/setup?expand=1',
     );
+  });
+
+  it('says why no pull request was opened, rather than letting the silence speak', async () => {
+    // An unrecognized host short-circuits before any CLI or push, so this
+    // exercises the enabled path without leaving the machine.
+    const enabled = new LocalGitAdapter({ localRepoRoot: null, localOpenPr: true } as Config);
+    git('remote', 'set-url', 'origin', 'git@git.internal:team/repo.git');
+
+    const change = await enabled.propose({ name: 'hint', localPath: dir } as RepoTarget, {
+      branch: 'specd/setup-2',
+      title: 'setup',
+      body: 'body',
+      files: [{ path: 'knowledge/README.md', content: '# k2\n' }],
+    });
+
+    expect(change.url).toBeNull();
+    expect(change.reviewHint).toContain('No pull request was opened');
+    expect(change.reviewHint).toContain('not a host specd can open a review on');
+    // Nothing to link to either — specd refuses to guess a self-managed host.
+    expect(change.reviewHint).not.toContain('http');
   });
 });

@@ -8,6 +8,7 @@ import {
   renderSpecMarkdown,
   slugify,
   specBranchName,
+  specPrTitle,
   type SpecContent,
 } from './spec.js';
 
@@ -97,10 +98,19 @@ describe('spec content', () => {
   it('derives branch and as-built paths the working agreements require', () => {
     expect(slugify('Export contacts to CSV')).toBe('export-contacts-to-csv');
     expect(specBranchName('CRM-142', 'export-contacts-to-csv')).toBe(
-      'spec/crm-142-export-contacts-to-csv',
+      'spec/CRM-142-export-contacts-to-csv',
     );
     expect(asBuiltPath('crm-142', 'export-contacts-to-csv')).toBe(
       'knowledge/specs/CRM-142-export-contacts-to-csv.md',
+    );
+  });
+
+  it('spells the ticket key the way the board does, whatever case it is given', () => {
+    // The branch, the PR title and the ticket all have to agree, so both
+    // helpers normalize rather than trusting the caller's casing.
+    expect(specBranchName('crm-142', 'export-contacts')).toBe('spec/CRM-142-export-contacts');
+    expect(specPrTitle('crm-142', 'Export contacts to CSV')).toBe(
+      '[CRM-142] - Export contacts to CSV',
     );
   });
 

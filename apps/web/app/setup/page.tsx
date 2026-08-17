@@ -1275,7 +1275,9 @@ function SetupWizard() {
                       <li key={r.id}>
                         <span className="mono">{r.name}</span>
                         {r.isPrimary && <span className="pill on">primary</span>}
-                        <span className={styles.path}>scaffold + AGENTS.md + CLAUDE.md</span>
+                        <span className={styles.path}>
+                          scaffold + AGENTS.md + CLAUDE.md (yours are kept, ours appended)
+                        </span>
                       </li>
                     ))}
                   </ul>

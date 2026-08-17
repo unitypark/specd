@@ -8,6 +8,7 @@ import {
   renderAsBuiltMarkdown,
   slugify,
   specBranchName,
+  specPrTitle,
   type CitationDrift,
   type ModelId,
   type SpecTask,
@@ -83,7 +84,8 @@ export interface BuildRunnerReport {
  * the ones the setup PR installed (AGENTS.md rules 5–7):
  *
  *   - work only from an approved spec
- *   - implement tasks in order, branch named spec/<id>-<slug>
+ *   - implement tasks in order, on a branch named spec/<ID>-<slug>, opening a
+ *     PR titled "[<ID>] - <Title>" (`specBranchName`/`specPrTitle`)
  *   - the final task files the as-built spec to knowledge/specs/
  *
  * Two deliberate constraints:
@@ -175,7 +177,7 @@ export class BuildAgent {
     const published = await this.workspaces.openReview(repo, {
       branch: prepared.branch,
       base: prepared.remote?.baseBranch ?? repo.defaultBranch,
-      title: `${spec.ticketKey}: ${spec.title}`,
+      title: specPrTitle(spec.ticketKey, spec.title),
       body: buildPrBody(spec, {
         commits: report.commits,
         verifyPassed: report.verifyPassed,
@@ -290,7 +292,7 @@ export class BuildAgent {
       // workspace is a temporary clone about to be deleted, so a branch that is
       // never pushed is a build that produced nothing.
       const published = await workspace.publish({
-        title: `${spec.ticketKey}: ${spec.title}`,
+        title: specPrTitle(spec.ticketKey, spec.title),
         body: buildPrBody(spec, {
         commits,
         verifyPassed,

@@ -5,6 +5,7 @@ import { Injectable } from '@nestjs/common';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { Config } from '../config.js';
 import { parseCommitLog, type HistoryCommit } from '../knowledge/history.js';
+import { detectHost, openLocalReview } from './local-review.js';
 import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
@@ -141,9 +142,19 @@ export class LocalGitAdapter implements VcsAdapter {
   }
 
   /**
-   * Writes the change to a branch and leaves it there. No push, no PR, no
-   * merge — a human reviews the diff and merges it themselves. Local mode is
-   * the trust path; it does not get to be clever.
+   * Writes the change to a branch, then opens a review for it where the repo
+   * already lives.
+   *
+   * Local mode holds no credential for the host and never will — but the
+   * machine it runs on is usually signed in to one already, and a branch
+   * nobody has been asked to look at is not a deliverable. So when `origin`
+   * points at a host whose CLI is installed and authenticated here, the branch
+   * is pushed and a real PR/MR is opened with the person's own account
+   * (`local-review.ts`, decision 0020). Where any of that is missing, the
+   * behaviour is what it always was: a branch, and instructions to diff it.
+   *
+   * Nothing in the review path may fail this call. The commit is the work; the
+   * review surface is how it reaches someone.
    */
   async propose(repo: RepoTarget, change: ProposedChange): Promise<ChangeResult> {
     const { git, root } = this.git(repo);
@@ -177,15 +188,44 @@ export class LocalGitAdapter implements VcsAdapter {
         '--author': 'specd <bot@specd.dev>',
       });
 
-      // Local mode cannot open a PR — there may be no host at all. But when
-      // `origin` points at one, the one-command path to a reviewable PR is
-      // worth spelling out: repos cloned from GitHub and connected in local
-      // mode are the common case, and "review as a PR" should not require
-      // knowing the compare-URL format by heart.
+      // There may be no host at all — `origin` is optional in local mode, and
+      // plenty of registered repos have never had one.
       const remoteUrl = await git
         .remote(['get-url', 'origin'])
         .then((r) => (r || '').trim())
         .catch(() => '');
+
+      const review =
+        this.config.localOpenPr && remoteUrl
+          ? await openLocalReview({
+              git,
+              cwd: root,
+              remoteUrl,
+              branch: change.branch,
+              base: startingBranch,
+              title: change.title,
+              body: change.body,
+            }).catch((err: unknown) => ({
+              url: null,
+              note: `opening a review failed (${err instanceof Error ? err.message : String(err)})`,
+            }))
+          : null;
+
+      if (review?.url) {
+        return {
+          branch: change.branch,
+          url: review.url,
+          reviewHint:
+            `Committed \`${change.branch}\` in ${root} and ${review.note}. ` +
+            'Merging is adopting.',
+          filesWritten: change.files.length,
+        };
+      }
+
+      // No review surface. The compare URL is the one-command path to one, and
+      // is worth spelling out: repos cloned from GitHub and connected in local
+      // mode are the common case, and "review as a PR" should not require
+      // knowing the compare-URL format by heart.
       const compare = remoteUrl
         ? hostedCompareUrl(remoteUrl, startingBranch, change.branch)
         : null;
@@ -196,8 +236,11 @@ export class LocalGitAdapter implements VcsAdapter {
         reviewHint:
           `Committed to branch \`${change.branch}\` in ${root}. Review it with ` +
           `\`git diff ${startingBranch}..${change.branch}\`, then merge when you are happy.` +
+          // Says why there is no PR, rather than letting its absence read as a
+          // deliberate choice the user made.
+          (review ? ` No pull request was opened — ${review.note}.` : '') +
           (compare
-            ? ` Prefer a pull request? Push and open one: \`git push -u origin ${change.branch}\` → ${compare}`
+            ? ` Open one yourself: \`git push -u origin ${change.branch}\` → ${compare}`
             : ''),
         filesWritten: change.files.length,
       };
@@ -327,18 +370,14 @@ async function sameDirectory(a: string, b: string): Promise<boolean> {
 
 /**
  * A compare URL for a branch, when `origin` points at a host we can address.
- * Only github.com and gitlab.com are recognized: a self-managed host's
- * software cannot be inferred from its URL, and a wrong guess would hand
- * someone a broken link mid-review. GitHub gets `?expand=1` so the link
- * lands on the open-PR form, not just the diff.
+ * Host detection is `detectHost`'s, so the link and the CLI that opens the
+ * review can never disagree about which host this is. GitHub gets `?expand=1`
+ * so the link lands on the open-PR form, not just the diff.
  */
 export function hostedCompareUrl(remoteUrl: string, base: string, branch: string): string | null {
-  const m = remoteUrl
-    .trim()
-    .match(/^(?:git@|ssh:\/\/git@|https?:\/\/)(github\.com|gitlab\.com)[:/](.+?)(?:\.git)?\/?$/);
-  if (!m) return null;
-  const [, host, path] = m;
-  return host === 'github.com'
-    ? `https://github.com/${path}/compare/${base}...${branch}?expand=1`
-    : `https://gitlab.com/${path}/-/compare/${base}...${branch}`;
+  const host = detectHost(remoteUrl);
+  if (!host) return null;
+  return host.kind === 'github'
+    ? `https://github.com/${host.path}/compare/${base}...${branch}?expand=1`
+    : `https://gitlab.com/${host.path}/-/compare/${base}...${branch}`;
 }

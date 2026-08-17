@@ -995,3 +995,18 @@ a.csource:hover {
   border-top: 1px solid var(--line);
   background: var(--panel);
 }
+
+/* Its own row under the actions: the branch is context for them, not one more
+   thing to click. */
+.dbranch {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.dbranch code {
+  color: var(--ink);
+  word-break: break-all;
+}

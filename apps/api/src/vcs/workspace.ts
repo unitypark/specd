@@ -7,6 +7,7 @@ import type { Repository } from '@specd/db';
 import { Config } from '../config.js';
 import { GitHubAdapter } from './github.adapter.js';
 import { GitLabAdapter } from './gitlab.adapter.js';
+import { openLocalReview, type LocalReview } from './local-review.js';
 import { VcsService } from './vcs.service.js';
 import { VcsError, reviewHint } from './vcs.types.js';
 
@@ -89,29 +90,76 @@ export class WorkspaceService {
     // A worktree left behind by a crashed run would block this one.
     await this.forceRemove(root, dir);
 
+    // `-B` resets the branch to the base tip whether or not it already exists,
+    // so every build starts from a clean feature branch. A re-run of a spec
+    // replaces its branch rather than stacking a second attempt's commits on
+    // the first — the same rule the hosted paths get from their force-push,
+    // which local mode used to be the only provider not to honour.
     const branches = await git.branchLocal();
-    if (branches.all.includes(branch)) {
-      await git.raw(['worktree', 'add', '--force', dir, branch]);
-    } else {
-      await git.raw(['worktree', 'add', '-b', branch, dir, baseBranch]);
-    }
+    const reset = branches.all.includes(branch);
+    await git.raw(['worktree', 'add', '--force', '-B', branch, dir, baseBranch]);
 
-    this.logger.log(`workspace ${dir} on ${branch} (from ${baseBranch})`);
+    this.logger.log(
+      `workspace ${dir} on ${branch} (${reset ? 'reset to' : 'from'} ${baseBranch})`,
+    );
 
     return {
       dir,
       branch,
       baseBranch,
-      publish: async () => ({
-        url: null,
-        reviewHint:
-          `Branch ${branch} is in ${root}. Review with \`git diff ${baseBranch}..${branch}\` ` +
-          'and merge when you are happy — merging is adopting.',
-      }),
+      // Same reach as a local-mode setup branch, and for the same reason: a
+      // build that ends in a branch nobody has been asked to look at has not
+      // finished. Where the machine is signed in to the host, the branch is
+      // pushed and a PR is opened under the person's own account; where it is
+      // not, this is what it always was (`local-review.ts`, decision 0020).
+      publish: async (pr) => {
+        const review = this.config.localOpenPr
+          ? await this.openLocalReview(dir, { branch, base: baseBranch, ...pr })
+          : null;
+
+        if (review?.url) {
+          return {
+            url: review.url,
+            reviewHint: `Branch ${branch} ${review.note}. Merging is adopting.`,
+          };
+        }
+
+        return {
+          url: null,
+          reviewHint:
+            `Branch ${branch} is in ${root}. Review with \`git diff ${baseBranch}..${branch}\` ` +
+            'and merge when you are happy — merging is adopting.' +
+            (review ? ` No pull request was opened — ${review.note}.` : ''),
+        };
+      },
       dispose: async () => {
         await this.forceRemove(root, dir);
       },
     };
+  }
+
+  /**
+   * Open a review for a branch that lives in a local worktree.
+   *
+   * Best-effort throughout: the commits are already in the user's repository
+   * and survive the worktree being removed, so nothing here is worth failing a
+   * build over. A repository with no `origin` simply has no review to open.
+   */
+  private async openLocalReview(
+    dir: string,
+    pr: { branch: string; base: string; title: string; body: string },
+  ): Promise<LocalReview | null> {
+    const git = simpleGit({ baseDir: dir });
+    const remoteUrl = await git
+      .remote(['get-url', 'origin'])
+      .then((r) => (r || '').trim())
+      .catch(() => '');
+    if (!remoteUrl) return null;
+
+    return openLocalReview({ git, cwd: dir, remoteUrl, ...pr }).catch((err: unknown) => ({
+      url: null,
+      note: `opening a pull request failed (${err instanceof Error ? err.message : String(err)})`,
+    }));
   }
 
   // ─── github: a shallow clone with a short-lived token ──────────────────────

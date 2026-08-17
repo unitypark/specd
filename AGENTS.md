@@ -13,8 +13,9 @@
 ## Spec-driven workflow
 5. Work items arrive as approved specs (Requirements / Design / Tasks)
    from specd — fetch with: specd spec pull <id>
-6. Implement tasks in order; one task ≤ one PR; reference the spec id
-   in every branch (spec/<id>-<slug>) and PR title.
+6. Implement tasks in order; one task ≤ one PR. Branch as
+   spec/<ID>-<slug> and title the PR "[<ID>] - <Title>" — the id is
+   spelled the way the board spells it, in both.
 7. The final task of every spec: commit the as-built spec to
    knowledge/specs/<id>-<slug>.md in this repo's PR.
 

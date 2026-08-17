@@ -42,7 +42,7 @@ matters: the point of running specd here is that the knowledge base is real.
    the discussion as input; v1 stays exactly as it was.
 3. **A person approves it.** Not an agent, ever — the server refuses
    (`409 spec_not_approved`) and no client can route around that.
-4. **Implement**, on `spec/<id>-<slug>`, referencing the id in the PR title.
+4. **Implement**, on `spec/<ID>-<slug>`, with a PR titled `[<ID>] - <Title>`.
    Either hand the spec to your own agent with `specd spec pull <id>`, or use
    the Build station.
 5. **File the as-built spec** — the last task of every spec, into

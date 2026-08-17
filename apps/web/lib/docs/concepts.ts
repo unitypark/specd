@@ -75,7 +75,7 @@ export const CONCEPTS: DocCategory = {
         { k: 'h2', text: '05 · Build' },
         {
           k: 'p',
-          text: 'The build agent implements the tasks in order, one commit each, on the spec\'s own `spec/<id>-<slug>` branch, and opens a pull request. It gets editing tools only — never a shell — and it never touches your working tree or pushes to a default branch. Details: [Build and ship](/docs/build-and-ship).',
+          text: 'The build agent implements the tasks in order, one commit each, on the spec\'s own `spec/<ID>-<slug>` branch, and opens a pull request titled `[<ID>] - <Title>`. It gets editing tools only — never a shell — and it never touches your working tree or pushes to a default branch. Details: [Build and ship](/docs/build-and-ship).',
         },
         { k: 'h2', text: '06 · Learn' },
         {
@@ -170,6 +170,10 @@ export const CONCEPTS: DocCategory = {
           text: 'Grounding also installs an `AGENTS.md` at the repository root: a numbered list of rules for any agent working in the repo, with `CLAUDE.md` importing it so Claude Code picks it up automatically. The rules that matter most:',
         },
         {
+          k: 'p',
+          text: 'If the repository already has an `AGENTS.md` or `CLAUDE.md`, **nothing in it is rewritten.** Your file stays exactly as it is and specd\'s rules are appended below it, fenced by `<!-- specd:begin -->` markers so a later grounding run updates only that block. Where the two sets disagree, yours came first and a human decides — the setup pull request says so, and `knowledge/open-questions.md` carries it as an item.',
+        },
+        {
           k: 'ol',
           items: [
             'Read `knowledge/README.md` and the docs it maps to your task **before** implementing anything.',
@@ -183,7 +187,7 @@ export const CONCEPTS: DocCategory = {
           k: 'note',
           tone: 'good',
           title: 'Three of those rules are enforced by software',
-          text: 'The server refuses to serve an unapproved spec, the webhook matches merged `spec/<id>-<slug>` branches back to their spec, and the build station files the as-built record itself. The [Claude Code plugin](/docs/agent-integrations) makes two more bind at the moment they are broken, with a hook that blocks an edit on an unapproved spec branch and a hook that asks whether rule 3 was met.',
+          text: 'The server refuses to serve an unapproved spec, the webhook matches merged `spec/<ID>-<slug>` branches back to their spec, and the build station files the as-built record itself. The [Claude Code plugin](/docs/agent-integrations) makes two more bind at the moment they are broken, with a hook that blocks an edit on an unapproved spec branch and a hook that asks whether rule 3 was met.',
         },
         { k: 'h2', text: 'How specd reads it' },
         {
@@ -487,7 +491,7 @@ polling the same queue cannot take the same row.
           head: ['What was merged', 'What specd does'],
           rows: [
             ['The setup branch from Ground', 'Records adoption and indexes `knowledge/`.'],
-            ['A `spec/<id>-<slug>` branch', 'Marks the spec delivered and re-indexes.'],
+            ['A `spec/<ID>-<slug>` branch', 'Marks the spec delivered and re-indexes.'],
             ['Anything touching `knowledge/` on the default branch', 'Re-indexes.'],
             ['A pull request that was closed, not merged', 'Nothing.'],
           ],

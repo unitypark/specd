@@ -8,7 +8,7 @@
 
 `AGENTS.md` is seven numbered rules, and the whole product exists to make them
 true. specd enforces three of them properly: the server refuses to serve an
-unapproved spec (rule 5), the webhook matches merged `spec/<id>-<slug>` branches
+unapproved spec (rule 5), the webhook matches merged `spec/<ID>-<slug>` branches
 back to the spec (rule 6), and the build station files the as-built record
 itself (rule 7).
 

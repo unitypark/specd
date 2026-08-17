@@ -9,7 +9,7 @@ Implement a pulled spec, task by task, in order. The discipline this skill enfor
 
 ## Before the first task
 
-Confirm you have the spec (`.specd-work/<id>.md` from `/specd:pull`) and that you are on its `spec/<id>-<slug>` branch. If the spec was never pulled, run `/specd:pull` first — implementing from the ticket text instead of the approved spec defeats the entire gate.
+Confirm you have the spec (`.specd-work/<id>.md` from `/specd:pull`) and that you are on its `spec/<ID>-<slug>` branch. If the spec was never pulled, run `/specd:pull` first — implementing from the ticket text instead of the approved spec defeats the entire gate.
 
 Re-check the gate if any time has passed: `specd spec status <id>`. A spec can be revised while you work, and exit 3 means the version you hold is no longer the one that is approved.
 

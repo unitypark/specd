@@ -2,6 +2,7 @@ import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
   VcsError,
+  describeTransportFailure,
   reviewHint,
   type ChangeResult,
   type OpenedReview,
@@ -27,6 +28,15 @@ import {
  * (which mints installation tokens per run) is P1-scope wiring on top of this
  * class, not a change to it.
  */
+/** The origin of an API base, for an error message. Falls back to the raw value. */
+function hostOf(apiBase: string): string {
+  try {
+    return new URL(apiBase).origin;
+  } catch {
+    return apiBase;
+  }
+}
+
 export class GitHubAdapter implements VcsAdapter {
   readonly provider = 'github';
 
@@ -42,16 +52,27 @@ export class GitHubAdapter implements VcsAdapter {
   }
 
   private async api<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${this.apiBase}${path}`, {
-      ...init,
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${this.token}`,
-        'X-GitHub-Api-Version': '2022-11-28',
-        'Content-Type': 'application/json',
-        ...(init.headers ?? {}),
-      },
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.apiBase}${path}`, {
+        ...init,
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${this.token}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json',
+          ...(init.headers ?? {}),
+        },
+      });
+    } catch (err) {
+      // As in the GitLab adapter: a request that never reached the host
+      // rejects with a TypeError, which is not an HttpException and so
+      // reaches the caller as an opaque 500. Rare against api.github.com,
+      // routine against an Enterprise Server behind a VPN.
+      const explained = describeTransportFailure(err, hostOf(this.apiBase));
+      if (explained) throw new VcsError(explained, err);
+      throw err;
+    }
 
     if (!res.ok) {
       const body = await res.text();
@@ -284,6 +305,18 @@ export class GitHubAdapter implements VcsAdapter {
 
       return { url: found.html_url, number: found.number, existing: true, descriptionStale };
     }
+  }
+
+  /**
+   * Prove a token, and say who it belongs to.
+   *
+   * Only meaningful for a user token — an App installation token has no user,
+   * and the App path proves itself by listing what it was granted instead.
+   * Used at connect time by local mode's review credential.
+   */
+  async verify(): Promise<{ username: string; name: string }> {
+    const me = await this.api<{ login: string; name: string | null }>('/user');
+    return { username: me.login, name: me.name ?? me.login };
   }
 
   /** Repo picker source: exactly what the installation was granted (§6 step 2). */

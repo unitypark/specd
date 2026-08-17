@@ -106,6 +106,7 @@ export class VcsService {
       localPath: repo.localPath,
       externalId: repo.externalId,
       defaultBranch: repo.defaultBranch,
+      projectId: repo.projectId,
     };
   }
 

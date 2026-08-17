@@ -191,6 +191,22 @@ curl -H "Authorization: Bearer $TOKEN" \\
           k: 'p',
           text: 'The complete walkthrough — self-managed instance URLs, webhook registration, verification — is in `docs/gitlab.md` in the repository.',
         },
+        { k: 'h2', text: 'When a self-managed instance does not connect' },
+        {
+          k: 'p',
+          text: 'specd reaches your instance **from the machine specd runs on**, not from your browser — so every check is about that machine. A bare host like `gitlab.example.com` is accepted and read as https; anything that cannot become an http(s) origin is refused on the connect call itself.',
+        },
+        {
+          k: 'table',
+          head: ['What the error says', 'What to fix'],
+          rows: [
+            ['`does not resolve from the machine specd runs on`', 'Wrong hostname, or this machine is not on the VPN that can see it.'],
+            ['`refused the connection`', 'The host resolves; the port is wrong, or nothing is serving there.'],
+            ['`did not answer in time`', 'Typically a firewall, or a VPN that is not connected.'],
+            ['`presented a certificate this machine does not trust`', 'An internal CA — point `NODE_EXTRA_CA_CERTS` at it where specd runs, rather than disabling verification.'],
+            ['`→ 401`', 'The instance answered. The token is the problem, not the network.'],
+          ],
+        },
         { k: 'h2', text: 'Webhook trust' },
         {
           k: 'p',

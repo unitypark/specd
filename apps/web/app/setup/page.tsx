@@ -117,6 +117,12 @@ function SetupWizard() {
   const [pathCheck, setPathCheck] = useState<{ ok: boolean; clean?: boolean; branch?: string; reason?: string } | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
 
+  // step 2 · local mode's optional review credential
+  const [reviewProvider, setReviewProvider] = useState<'' | 'github' | 'gitlab'>('');
+  const [reviewInstanceUrl, setReviewInstanceUrl] = useState('');
+  const [reviewToken, setReviewToken] = useState('');
+  const [reviewCheck, setReviewCheck] = useState<{ ok: boolean; detail: string } | null>(null);
+
   // step 2 · GitLab
   const [gitlabToken, setGitlabToken] = useState('');
   const [gitlabInstanceUrl, setGitlabInstanceUrl] = useState('');
@@ -431,10 +437,54 @@ function SetupWizard() {
     setBusyAction('continue-2');
     setError(null);
     try {
-      await post(`/projects/${project.slug}/connections/vcs`, { provider: vcs });
+      await post(`/projects/${project.slug}/connections/vcs`, localVcsBody());
       goTo(3);
     } catch (err) {
+      // A rejected review token must not read as "local mode is broken" — it
+      // is the one optional thing on this step.
       fail(err);
+    } finally {
+      setBusy(false);
+      setBusyAction(null);
+    }
+  }
+
+  /** Local mode's connection, with its optional review credential if given. */
+  function localVcsBody() {
+    return reviewProvider
+      ? {
+          provider: 'local',
+          reviewProvider,
+          token: reviewToken,
+          instanceUrl: reviewInstanceUrl.trim() || undefined,
+        }
+      : { provider: 'local' };
+  }
+
+  /**
+   * Prove the review token before Continue does, so a bad one is answered on
+   * the field rather than as a failure to advance. Storing it here as well is
+   * deliberate: this *is* the connect call, and repeating it on Continue is
+   * idempotent.
+   */
+  async function checkReviewCredential() {
+    if (!project || !reviewProvider || !reviewToken) return;
+    setBusy(true);
+    setBusyAction('check-review');
+    setReviewCheck(null);
+    try {
+      const res = await post<{ ok: boolean; connectedAs?: string }>(
+        `/projects/${project.slug}/connections/vcs`,
+        localVcsBody(),
+      );
+      setReviewCheck({
+        ok: true,
+        detail: res.connectedAs
+          ? `Token accepted — ${reviewProvider === 'gitlab' ? 'GitLab' : 'GitHub'} knows it as ${res.connectedAs}.`
+          : 'Token accepted.',
+      });
+    } catch (err) {
+      setReviewCheck({ ok: false, detail: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
       setBusyAction(null);
@@ -843,9 +893,14 @@ function SetupWizard() {
                       id="glurl"
                       value={gitlabInstanceUrl}
                       onChange={(e) => setGitlabInstanceUrl(e.target.value)}
-                      placeholder="gitlab.com — leave blank for gitlab.com"
+                      placeholder="https://gitlab.example.com — leave blank for gitlab.com"
                       spellCheck={false}
                     />
+                    <span className="hint">
+                      The instance&apos;s origin. specd reaches it from the machine it runs on, so
+                      a host behind a VPN needs this machine on that VPN, and an internal CA
+                      needs to be trusted here (<code>NODE_EXTRA_CA_CERTS</code>).
+                    </span>
                   </div>
                   {gitlabError && <div className="err">{gitlabError}</div>}
                   <button type="button" className="btn" onClick={connectGitlab} disabled={busy || !gitlabToken}>
@@ -941,6 +996,85 @@ function SetupWizard() {
                       </div>
                       <button type="button" className="btn" onClick={addRepo} disabled={busy}>
                         {busyAction === 'add-repo' && <span className="spinner" />} + Add repository
+                      </button>
+                    </>
+                  )}
+
+                  {/* Optional, and off by default: local mode's promise is that
+                      specd holds no key to your host. This is the way to say
+                      "open the merge request for me anyway" — used for that and
+                      nothing else. */}
+                  <div className="field">
+                    <label htmlFor="revhost">Open pull/merge requests on (optional)</label>
+                    <select
+                      id="revhost"
+                      value={reviewProvider}
+                      onChange={(e) => {
+                        setReviewProvider(e.target.value as '' | 'github' | 'gitlab');
+                        setReviewCheck(null);
+                      }}
+                    >
+                      <option value="">Nothing — leave me a branch to diff</option>
+                      <option value="gitlab">GitLab (gitlab.com or self-managed)</option>
+                      <option value="github">GitHub (github.com or Enterprise Server)</option>
+                    </select>
+                    <span className="hint">
+                      specd reads and writes your code on disk either way. A token here is used
+                      for one thing — opening the review — and never to fetch a file or push a
+                      commit; your own git credentials do the push.
+                    </span>
+                  </div>
+
+                  {reviewProvider && (
+                    <>
+                      <div className="field">
+                        <label htmlFor="revurl">
+                          Instance URL {reviewProvider === 'gitlab' ? '(self-managed only)' : '(Enterprise Server only)'}
+                        </label>
+                        <input
+                          id="revurl"
+                          value={reviewInstanceUrl}
+                          onChange={(e) => setReviewInstanceUrl(e.target.value)}
+                          placeholder={
+                            reviewProvider === 'gitlab'
+                              ? 'https://gitlab.example.com — blank for gitlab.com'
+                              : 'https://github.example.com — blank for github.com'
+                          }
+                          spellCheck={false}
+                        />
+                        <span className="hint">
+                          The instance root, not a project page. specd reaches it from the machine
+                          it runs on, so a host behind a VPN needs this machine on that VPN.
+                        </span>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="revtoken">Access token</label>
+                        <input
+                          id="revtoken"
+                          type="password"
+                          value={reviewToken}
+                          onChange={(e) => setReviewToken(e.target.value)}
+                          placeholder={reviewProvider === 'gitlab' ? 'glpat-…' : 'ghp_…'}
+                          spellCheck={false}
+                        />
+                        <span className="hint">
+                          {reviewProvider === 'gitlab'
+                            ? 'Needs the api scope, and permission to open merge requests on the project.'
+                            : 'A token with pull-request write access on the repository.'}
+                        </span>
+                      </div>
+                      {reviewCheck && (
+                        <div className={reviewCheck.ok ? styles.good : styles.bad}>
+                          {reviewCheck.ok ? <>✓ {reviewCheck.detail}</> : <>✕ {reviewCheck.detail}</>}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={checkReviewCredential}
+                        disabled={busy || !reviewToken}
+                      >
+                        {busyAction === 'check-review' ? <span className="spinner" /> : 'Check token'}
                       </button>
                     </>
                   )}

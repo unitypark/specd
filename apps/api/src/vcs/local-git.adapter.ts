@@ -6,6 +6,7 @@ import { simpleGit, type SimpleGit } from 'simple-git';
 import { Config } from '../config.js';
 import { parseCommitLog, type HistoryCommit } from '../knowledge/history.js';
 import { detectHost, openLocalReview } from './local-review.js';
+import { LocalReviewService } from './local-review.service.js';
 import { collectSamples } from './scan-targets.js';
 import {
   IGNORED_DIRS,
@@ -32,7 +33,10 @@ import {
 export class LocalGitAdapter implements VcsAdapter {
   readonly provider = 'local';
 
-  constructor(private readonly config: Config) {}
+  constructor(
+    private readonly config: Config,
+    private readonly reviews: LocalReviewService,
+  ) {}
 
   private git(repo: RepoTarget): { git: SimpleGit; root: string } {
     const root = this.repoRoot(repo);
@@ -205,6 +209,7 @@ export class LocalGitAdapter implements VcsAdapter {
               base: startingBranch,
               title: change.title,
               body: change.body,
+              credential: await this.reviews.credentialFor(repo.projectId),
             }).catch((err: unknown) => ({
               url: null,
               note: `opening a review failed (${err instanceof Error ? err.message : String(err)})`,

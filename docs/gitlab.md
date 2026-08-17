@@ -66,7 +66,23 @@ curl -X POST "$SPECD_API/projects/$PROJECT_SLUG/connections/vcs" \
 ```
 
 Self-managed instance: add `"instanceUrl": "https://gitlab.example.com"`.
-Omit it for gitlab.com.
+Omit it for gitlab.com. A bare host (`gitlab.example.com`) is accepted and
+read as https; anything specd cannot turn into an http(s) origin is refused
+here, on this call, rather than at the repository listing one call later.
+
+### When a self-managed instance does not connect
+
+specd reaches your instance **from the machine specd runs on**, not from your
+browser — so the checks are about that machine. Every one of these now comes
+back as a sentence naming the cause, rather than as "Internal server error":
+
+| What you see | What it means |
+| --- | --- |
+| `does not resolve from the machine specd runs on` | Wrong hostname, or this machine is not on the VPN that can see it. |
+| `refused the connection` | The host resolves; the port is wrong, or nothing is serving there. |
+| `did not answer in time` | Typically a firewall, or a VPN that is not connected. |
+| `presented a certificate this machine does not trust` | An internal CA. Point `NODE_EXTRA_CA_CERTS` at it where specd runs — do not disable verification. |
+| `→ 401` | The instance answered. The token is the problem, not the network. |
 
 **3. Find and add a repository.** The picker reads live from the token —
 specd cannot see anything it was not granted:

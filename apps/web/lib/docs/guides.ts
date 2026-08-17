@@ -58,7 +58,17 @@ export const GUIDES: DocCategory = {
         },
         {
           k: 'p',
-          text: 'specd holds no host credential in this mode and never will — but where `origin` points at GitHub or GitLab and that host\'s CLI (`gh`, `glab`) is installed and signed in on the same machine, setup and build branches are pushed and opened as real pull requests through **your** account. The CLI is checked before anything is pushed, so a repository specd cannot open a review on is never published to. Set `SPECD_LOCAL_OPEN_PR=0` to keep everything local; the branch is committed either way.',
+          text: 'Where `origin` points at github.com or gitlab.com and that host\'s CLI (`gh`, `glab`) is installed and signed in on the same machine, setup and build branches are pushed and opened as real pull requests through **your** account. The CLI is checked before anything is pushed, so a repository specd cannot open a review on is never published to. Set `SPECD_LOCAL_OPEN_PR=0` to keep everything local; the branch is committed either way.',
+        },
+        {
+          k: 'p',
+          text: 'For a **self-managed** GitLab or GitHub Enterprise, that is not enough: specd refuses to guess what software a host runs from its URL, and the host\'s CLI is often not on a corporate machine. So the local step takes an optional **review credential** — pick the host, give the instance URL and a token, and specd opens the merge request with it. The token is checked on the spot, and is used for that one thing.',
+        },
+        {
+          k: 'note',
+          tone: 'rule',
+          title: 'The review credential is not a second connection',
+          text: 'It never reads a file, lists a tree, clones or pushes — your own git credentials still do the push, and specd still reads the repository from disk. Leave it unset and local mode holds no credential at all, exactly as before.',
         },
         { k: 'h2', text: 'GitHub — as an App, not a personal token' },
         {

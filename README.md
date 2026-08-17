@@ -569,14 +569,16 @@ write path, same fail-closed webhook rule using the mechanism GitLab actually
 offers (token echo, constant-time compare). Walkthrough:
 [`docs/gitlab.md`](docs/gitlab.md).
 
-**Local mode** — a repository registered by path (`specd connect .`). specd
-holds no credential for any host here and never will. Where `origin` points at
-GitHub or GitLab and that host's CLI (`gh`, `glab`) is installed and signed in
-on the same machine, setup and build branches are pushed and opened as real
-PRs through *your* account; the CLI is checked before anything is pushed, so a
-repository specd cannot open a review on is never published to.
-`SPECD_LOCAL_OPEN_PR=0` keeps everything local — the branch is committed
-either way
+**Local mode** — a repository registered by path (`specd connect .`), read and
+written on disk. Where `origin` is github.com or gitlab.com and that host's CLI
+(`gh`, `glab`) is signed in on the same machine, setup and build branches are
+pushed and opened as real PRs through *your* account. For a **self-managed**
+instance — where specd refuses to guess what software a host runs — the local
+step takes an optional **review credential**: pick the host, give the instance
+URL and a token, and it opens the merge request with that. The token opens
+reviews and nothing else; your own git does the push, and leaving it unset
+keeps local mode credential-free. `SPECD_LOCAL_OPEN_PR=0` disables the whole
+path — the branch is committed either way
 ([`knowledge/decisions/0020-local-mode-borrows-the-host-cli.md`](knowledge/decisions/0020-local-mode-borrows-the-host-cli.md)).
 
 **Jira** — connect, import issues, backlink comments and status mirroring work

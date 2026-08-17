@@ -8,6 +8,7 @@ import { Config } from '../config.js';
 import { GitHubAdapter } from './github.adapter.js';
 import { GitLabAdapter } from './gitlab.adapter.js';
 import { openLocalReview, type LocalReview } from './local-review.js';
+import { LocalReviewService } from './local-review.service.js';
 import { VcsService } from './vcs.service.js';
 import { VcsError, reviewHint } from './vcs.types.js';
 
@@ -50,6 +51,7 @@ export class WorkspaceService {
   constructor(
     private readonly vcs: VcsService,
     private readonly config: Config,
+    private readonly reviews: LocalReviewService,
   ) {}
 
   async create(repo: Repository, branch: string): Promise<Workspace> {
@@ -114,7 +116,7 @@ export class WorkspaceService {
       // not, this is what it always was (`local-review.ts`, decision 0020).
       publish: async (pr) => {
         const review = this.config.localOpenPr
-          ? await this.openLocalReview(dir, { branch, base: baseBranch, ...pr })
+          ? await this.openLocalReview(dir, repo.projectId, { branch, base: baseBranch, ...pr })
           : null;
 
         if (review?.url) {
@@ -147,6 +149,7 @@ export class WorkspaceService {
    */
   private async openLocalReview(
     dir: string,
+    projectId: string | undefined,
     pr: { branch: string; base: string; title: string; body: string },
   ): Promise<LocalReview | null> {
     const git = simpleGit({ baseDir: dir });
@@ -156,7 +159,9 @@ export class WorkspaceService {
       .catch(() => '');
     if (!remoteUrl) return null;
 
-    return openLocalReview({ git, cwd: dir, remoteUrl, ...pr }).catch((err: unknown) => ({
+    const credential = await this.reviews.credentialFor(projectId).catch(() => null);
+
+    return openLocalReview({ git, cwd: dir, remoteUrl, credential, ...pr }).catch((err: unknown) => ({
       url: null,
       note: `opening a pull request failed (${err instanceof Error ? err.message : String(err)})`,
     }));

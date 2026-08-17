@@ -31,6 +31,9 @@ import { KnowledgeService } from '../knowledge/knowledge.service.js';
 import { ModelRouter } from '../agents/model.router.js';
 import { Vault } from '../common/vault.js';
 import { JiraAdapter } from '../tracker/jira.adapter.js';
+import { VcsError, normalizeInstanceUrl } from '../vcs/vcs.types.js';
+import { GitHubAdapter } from '../vcs/github.adapter.js';
+import { GitLabAdapter } from '../vcs/gitlab.adapter.js';
 
 class CreateProjectDto {
   @IsString() @MinLength(1) @MaxLength(80) name!: string;
@@ -73,6 +76,11 @@ class ConnectVcsDto {
   @IsIn(['local', 'github', 'gitlab']) provider!: string;
   @IsOptional() @IsString() token?: string;
   @IsOptional() @IsString() instanceUrl?: string;
+  /**
+   * Local mode only: the host to open pull/merge requests on, if any. Absent
+   * keeps local mode exactly as it was — a branch, and no credential held.
+   */
+  @IsOptional() @IsIn(['github', 'gitlab']) reviewProvider?: 'github' | 'gitlab';
 }
 
 class ConnectTrackerDto {
@@ -295,15 +303,58 @@ export class ProjectsController {
   ) {
     const project = await this.projects.bySlug(slug);
     await this.projects.requireRole(user.sub, project.id, ['owner', 'maintainer']);
+
+    // Normalized before it is stored, so the complaint lands on the field
+    // somebody just typed into rather than on the repository list one call
+    // later — and so every later caller (webhooks, indexing, builds) reads a
+    // URL that is already in a shape `fetch` accepts.
+    let instanceUrl: string | null = null;
+    if (dto.instanceUrl?.trim()) {
+      try {
+        instanceUrl = normalizeInstanceUrl(dto.instanceUrl);
+      } catch (err) {
+        throw new BadRequestException(err instanceof VcsError ? err.message : String(err));
+      }
+    }
+
+    // Local mode may carry a credential used for one thing: opening the
+    // review. It is proved here, live, because the wizard must not claim a
+    // connection that fails later inside a run (§6 guardrail) — and because
+    // "the merge request never appeared" is a bad way to learn a token is
+    // wrong.
+    let connectedAs: string | undefined;
+    const reviewProvider = dto.provider === 'local' ? dto.reviewProvider ?? null : null;
+    if (reviewProvider) {
+      if (!dto.token) {
+        throw new BadRequestException(
+          `A ${reviewProvider === 'gitlab' ? 'GitLab' : 'GitHub'} token is needed to open reviews from local mode. Leave the review host unset to keep local mode credential-free.`,
+        );
+      }
+      try {
+        const identity =
+          reviewProvider === 'gitlab'
+            ? await new GitLabAdapter(dto.token, instanceUrl ?? undefined).verify()
+            : await new GitHubAdapter(
+                dto.token,
+                instanceUrl ? `${instanceUrl}/api/v3` : undefined,
+              ).verify();
+        connectedAs = identity.username;
+      } catch (err) {
+        throw new BadRequestException(
+          err instanceof VcsError ? err.message : err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
     await this.connections.upsert({
       projectId: project.id,
       kind: 'vcs',
       provider: dto.provider,
-      label: dto.provider === 'local' ? 'local runner' : dto.instanceUrl ?? dto.provider,
-      settings: { instanceUrl: dto.instanceUrl ?? null },
+      label: dto.provider === 'local' ? 'local runner' : instanceUrl ?? dto.provider,
+      settings: { instanceUrl, reviewProvider },
       secret: dto.token ?? null,
     });
-    return { ok: true };
+    return connectedAs ? { ok: true, connectedAs } : { ok: true };
   }
 
   @Post(':slug/connections/tracker')

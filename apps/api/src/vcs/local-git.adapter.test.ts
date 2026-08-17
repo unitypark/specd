@@ -6,6 +6,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hostedCompareUrl, LocalGitAdapter } from './local-git.adapter.js';
 import type { Config } from '../config.js';
 import type { RepoTarget } from './vcs.types.js';
+import type { LocalReviewService } from './local-review.service.js';
+
+/** No project carries a review credential in these fixtures. */
+const noReviews = { credentialFor: async () => null } as unknown as LocalReviewService;
 
 /**
  * The real adapter against a real git repository.
@@ -38,7 +42,7 @@ describe('LocalGitAdapter against a real repository', () => {
     git('add', '-A');
     git('commit', '-qm', 'first');
 
-    adapter = new LocalGitAdapter({ localRepoRoot: null } as Config);
+    adapter = new LocalGitAdapter({ localRepoRoot: null } as Config, noReviews);
     target = { name: 'test/repo', localPath: dir, defaultBranch: 'main' } as RepoTarget;
   });
 
@@ -123,7 +127,7 @@ describe('propose review hint against a real repository', () => {
   // PR opening off: this suite is about the hint a repository gets when there
   // is no review surface, and leaving it on would have the test shell out to
   // whichever `gh` happens to be signed in on the machine running it.
-  const adapter = new LocalGitAdapter({ localRepoRoot: null, localOpenPr: false } as Config);
+  const adapter = new LocalGitAdapter({ localRepoRoot: null, localOpenPr: false } as Config, noReviews);
 
   const propose = (branch: string) =>
     adapter.propose({ name: 'hint', localPath: dir } as RepoTarget, {
@@ -159,7 +163,7 @@ describe('propose review hint against a real repository', () => {
   it('says why no pull request was opened, rather than letting the silence speak', async () => {
     // An unrecognized host short-circuits before any CLI or push, so this
     // exercises the enabled path without leaving the machine.
-    const enabled = new LocalGitAdapter({ localRepoRoot: null, localOpenPr: true } as Config);
+    const enabled = new LocalGitAdapter({ localRepoRoot: null, localOpenPr: true } as Config, noReviews);
     git('remote', 'set-url', 'origin', 'git@git.internal:team/repo.git');
 
     const change = await enabled.propose({ name: 'hint', localPath: dir } as RepoTarget, {
@@ -171,7 +175,7 @@ describe('propose review hint against a real repository', () => {
 
     expect(change.url).toBeNull();
     expect(change.reviewHint).toContain('No pull request was opened');
-    expect(change.reviewHint).toContain('not a host specd can open a review on');
+    expect(change.reviewHint).toContain('will not guess what software a self-managed host runs');
     // Nothing to link to either — specd refuses to guess a self-managed host.
     expect(change.reviewHint).not.toContain('http');
   });

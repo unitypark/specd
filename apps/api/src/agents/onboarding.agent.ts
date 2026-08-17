@@ -16,7 +16,7 @@ import {
 import type { AiMode, ModelId } from '@specd/shared';
 import { DB } from '../db/db.module.js';
 import { VcsService } from '../vcs/vcs.service.js';
-import type { RepoFile, RepoSnapshot } from '../vcs/vcs.types.js';
+import type { RepoFile, RepoSnapshot, RepoTarget, VcsAdapter } from '../vcs/vcs.types.js';
 import { ModelRouter } from './model.router.js';
 import type { RunHandle } from '../runs/runs.service.js';
 
@@ -187,13 +187,15 @@ export class OnboardingAgent {
     const { repo, projectName, stack } = ctx;
     const drafted = parsed;
 
+    const adapter = await this.vcs.adapterFor(repo);
+    const target = this.vcs.toTarget(repo);
+
     // A job queued before this shape existed carries no evidence pack. Rescan
     // rather than render a hollow scaffold from a payload we can no longer read.
     let evidence = ctx.evidence;
     if (!evidence) {
       await log('job payload predates the evidence pack — rescanning', 'warn');
-      const adapter = await this.vcs.adapterFor(repo);
-      evidence = collectEvidence(await adapter.snapshot(this.vcs.toTarget(repo)));
+      evidence = collectEvidence(await adapter.snapshot(target));
     }
 
     if (drafted) {
@@ -215,6 +217,19 @@ export class OnboardingAgent {
       docs: scaffoldDocPaths(evidence),
     });
 
+    // What the repo already tells its agents. Onboarding adds to this; it does
+    // not get to replace it. Read at HEAD of the default branch rather than
+    // taken from the scan, because a queued job's evidence pack records only
+    // which agent docs *exist*, and the merge needs their text.
+    const existing = await readAgentDocs(adapter, target);
+    if (existing.agentsMd || existing.claudeMd) {
+      await log(
+        `${[existing.agentsMd && 'AGENTS.md', existing.claudeMd && 'CLAUDE.md']
+          .filter(Boolean)
+          .join(' + ')} already here — appending under a specd marker, keeping what is there`,
+      );
+    }
+
     const files = renderScaffold({
       repoName: repo.name,
       projectName,
@@ -224,6 +239,7 @@ export class OnboardingAgent {
       date: new Date().toISOString().slice(0, 10),
       agentsMd,
       drafted,
+      existing,
     });
 
     const unverifiedCount = files.reduce(
@@ -242,8 +258,6 @@ export class OnboardingAgent {
     });
 
     await log(`proposing ${files.length} files for review`);
-    const adapter = await this.vcs.adapterFor(repo);
-    const target = this.vcs.toTarget(repo);
     const change = await adapter.propose(target, {
       branch: 'specd/setup',
       title: `specd setup — knowledge base and agent working agreements`,
@@ -530,6 +544,22 @@ function describeEvidence(evidence: RepoEvidence): string {
       `${evidence.tests.fileCount} test file(s)`,
     ].join(' · ') + (evidence.existingAgentDocs.length ? ` · found ${evidence.existingAgentDocs.join(', ')}` : '')
   );
+}
+
+/**
+ * The agent instructions a repository already has, at HEAD.
+ *
+ * Failing to read them must not fail the run: the worst outcome of an empty
+ * answer here is the scaffold specd wrote before this existed, whereas a
+ * failed grounding run leaves a project with no knowledge base at all.
+ */
+async function readAgentDocs(
+  adapter: VcsAdapter,
+  target: RepoTarget,
+): Promise<{ agentsMd: string | null; claudeMd: string | null }> {
+  const found = await adapter.readFiles(target, ['AGENTS.md', 'CLAUDE.md']).catch(() => []);
+  const at = (path: string) => found.find((f) => f.path === path)?.content ?? null;
+  return { agentsMd: at('AGENTS.md'), claudeMd: at('CLAUDE.md') };
 }
 
 function countUnverified(drafted: DraftedDocs | null): number {

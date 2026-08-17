@@ -1,4 +1,5 @@
 import { type DetectedStack, describeStack } from './stack.js';
+import { mergeAgentsMd, mergeClaudeMd } from './agents-md.js';
 import {
   hasDataEvidence,
   hasIntegrationEvidence,
@@ -359,7 +360,8 @@ ${draftedOr(drafted?.conventionsReview, 'the rejections that recur. An agent tha
 
 ## Git
 
-- Spec work branches as \`spec/<id>-<slug>\` and names the spec id in the PR title.
+- Spec work branches as \`spec/<ID>-<slug>\`, with a PR titled \`[<ID>] - <Title>\`.
+  The id is spelled the way the board spells it, in both.
 - One task, one PR. The last task of a spec files the as-built copy into
   [specs/](specs/README.md).
 - Docs ride the change: knowledge updates land in the same PR as the code.
@@ -629,10 +631,24 @@ export function renderOpenQuestions(input: DocContext): string {
       doc: 'runbooks/deploy.md',
     });
   }
-  if (evidence.existingAgentDocs.length) {
+  const merged = mergedAgentDocs(evidence);
+  if (merged.length) {
     items.push({
-      question: `This repo already had agent instructions (${evidence.existingAgentDocs.join(', ')}) — fold them into the ones this setup added, or delete one set.`,
-      why: 'Two sets of rules in one repo is worse than either set alone: agents follow whichever they read first.',
+      question: `This repo already had ${merged.join(' and ')} — read ${merged.length === 1 ? 'it' : 'them'} against the specd block appended below yours and reconcile anything that disagrees.`,
+      why: "Your rules were kept and specd's were added under a marked fence, so nothing was lost — but two rules that contradict each other are worse than either alone: an agent follows whichever it reads first.",
+      doc: 'conventions.md',
+    });
+  }
+
+  // Instructions for other tools. specd writes neither file, so there is
+  // nothing to reconcile *inside* them — but a repo whose Cursor rules and
+  // whose AGENTS.md now say different things has the same problem one file
+  // further away, and only a human can decide which is right.
+  const untouched = evidence.existingAgentDocs.filter((d) => !merged.includes(d));
+  if (untouched.length) {
+    items.push({
+      question: `${untouched.join(' and ')} ${untouched.length === 1 ? 'is' : 'are'} instructions for another tool, and specd left ${untouched.length === 1 ? 'it' : 'them'} alone — do they still agree with AGENTS.md?`,
+      why: 'Nothing keeps two sets of agent rules in step. An agent reading only one of them will not know the other exists.',
       doc: 'conventions.md',
     });
   }
@@ -977,14 +993,27 @@ export function renderScaffold(input: {
   date: string;
   agentsMd: string;
   drafted?: DraftedKnowledge | null;
+  /**
+   * What the repository already has at these paths, so setup adds to a team's
+   * agent instructions instead of replacing them. Absent means "not read" —
+   * which is treated the same as "not there", so an older caller keeps
+   * working, just without the merge.
+   */
+  existing?: { agentsMd?: string | null; claudeMd?: string | null };
 }): ScaffoldFile[] {
-  const { repoName, projectName, stack, evidence, date, agentsMd, drafted } = input;
+  const { repoName, projectName, stack, evidence, date, agentsMd, drafted, existing } = input;
   const docs = scaffoldDocPaths(evidence);
   const ctx: DocContext = { repoName, projectName, stack, evidence, drafted, docs };
 
+  const mergedAgents = mergeAgentsMd(existing?.agentsMd, agentsMd);
+  const mergedClaude = mergeClaudeMd(existing?.claudeMd);
+
   const files: ScaffoldFile[] = [
-    { path: 'AGENTS.md', content: agentsMd },
-    { path: 'CLAUDE.md', content: renderClaudeMdRef() },
+    { path: 'AGENTS.md', content: mergedAgents },
+    // `null` means the repo's CLAUDE.md already points at AGENTS.md. Writing
+    // it anyway would put an identical file in the PR for a reviewer to read
+    // and find nothing in.
+    ...(mergedClaude === null ? [] : [{ path: 'CLAUDE.md', content: mergedClaude }]),
     { path: 'knowledge/README.md', content: renderKnowledgeReadme(ctx) },
     { path: 'knowledge/product.md', content: renderProduct(ctx) },
     { path: 'knowledge/architecture.md', content: renderArchitecture(ctx) },
@@ -1016,19 +1045,6 @@ export function renderScaffold(input: {
   return files;
 }
 
-function renderClaudeMdRef(): string {
-  return `# CLAUDE.md
-
-@AGENTS.md
-
-<!--
-  specd emits both files by design (D6): AGENTS.md is canonical and read by
-  most agents; this file is a thin pointer so Claude Code picks up the same
-  rules natively. Edit AGENTS.md — this file needs no maintenance.
--->
-`;
-}
-
 /** The setup PR description. It says exactly what the drafts are worth (§6). */
 export function renderSetupPrBody(input: {
   repoName: string;
@@ -1053,11 +1069,22 @@ export function renderSetupPrBody(input: {
     .filter(Boolean)
     .join(' · ');
 
+  // Named up front, because "did this thing rewrite our AGENTS.md?" is the
+  // first question a reviewer of this PR has, and the diff is the second.
+  const merged = mergedAgentDocs(evidence);
+  const kept = merged.length
+    ? `\n\n> **Your existing ${merged.join(' and ')} ${
+        merged.length === 1 ? 'was' : 'were'
+      } kept.** Nothing in ${
+        merged.length === 1 ? 'it' : 'them'
+      } was rewritten — specd's agreements are appended below yours, fenced by\n> \`<!-- specd:begin -->\` markers so a later setup run updates only that block.\n> Where the two sets disagree, yours came first and a human decides.`
+    : '';
+
   return `## specd setup — review me, then merge to adopt
 
 This PR installs the working agreements and knowledge base for **${input.projectName}**.
 
-**${input.fileCount} files.** Detected stack: ${input.stackLine}.
+**${input.fileCount} files.** Detected stack: ${input.stackLine}.${kept}
 
 ### What the scan read
 
@@ -1096,6 +1123,18 @@ only holds a derived index._
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * The agent docs the scan found that setup actually merges into.
+ *
+ * `existingAgentDocs` is wider than that — it also names `.cursorrules` and
+ * Copilot instructions, which specd never writes. Saying "your existing
+ * .cursorrules was kept, specd's rules were appended below it" would be a
+ * claim about a file this PR does not touch.
+ */
+function mergedAgentDocs(evidence: RepoEvidence): string[] {
+  return evidence.existingAgentDocs.filter((d) => d === 'AGENTS.md' || d === 'CLAUDE.md');
+}
 
 /**
  * A drafted slot, or the question it exists to answer. The fallback is phrased

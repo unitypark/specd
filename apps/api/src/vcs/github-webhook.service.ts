@@ -364,9 +364,14 @@ export class GitHubWebhookService {
 
   /**
    * Find the spec a branch belongs to by *reconstructing* branch names rather
-   * than parsing them. `spec/crm-14-2-factor-auth` cannot be split back into
+   * than parsing them. `spec/CRM-14-2-factor-auth` cannot be split back into
    * key and slug unambiguously, so we never try — we compute what each
-   * candidate spec's branch would be and look for an exact match.
+   * candidate spec's branch would be and look for a match.
+   *
+   * The comparison ignores case because `specBranchName` used to lowercase the
+   * ticket key. A branch built before that changed merges months later, and it
+   * has to still find its spec — the alternative is a delivered spec silently
+   * left in `building` because of a naming change it predates.
    */
   private async specForBranch(projectId: string, branch: string) {
     const rows = await this.db
@@ -387,7 +392,12 @@ export class GitHubWebhookService {
       )
       .orderBy(desc(specs.version));
 
-    return rows.find((row) => specBranchName(row.ticketKey, slugify(row.title)) === branch) ?? null;
+    const wanted = branch.toLowerCase();
+    return (
+      rows.find(
+        (row) => specBranchName(row.ticketKey, slugify(row.title)).toLowerCase() === wanted,
+      ) ?? null
+    );
   }
 
   private async unmatched(fullName: string | undefined): Promise<DeliveryOutcome> {

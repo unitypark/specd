@@ -277,6 +277,7 @@ pnpm cli:install    # → $(go env GOPATH)/bin/specd — warns if that is not on
           head: ['Variable', 'Notes'],
           rows: [
             ['`SPECD_LOCAL_REPO_ROOT`', 'Root the local-git adapter may touch. Repos registered via `specd connect` must live under it.'],
+            ['`SPECD_LOCAL_OPEN_PR`', 'Default `1`. May a local-mode branch be pushed to its own `origin` and opened as a PR/MR with the `gh`/`glab` signed in on this machine? Set `0` for a machine with a remote it must not publish to — the branch is still committed locally.'],
             ['`GITHUB_APP_ID` · `GITHUB_APP_SLUG` · `GITHUB_APP_PRIVATE_KEY`', 'From the App GitHub generated. Real newlines or `\\n` escapes both work.'],
             ['`GITHUB_WEBHOOK_SECRET`', 'Required for webhooks. **Empty rejects every delivery** — it never means "skip the signature check".'],
             ['`GITLAB_WEBHOOK_SECRET`', 'Same rule, same reason.'],
@@ -356,7 +357,7 @@ pnpm cli:install    # → $(go env GOPATH)/bin/specd — warns if that is not on
         ▼
    [ named human approves ]
         ▼
-   build on spec/<id> branch → PR / MR — you merge
+   build on spec/<ID> branch → PR / MR — you merge
         └──────────────────────────────────────────► back to the webhook`,
         },
         { k: 'h2', text: 'Why Postgres is the only runtime dependency' },

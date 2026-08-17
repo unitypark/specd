@@ -51,10 +51,12 @@ Where the specd MCP server is configured, `search_knowledge` answers this faster
 ## 4. Open the branch
 
 ```bash
-git switch -c spec/<id>-<slug>
+git switch -c spec/<ID>-<slug>
 ```
 
-The `spec/<id>-<slug>` shape is rule 6 and it is load-bearing in three places: specd's webhook matches merged branches back to the spec, the gate hook in this plugin reads the id out of the branch name, and the PR title carries the id for the humans. `<slug>` is the spec title, lowercased and hyphenated.
+The `spec/<ID>-<slug>` shape is rule 6 and it is load-bearing in three places: specd's webhook matches merged branches back to the spec, the gate hook in this plugin reads the id out of the branch name, and the PR title carries the id for the humans. `<ID>` is the spec id spelled the way the board spells it — `S-104`, not `s-104`. `<slug>` is the spec title, lowercased and hyphenated.
+
+The PR that ends this work is titled `[<ID>] - <Title>`, matching what specd's own build station opens.
 
 If the working tree is dirty, say so and let the user decide — do not stash or discard.
 

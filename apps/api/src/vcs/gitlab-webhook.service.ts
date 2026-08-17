@@ -339,7 +339,12 @@ export class GitLabWebhookService {
       )
       .orderBy(desc(specs.version));
 
-    return rows.find((row) => specBranchName(row.ticketKey, slugify(row.title)) === branch) ?? null;
+    const wanted = branch.toLowerCase();
+    return (
+      rows.find(
+        (row) => specBranchName(row.ticketKey, slugify(row.title)).toLowerCase() === wanted,
+      ) ?? null
+    );
   }
 
   private async unmatched(path: string | undefined): Promise<DeliveryOutcome> {

@@ -138,7 +138,7 @@ flowchart LR
     PG --> RET
     RET --> AGENT
     AGENT -->|"cited spec"| GATE["named human approves"]
-    GATE -->|"build on spec/<id> branch"| PR["PR / MR — you merge"]
+    GATE -->|"build on spec/<ID> branch"| PR["PR / MR — you merge"]
     PR -->|merge| W
 ```
 
@@ -277,6 +277,9 @@ through the stations — narrated click by click in
    they name; the judgement around them is drafted, and anything the scan
    could not ground says `UNVERIFIED`. The wizard does not pretend to know
    your architecture ([`knowledge/decisions/0015-onboarding-reads-the-repo-before-it-drafts.md`](knowledge/decisions/0015-onboarding-reads-the-repo-before-it-drafts.md)).
+   An `AGENTS.md` or `CLAUDE.md` you already have is **not rewritten** — specd's
+   rules are appended below yours behind a `<!-- specd:begin -->` fence, which
+   a later grounding run updates in place.
 3. **Adopt** — merge the setup branch. Merging *is* the adoption signal;
    specd indexes `knowledge/` the moment the webhook lands (local mode has an
    "I merged it" button instead).
@@ -287,8 +290,9 @@ through the stations — narrated click by click in
    state machine *and* a database CHECK constraint: an approved spec without
    an approver cannot exist even via a direct write.
 6. **Build** — the build agent implements the tasks, one commit each, on the
-   spec's own branch, and opens a PR. It never touches your working tree and
-   never pushes to a default branch.
+   spec's own `spec/<ID>-<slug>` branch (cut fresh from your default branch
+   every run), and opens a PR titled `[<ID>] - <Title>`. It never touches your
+   working tree and never pushes to a default branch.
 7. **Learn** — you merge, the webhook fires, the as-built spec is filed into
    `knowledge/specs/`, and the index refreshes. The next spec starts better.
 
@@ -411,7 +415,7 @@ specd use <project>            # default project for this machine
 specd spec pull CRM-131        # print an approved spec as markdown
 specd spec status CRM-131      # lifecycle state; exit 3 when unapproved
 specd specs list --status approved
-specd connect .                # register a local repo (code stays on your machine)
+specd connect .                # register a local repo (specd holds no host token for it)
 specd runner pair XXXXX-XXXXX  # pair this machine as a self-hosted runner
 specd doctor                   # check the whole setup, in dependency order
 ```
@@ -486,7 +490,7 @@ through it is not blocked — it is impossible. See
 
 `AGENTS.md` is a numbered list of rules, and three of them are enforced by
 software: the server refuses to serve an unapproved spec, the webhook matches
-merged `spec/<id>-<slug>` branches back to their spec, and the build station
+merged `spec/<ID>-<slug>` branches back to their spec, and the build station
 files the as-built record itself. The rest were enforced by asking nicely.
 
 The plugin in [`plugins/`](plugins/) makes two more of them bind at the moment
@@ -565,6 +569,16 @@ write path, same fail-closed webhook rule using the mechanism GitLab actually
 offers (token echo, constant-time compare). Walkthrough:
 [`docs/gitlab.md`](docs/gitlab.md).
 
+**Local mode** — a repository registered by path (`specd connect .`). specd
+holds no credential for any host here and never will. Where `origin` points at
+GitHub or GitLab and that host's CLI (`gh`, `glab`) is installed and signed in
+on the same machine, setup and build branches are pushed and opened as real
+PRs through *your* account; the CLI is checked before anything is pushed, so a
+repository specd cannot open a review on is never published to.
+`SPECD_LOCAL_OPEN_PR=0` keeps everything local — the branch is committed
+either way
+([`knowledge/decisions/0020-local-mode-borrows-the-host-cli.md`](knowledge/decisions/0020-local-mode-borrows-the-host-cli.md)).
+
 **Jira** — connect, import issues, backlink comments and status mirroring work
 from the wizard; sync is **one-way** (see [status](#project-status)). Nothing
 Jira does can fail a specd action: approving a spec succeeds whether or not
@@ -607,6 +621,9 @@ enforced rather than hoped for:
 - **It never touches your working tree.** Local builds use a throwaway git
   worktree; hosted builds a shallow clone in a scratch directory. The branch
   survives; the workspace does not.
+- **Every run starts from a clean branch.** `spec/<ID>-<slug>` is cut from the
+  default branch each time, so a rebuild replaces the last attempt rather than
+  stacking on it. The PR is titled `[<ID>] - <Title>`.
 
 The as-built spec is written by specd, not the model — a verbatim record of
 what was approved. Verify results distinguish **failed** (your tests ran and

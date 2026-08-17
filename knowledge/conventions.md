@@ -82,7 +82,7 @@ These apply to generated content and to knowledge docs in this repo:
 ## Behavioural rules for agents working in this repo
 
 - Read `knowledge/` before writing code — the reading order lives in `knowledge/README.md` — work from an approved spec, and write what was built back to `knowledge/specs/` in the same PR.
-- Never push to a default branch. Work lands on the spec's own branch plus a PR (hosted) or a branch to diff (local mode).
+- Never push to a default branch. Work lands on the spec's own branch — `spec/<ID>-<slug>`, titled `[<ID>] - <Title>` on the PR (`specBranchName`/`specPrTitle` in `@specd/shared`) — plus a PR. Local mode opens one too where `gh`/`glab` is signed in on the machine (`decisions/0020-local-mode-borrows-the-host-cli.md`); where it is not, the output is a branch to diff.
 - `packages/templates` ships the `AGENTS.md` / `CLAUDE.md` scaffolds for
   **onboarded** projects. This repo's own `AGENTS.md` is itself a generated
   instance of that template — kept because specd onboarded itself

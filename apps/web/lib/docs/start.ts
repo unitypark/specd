@@ -637,7 +637,7 @@ pnpm demo`,
         },
         {
           k: 'p',
-          text: 'You get a pull request: one commit per task, on the spec\'s own `spec/<id>-<slug>` branch. Verify results distinguish **failed** (your tests ran and did not pass) from **could not run** (toolchain missing) — different problems, different reviewers.',
+          text: 'You get a pull request titled `[<ID>] - <Title>`: one commit per task, on the spec\'s own `spec/<ID>-<slug>` branch. Verify results distinguish **failed** (your tests ran and did not pass) from **could not run** (toolchain missing) — different problems, different reviewers.',
         },
         { k: 'h2', text: '07 · Learn — merge, and watch the loop close' },
         {

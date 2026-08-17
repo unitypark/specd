@@ -56,6 +56,17 @@ export class Config {
    */
   readonly localRepoRoot = process.env.SPECD_LOCAL_REPO_ROOT || null;
 
+  /**
+   * May a local-mode branch be pushed to its own `origin` and opened as a real
+   * PR/MR, using the host CLI (`gh`/`glab`) already signed in on this machine?
+   *
+   * On by default: a branch nobody can review is not a deliverable, and local
+   * mode is the one place specd can reach a host without ever holding a
+   * credential. Set to `0` where the machine has a remote it must not publish
+   * to — the branch is still committed locally either way.
+   */
+  readonly localOpenPr = (process.env.SPECD_LOCAL_OPEN_PR ?? '1') !== '0';
+
   // ─── Runner job leases (S-101) ─────────────────────────────────────────────
   // A dispatched job whose runner stops heartbeating becomes claimable again
   // after the lease. Build gets its own, longer lease: a build is N model

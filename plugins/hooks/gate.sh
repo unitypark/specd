@@ -4,7 +4,7 @@
 # AGENTS.md rule 5 says work arrives as approved specs. Today that rule is
 # enforced at the server (the API refuses to serve an unapproved spec) and in
 # CI (exit 3 blocks the build), but not in the editor — nothing stops an agent
-# from opening spec/crm-1-widget and implementing a draft nobody approved.
+# from opening spec/CRM-1-widget and implementing a draft nobody approved.
 # This closes that gap at the only moment it matters: the first write.
 #
 # Two disciplines, and the difference between them is the whole design:
@@ -24,7 +24,7 @@ set -u
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
 [ -n "$branch" ] || exit 0
 
-# Only spec/<id>-<slug> branches are spec work. Everything else — main, a
+# Only spec/<ID>-<slug> branches are spec work. Everything else — main, a
 # throwaway experiment, a docs fix — this hook has no opinion about.
 case "$branch" in
   spec/*) ;;
@@ -32,9 +32,11 @@ case "$branch" in
 esac
 
 # Recover the ticket key from the branch. Keys carry their own hyphen
-# (CRM-1, S-104) and specBranchName() lowercases them, so spec/crm-1-add-widget
-# means CRM-1 — the first two segments, when the second is numeric. Anything
-# else, fall back to the first segment and let the server decide.
+# (CRM-1, S-104), so spec/CRM-1-add-widget means CRM-1 — the first two
+# segments, when the second is numeric. Anything else, fall back to the first
+# segment and let the server decide. Case is not load-bearing here: branches
+# written before specBranchName() stopped lowercasing keys still parse, and the
+# key is upper-cased below either way.
 rest=${branch#spec/}
 head=${rest%%-*}
 tail=${rest#*-}

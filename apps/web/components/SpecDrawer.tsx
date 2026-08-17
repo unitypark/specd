@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BUILDABLE_STATUSES, type SpecStatus } from '@specd/shared';
+import { BUILDABLE_STATUSES, slugify, specBranchName, type SpecStatus } from '@specd/shared';
 import { del, get, patch, post } from '@/lib/api';
 import { ConfirmDialog } from './ConfirmDialog';
 import styles from './board.module.css';
@@ -46,6 +46,14 @@ interface Comment {
   createdAt: string;
 }
 
+/** What `POST …/build` answers with the moment the run is under way. */
+interface BuildStarted {
+  runId: string;
+  ticketKey: string;
+  branch: string;
+  queued?: boolean;
+}
+
 interface TicketDetail {
   ticket: {
     id: string;
@@ -88,6 +96,9 @@ export function SpecDrawer({
   const [confirmDeleteTicket, setConfirmDeleteTicket] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Which branch the build is working on. The server picks it, so until it
+  // answers, the drawer has nothing truthful to say about where the work went.
+  const [build, setBuild] = useState<BuildStarted | null>(null);
 
   const panel = useRef<HTMLElement>(null);
   // Where focus was before the drawer took over, so closing puts it back on
@@ -114,6 +125,7 @@ export function SpecDrawer({
     setCommentDrafts({});
     setEditing(false);
     setConfirmDeleteTicket(false);
+    setBuild(null);
     fetchDetail()
       .then(setDetail)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'));
@@ -173,6 +185,10 @@ export function SpecDrawer({
   }
 
   const spec = detail?.spec ?? null;
+  // Derived, not remembered: the same function the build station and the merge
+  // webhook use, so what the drawer shows is the branch the work is actually
+  // on — including after a reload, when the POST's answer is long gone.
+  const specBranch = spec ? specBranchName(spec.ticketKey, slugify(spec.title)) : null;
   const commentable = Boolean(spec && !BUILDABLE_STATUSES.includes(spec.status as SpecStatus));
   // Mirrors the server's refusal (`ticket_has_delivered_work`): a ticket
   // whose spec reached the gate is audit trail, not clutter.
@@ -676,7 +692,11 @@ export function SpecDrawer({
                     className="btn primary"
                     disabled={busy === 'build'}
                     onClick={() =>
-                      act('build', () => post(`/projects/${slug}/board/specs/${spec.id}/build`))
+                      act('build', async () => {
+                        setBuild(
+                          await post<BuildStarted>(`/projects/${slug}/board/specs/${spec.id}/build`),
+                        );
+                      })
                     }
                   >
                     {busy === 'build' ? (
@@ -719,6 +739,20 @@ export function SpecDrawer({
                 >
                   {busy === 'delivered' && <span className="spinner" />} Mark delivered
                 </button>
+              )}
+
+              {/* Where the work is. A build leaves a branch and opens a PR
+                  titled with the same key, so naming the branch here is what
+                  connects the card to the thing a reviewer will be sent. */}
+              {specBranch && spec && BUILDABLE_STATUSES.includes(spec.status as SpecStatus) && (
+                <p className={styles.dbranch}>
+                  {spec.status === 'building' ? 'Building on' : 'Builds on'}{' '}
+                  <code className="mono">{specBranch}</code> → PR{' '}
+                  <code className="mono">
+                    [{spec.ticketKey}] - {spec.title}
+                  </code>
+                  {build?.queued && ' · queued for your paired runner'}
+                </p>
               )}
             </div>
           </>

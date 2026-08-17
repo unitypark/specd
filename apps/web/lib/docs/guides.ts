@@ -56,6 +56,10 @@ export const GUIDES: DocCategory = {
           k: 'p',
           text: 'Code stays on your machine. In place of a merge webhook you get an "I merged it" button in the app, so adoption and delivery are still explicit events rather than assumptions.',
         },
+        {
+          k: 'p',
+          text: 'specd holds no host credential in this mode and never will — but where `origin` points at GitHub or GitLab and that host\'s CLI (`gh`, `glab`) is installed and signed in on the same machine, setup and build branches are pushed and opened as real pull requests through **your** account. The CLI is checked before anything is pushed, so a repository specd cannot open a review on is never published to. Set `SPECD_LOCAL_OPEN_PR=0` to keep everything local; the branch is committed either way.',
+        },
         { k: 'h2', text: 'GitHub — as an App, not a personal token' },
         {
           k: 'p',
@@ -368,9 +372,9 @@ specd spec status CRM-131      # exit 0 approved · exit 3 not approved`,
         {
           k: 'ul',
           items: [
-            'A branch named `spec/<id>-<slug>` — which is also how the merge webhook matches the delivery back to the spec.',
+            'A branch named `spec/<ID>-<slug>`, cut fresh from your default branch every run — which is also how the merge webhook matches the delivery back to the spec.',
             'One commit per task, in the order the spec listed them.',
-            'A pull request (or merge request) you review and merge. specd never merges.',
+            'A pull request (or merge request) titled `[<ID>] - <Title>`, for you to review and merge. specd never merges.',
             'The as-built spec, filed into `knowledge/specs/` by the last task — and appended by specd itself if the model omitted it.',
           ],
         },
@@ -562,7 +566,7 @@ SPECD_EMBEDDING_PROVIDER=openai   SPECD_EMBEDDING_BASE_URL=http://localhost:1143
         { k: 'h2', text: 'The Claude Code plugin' },
         {
           k: 'p',
-          text: '`AGENTS.md` is a numbered list of rules, and three of them are already enforced by software: the server refuses to serve an unapproved spec, the webhook matches merged `spec/<id>-<slug>` branches back to their spec, and the build station files the as-built record itself. The rest were enforced by asking nicely. The plugin makes two more bind at the moment they are broken.',
+          text: '`AGENTS.md` is a numbered list of rules, and three of them are already enforced by software: the server refuses to serve an unapproved spec, the webhook matches merged `spec/<ID>-<slug>` branches back to their spec, and the build station files the as-built record itself. The rest were enforced by asking nicely. The plugin makes two more bind at the moment they are broken.',
         },
         {
           k: 'p',

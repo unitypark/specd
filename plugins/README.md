@@ -26,7 +26,7 @@ machine that has run `specd login`.
 
 | Command | What it does |
 | --- | --- |
-| `/specd:pull <id>` | Checks the gate, fetches the approved spec, reads the knowledge its design cites, opens the `spec/<id>-<slug>` branch |
+| `/specd:pull <id>` | Checks the gate, fetches the approved spec, reads the knowledge its design cites, opens the `spec/<ID>-<slug>` branch |
 | `/specd:implement` | Works the task list in order — one commit per task, verify between tasks, `knowledge/` updated in the same change |
 | `/specd:as-built` | Files the as-built record into `knowledge/specs/`, assembled from the approved spec rather than written from memory |
 
@@ -36,7 +36,7 @@ what counts as a deviation worth recording.
 
 ### Hooks
 
-**`gate.sh`** — `PreToolUse` on `Write`/`Edit`. On a `spec/<id>-<slug>` branch it
+**`gate.sh`** — `PreToolUse` on `Write`/`Edit`. On a `spec/<ID>-<slug>` branch it
 asks `specd spec status <id>`, and blocks the edit when that returns exit 3: the
 spec exists and no human has approved it. Two disciplines make it liveable:
 

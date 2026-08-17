@@ -47,6 +47,7 @@ A few conventions the codebase holds itself to, which reviews will hold you to:
 
 - First-run setup is in the [README](README.md#quick-start); day-two loop in
   [`knowledge/runbooks/local-dev.md`](knowledge/runbooks/local-dev.md).
-- Branch naming for spec-driven work: `spec/<id>-<slug>` (AGENTS.md rule 6);
+- Branch naming for spec-driven work: `spec/<ID>-<slug>`, PR titled
+  `[<ID>] - <Title>` (AGENTS.md rule 6);
   anything else descriptive is fine for ordinary changes.
 - Security problems go through [`SECURITY.md`](SECURITY.md), not issues.

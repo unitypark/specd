@@ -53,7 +53,7 @@ jobs:
       # generator stamps into canonical and Open Graph URLs, and it already
       # knows whether this repository serves from github.io or a custom
       # domain. Hardcoding the URL would send a fork's canonical tags here.
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         id: pages
 
       - uses: pnpm/action-setup@v6

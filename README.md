@@ -277,9 +277,10 @@ through the stations — narrated click by click in
    they name; the judgement around them is drafted, and anything the scan
    could not ground says `UNVERIFIED`. The wizard does not pretend to know
    your architecture ([`knowledge/decisions/0015-onboarding-reads-the-repo-before-it-drafts.md`](knowledge/decisions/0015-onboarding-reads-the-repo-before-it-drafts.md)).
-   An `AGENTS.md` or `CLAUDE.md` you already have is **not rewritten** — specd's
-   rules are appended below yours behind a `<!-- specd:begin -->` fence, which
-   a later grounding run updates in place.
+   An `AGENTS.md` or `CLAUDE.md` you already have is **not rewritten**, and not
+   restated: specd appends a short block with the four rules its own machinery
+   enforces, behind a `<!-- specd:begin -->` fence a later grounding run updates
+   in place. Your own agreements are left to say everything else.
 3. **Adopt** — merge the setup branch. Merging *is* the adoption signal;
    specd indexes `knowledge/` the moment the webhook lands (local mode has an
    "I merged it" button instead).

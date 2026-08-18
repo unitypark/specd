@@ -56,6 +56,13 @@ export const projects = pgTable(
     /** Spend caps are default-on (§12). Enforced pre-run, per project, per month. */
     spendCapCents: integer('spend_cap_cents').notNull().default(10_000),
     defaultModel: text('default_model').notNull().default('claude-opus-5'),
+    /**
+     * Effort override for every station, or NULL for "no preference" — which
+     * is not the same as `low`. Stations have different defaults for good
+     * reasons (`STATION_EFFORT` in `@specd/shared`); this dial says the whole
+     * project is cost-sensitive or worth the spend, and moves all of them.
+     */
+    effort: text('effort'),
     /** Kill switch per project (§12). */
     agentsPaused: boolean('agents_paused').notNull().default(false),
     /**

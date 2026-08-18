@@ -12,6 +12,8 @@ export interface ProjectSummary {
   spendCapCents: number;
   knowledgeHealth: number;
   defaultModel: string;
+  /** null = every station keeps its own default. */
+  effort: string | null;
   agentsPaused: boolean;
   setupComplete: boolean;
 }

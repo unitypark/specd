@@ -12,10 +12,12 @@ import {
   type CitationDrift,
   type ModelId,
   type SpecTask,
-  type SpecView,
+  type SpecView, STATION_EFFORT,
+  type Effort,
 } from '@specd/shared';
 import type { DetectedStack } from '@specd/templates';
 import { ClaudeCodeProvider } from './claude-code.provider.js';
+import { ReviewAgent, type ReviewFindings } from './review.agent.js';
 import { WorkspaceService } from '../vcs/workspace.js';
 import type { RunHandle } from '../runs/runs.service.js';
 
@@ -29,6 +31,8 @@ export interface BuildResult {
   asBuiltPath: string;
   /** Where to review it. A PR on hosted providers; null in local mode. */
   reviewUrl: string | null;
+  /** What the review pass found, or null when it could not run. */
+  review: ReviewFindings | null;
 }
 
 /** One task, with its prompt already rendered so a runner needs no spec knowledge. */
@@ -49,6 +53,10 @@ export interface PreparedBuildTask {
 export interface PreparedBuild {
   system: string;
   model: ModelId;
+  /** Travels to a runner so a dispatched build works as hard as a local one. */
+  effort: Effort;
+  /** Rendered here, executed wherever the workspace is. */
+  review: { system: string; brief: string; schema: Record<string, unknown> };
   branch: string;
   asBuiltPath: string;
   asBuiltCommitMessage: string;
@@ -74,6 +82,13 @@ export interface BuildRunnerReport {
   commits: number;
   verifyPassed: boolean | null;
   verifyOutput: string | null;
+  /**
+   * The review the runner ran on its own machine, if it did. It has to happen
+   * there: the workspace is on the runner's disk and gone by the time this
+   * report arrives, so the alternative is that dispatched builds silently ship
+   * unreviewed while local ones do not.
+   */
+  review?: ReviewFindings | null;
 }
 
 /**
@@ -101,6 +116,7 @@ export class BuildAgent {
   constructor(
     private readonly claudeCode: ClaudeCodeProvider,
     private readonly workspaces: WorkspaceService,
+    private readonly reviewer: ReviewAgent,
   ) {}
 
   /**
@@ -117,6 +133,8 @@ export class BuildAgent {
     projectName: string;
     knowledgeExcerpts: string;
     model: ModelId;
+    /** Defaults to the build station's level. */
+    effort?: Effort;
     drifted?: CitationDrift[];
   }): Promise<PreparedBuild> {
     const { repo, spec, model } = input;
@@ -136,6 +154,8 @@ export class BuildAgent {
     return {
       system: BUILD_SYSTEM_PROMPT,
       model,
+      effort: input.effort ?? STATION_EFFORT.build,
+      review: this.reviewer.prepare(spec),
       branch,
       asBuiltPath: asBuilt,
       drifted: input.drifted ?? [],
@@ -195,7 +215,62 @@ export class BuildAgent {
       verifyOutput: report.verifyOutput,
       asBuiltPath: prepared.asBuiltPath,
       reviewUrl: published.url,
+      // The runner built on its own machine and its workspace is gone by the
+      // time this runs, so there is nothing here to read. `runner-review`
+      // covers that path instead of this one.
+      review: report.review ?? null,
     };
+  }
+
+  /**
+   * Read the branch back and say what is wrong with it.
+   *
+   * Best-effort throughout: the commits exist and verify has already spoken,
+   * so a review that cannot run costs an opinion, not the build. That is the
+   * same posture the review *surface* takes one step later — nothing after the
+   * work is allowed to lose the work.
+   */
+  private async reviewOwnWork(input: {
+    spec: SpecView;
+    model: ModelId;
+    effort: Effort;
+    workspace: { dir: string; baseBranch: string };
+    run: RunHandle;
+  }): Promise<ReviewFindings | null> {
+    const { spec, model, effort, workspace, run } = input;
+    try {
+      const diff = await this.workspaces.diff(workspace.dir, workspace.baseBranch);
+      if (!diff.trim()) return null;
+
+      await run.log(`reviewing the diff at effort ${effort}`);
+      const findings = await this.reviewer.run({
+        spec,
+        model,
+        effort,
+        workspaceDir: workspace.dir,
+        diff,
+      });
+
+      if (findings.verdict === 'unreviewed') {
+        await run.log('the review pass did not answer — opening the PR without it', 'warn');
+        return null;
+      }
+
+      const blocking = findings.findings.filter((f) => f.severity === 'blocking').length;
+      await run.log(
+        findings.findings.length === 0
+          ? 'review found nothing to raise'
+          : `review raised ${findings.findings.length} finding(s), ${blocking} blocking — advisory, in the PR body`,
+        blocking > 0 ? 'warn' : 'info',
+      );
+      return findings;
+    } catch (err) {
+      await run.log(
+        `the review pass failed (${err instanceof Error ? err.message : String(err)}) — opening the PR without it`,
+        'warn',
+      );
+      return null;
+    }
   }
 
   async run(input: {
@@ -204,6 +279,7 @@ export class BuildAgent {
     projectName: string;
     knowledgeExcerpts: string;
     model: ModelId;
+    effort?: Effort;
     run: RunHandle;
   }): Promise<BuildResult> {
     const { repo, spec, run, model } = input;
@@ -228,6 +304,7 @@ export class BuildAgent {
 
         const result = await this.claudeCode.code({
           model,
+          effort: plan.effort,
           workspaceDir: workspace.dir,
           system: plan.system,
           user: task.prompt,
@@ -288,18 +365,31 @@ export class BuildAgent {
 
       const commits = await this.workspaces.commitCount(workspace.dir, workspace.baseBranch);
 
+      // Station 05b. After verify, because a review of code whose tests do not
+      // run is mostly noise about the tests; before publish, because the point
+      // is for the findings to reach the pull request rather than a run log
+      // somebody would have to go and find.
+      const review = await this.reviewOwnWork({
+        spec,
+        model,
+        effort: plan.effort,
+        workspace,
+        run,
+      });
+
       // Hand the branch to wherever this team reviews. On a hosted provider the
       // workspace is a temporary clone about to be deleted, so a branch that is
       // never pushed is a build that produced nothing.
       const published = await workspace.publish({
         title: specPrTitle(spec.ticketKey, spec.title),
         body: buildPrBody(spec, {
-        commits,
-        verifyPassed,
-        verifyCommand,
-        asBuilt,
-        drifted: plan.drifted ?? [],
-      }),
+          commits,
+          verifyPassed,
+          verifyCommand,
+          asBuilt,
+          drifted: plan.drifted ?? [],
+          review,
+        }),
       });
 
       await run.log(`branch ${branch} ready · ${commits} commit(s) · ${published.reviewHint}`);
@@ -313,6 +403,7 @@ export class BuildAgent {
         verifyOutput,
         asBuiltPath: asBuilt,
         reviewUrl: published.url,
+        review,
       };
     } finally {
       // The worktree goes; the branch it produced stays.
@@ -417,6 +508,43 @@ ${
 Implement it in the current directory.`;
 }
 
+/**
+ * The review section of the pull request body.
+ *
+ * Advisory, and says so in the text: these findings did not block the build and
+ * are not a second gate. What they are is the reading a human would otherwise
+ * do cold — so they sit above the acceptance criteria, where that reading
+ * starts, rather than in a run log nobody opens.
+ */
+function renderReview(review: ReviewFindings | null | undefined): string[] {
+  if (!review || review.verdict === 'unreviewed') return [];
+
+  if (review.findings.length === 0) {
+    return ['', `> **Review pass found nothing to raise.** ${review.summary ?? ''}`.trimEnd()];
+  }
+
+  const order = { blocking: 0, consider: 1, nit: 2 } as const;
+  const sorted = [...review.findings].sort((a, b) => order[a.severity] - order[b.severity]);
+  const blocking = sorted.filter((f) => f.severity === 'blocking').length;
+
+  return [
+    '',
+    '### Review pass',
+    '',
+    review.summary ?? '',
+    '',
+    `${sorted.length} finding(s)${blocking ? `, ${blocking} of them blocking` : ''}. ` +
+      'These are advisory — they did not stop the build, and nothing here has been ' +
+      'acted on. A human decides which are real.',
+    '',
+    ...sorted.map(
+      (f) =>
+        `- **${f.severity}** \`${f.where}\` — ${f.what}` +
+        (f.against ? `\n  _against:_ ${f.against}` : ''),
+    ),
+  ];
+}
+
 /** Runs the repo's own verify command. Never a model-supplied string. */
 function runShell(
   command: string,
@@ -469,6 +597,7 @@ export function buildPrBody(
     verifyCommand: string | null;
     asBuilt: string;
     drifted?: CitationDrift[];
+    review?: ReviewFindings | null;
   },
 ): string {
   const verify =
@@ -501,6 +630,8 @@ export function buildPrBody(
       ]
     : [];
 
+  const review = renderReview(meta.review);
+
   return [
     `Built from **${spec.ticketKey} v${spec.version}** — ${spec.title}`,
     '',
@@ -510,6 +641,7 @@ export function buildPrBody(
     `- As-built spec filed at \`${meta.asBuilt}\``,
     `- ${verify}`,
     ...drift,
+    ...review,
     '',
     '---',
     '',

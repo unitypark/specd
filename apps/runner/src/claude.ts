@@ -9,6 +9,8 @@ import {
   type ClaudeCodeEnvelope,
   type ModelId,
   type TokenUsage,
+  STATION_EFFORT,
+  type Effort,
 } from '@specd/shared';
 
 /**
@@ -20,6 +22,8 @@ import {
  */
 
 export interface ClaudeCallOptions {
+  /** Sent by the API with the job; falls back to the station default. */
+  effort?: Effort;
   model: ModelId;
   system: string;
   user: string;
@@ -84,6 +88,8 @@ export async function callClaudeCode(opts: {
   system: string;
   user: string;
   workspaceDir: string;
+  /** Sent by the API with the job, so a dispatched build is not quietly cheaper. */
+  effort?: Effort;
   timeoutMs?: number;
 }): Promise<{ text: string; usage: TokenUsage; model: ModelId | null }> {
   const args = [
@@ -92,6 +98,8 @@ export async function callClaudeCode(opts: {
     'json',
     '--model',
     opts.model,
+    '--effort',
+    opts.effort ?? STATION_EFFORT.build,
     '--append-system-prompt',
     opts.system,
     '--permission-mode',
@@ -127,6 +135,8 @@ async function invoke(
       'json',
       '--model',
       opts.model,
+      '--effort',
+      opts.effort ?? STATION_EFFORT.spec,
       '--system-prompt',
       system,
       '--exclude-dynamic-system-prompt-sections',
@@ -291,4 +301,72 @@ function stripClaudeSessionVars(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     if (/^CLAUDE(_CODE)?(_|$)/.test(key) || key === 'CLAUDECODE') delete copy[key];
   }
   return copy;
+}
+
+
+/**
+ * The read-only review pass, mirroring `ClaudeCodeProvider.review()`.
+ *
+ * It exists here because the diff it reads is on this machine — a dispatched
+ * build whose review ran on the API host would be reviewing a workspace that
+ * does not exist there. Best-effort: a review that cannot run costs an
+ * opinion, never the build.
+ */
+export async function reviewWithClaude<T>(opts: {
+  model: ModelId;
+  effort?: Effort;
+  system: string;
+  user: string;
+  schema: Record<string, unknown>;
+  workspaceDir: string;
+  timeoutMs?: number;
+}): Promise<{ parsed: T | null; usage: TokenUsage }> {
+  const args = [
+    '--print',
+    '--output-format',
+    'json',
+    '--model',
+    opts.model,
+    '--effort',
+    opts.effort ?? STATION_EFFORT.review,
+    '--append-system-prompt',
+    `${opts.system}\n${schemaInstruction(opts.schema)}`,
+    '--permission-mode',
+    'plan',
+    '--allowedTools',
+    'Read',
+    'Glob',
+    'Grep',
+    '--disallowed-tools',
+    'Write',
+    'Edit',
+    'Bash',
+    'WebFetch',
+    'WebSearch',
+    'Task',
+    'NotebookEdit',
+  ];
+
+  const empty: TokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  };
+
+  try {
+    const result = await exec(args, opts.user, opts.timeoutMs ?? 600_000, opts.workspaceDir);
+    if (result.timedOut || result.code !== 0) return { parsed: null, usage: empty };
+
+    const envelope = JSON.parse(result.stdout) as ClaudeCodeEnvelope;
+    const usage: TokenUsage = {
+      inputTokens: envelope.usage?.input_tokens ?? 0,
+      outputTokens: envelope.usage?.output_tokens ?? 0,
+      cacheReadInputTokens: envelope.usage?.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: envelope.usage?.cache_creation_input_tokens ?? 0,
+    };
+    return { parsed: parseAgainstSchema<T>(envelope.result ?? '', opts.schema), usage };
+  } catch {
+    return { parsed: null, usage: empty };
+  }
 }

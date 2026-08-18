@@ -19,6 +19,7 @@ import { VcsService } from '../vcs/vcs.service.js';
 import type { RepoFile, RepoSnapshot, RepoTarget, VcsAdapter } from '../vcs/vcs.types.js';
 import { ModelRouter } from './model.router.js';
 import type { RunHandle } from '../runs/runs.service.js';
+import { STATION_EFFORT, type Effort } from '@specd/shared';
 
 /**
  * What we ask the model for.
@@ -285,6 +286,8 @@ export class OnboardingAgent {
     apiKey: string | null;
     model: ModelId;
     mode: AiMode;
+    /** Defaults to the ground station's level. */
+    effort?: Effort;
     run: RunHandle;
   }): Promise<{ branch: string; url: string | null; reviewHint: string; fileCount: number }> {
     const { repo, projectName, apiKey, model, mode, run } = input;
@@ -301,7 +304,7 @@ export class OnboardingAgent {
         apiKey: apiKey ?? '',
         model,
         maxTokens: 32_000,
-        effort: 'high',
+        effort: input.effort ?? STATION_EFFORT.ground,
         system: prepared.system,
         user: prepared.user,
         schema: prepared.schema,

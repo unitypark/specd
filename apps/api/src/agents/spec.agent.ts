@@ -13,8 +13,7 @@ import {
   type SpecDraftResult,
   type EarsCriterion,
   type CitationCoverage,
-  type Precedent,
-} from '@specd/shared';
+  type Precedent, STATION_EFFORT, type Effort } from '@specd/shared';
 import { KnowledgeService } from '../knowledge/knowledge.service.js';
 import { ModelRouter } from './model.router.js';
 import type { RunHandle } from '../runs/runs.service.js';
@@ -246,6 +245,8 @@ export class SpecAgent {
     apiKey: string | null;
     model: ModelId;
     mode: AiMode;
+    /** Defaults to the spec station's level. */
+    effort?: Effort;
     run: RunHandle;
     /** Review discussion, when re-drafting. v2 consumes the threads (§8). */
     revisionNotes?: string[];
@@ -266,7 +267,7 @@ export class SpecAgent {
       apiKey: input.apiKey ?? '',
       model: input.model,
       maxTokens: 32_000,
-      effort: 'high',
+      effort: input.effort ?? STATION_EFFORT.spec,
       system: prepared.system,
       user: prepared.user,
       schema: prepared.schema,

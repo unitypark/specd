@@ -624,6 +624,12 @@ enforced rather than hoped for:
 - **It never touches your working tree.** Local builds use a throwaway git
   worktree; hosted builds a shallow clone in a scratch directory. The branch
   survives; the workspace does not.
+- **It reviews its own diff before asking you to.** Between verify and the PR,
+  a read-only pass reads the change against the spec and puts its findings in
+  the PR body — advisory, never blocking, and an empty list is a real answer.
+- **Effort is per station.** Builds and reviews run at `xhigh`, spec and
+  grounding at `high`, indexing at `low`; one project setting moves all of them
+  ([`knowledge/decisions/0021-…`](knowledge/decisions/0021-effort-is-per-station-and-builds-review-themselves.md)).
 - **Every run starts from a clean branch.** `spec/<ID>-<slug>` is cut from the
   default branch each time, so a rebuild replaces the last attempt rather than
   stacking on it. The PR is titled `[<ID>] - <Title>`.

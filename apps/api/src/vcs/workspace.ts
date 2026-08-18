@@ -446,6 +446,23 @@ export class WorkspaceService {
     return (await git.revparse(['HEAD'])).trim();
   }
 
+  /**
+   * The change as a reviewer will see it, capped.
+   *
+   * Capped because a build that touched a lockfile or a generated bundle would
+   * otherwise spend the whole review budget on diff nobody reads. The cap is
+   * announced in the text rather than silently applied — a review of half a
+   * change that claims to be a review of the change is worse than no review.
+   */
+  async diff(dir: string, baseBranch: string, limit = 120_000): Promise<string> {
+    const git = simpleGit({ baseDir: dir });
+    const out = await git
+      .raw(['diff', `${baseBranch}...HEAD`, '--', '.', ':(exclude)*.lock', ':(exclude)*-lock.json'])
+      .catch(() => '');
+    if (out.length <= limit) return out;
+    return `${out.slice(0, limit)}\n\n[diff truncated at ${limit} characters — ${out.length - limit} more not shown]`;
+  }
+
   async commitCount(dir: string, baseBranch: string): Promise<number> {
     const git = simpleGit({ baseDir: dir });
     try {

@@ -4,6 +4,7 @@ import { agentRuns, type DbHandle, type Repository, type Runner } from '@specd/d
 import type { DetectedStack } from '@specd/templates';
 import type {
   CitationCoverage,
+  Effort,
   ModelId,
   RetrievedChunk,
   SpecContent,
@@ -41,7 +42,7 @@ export interface SpecJobPayload {
   schema: Record<string, unknown>;
   model: ModelId;
   maxTokens: number;
-  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  effort: Effort;
   // Carried through to finalize() once the runner reports a result — the
   // runner itself never needs to understand any of this, only echo the
   // model's reply back.
@@ -82,12 +83,23 @@ export interface OnboardJobPayload {
 export interface BuildJobPayload {
   kind: 'build';
   model: ModelId;
+  /** So a dispatched build works as hard as one that ran here. */
+  effort: Effort;
   system: string;
   branch: string;
   asBuiltPath: string;
   asBuiltCommitMessage: string;
   verifyCommand: string | null;
   tasks: PreparedBuildTask[];
+  /**
+   * The review pass, rendered here and executed there.
+   *
+   * The prompt is authored on this side for the same reason every other prompt
+   * is (`prepare()` has no side effects, so both paths ask the model the same
+   * thing), but it can only *run* on the runner: the diff it reviews lives in
+   * the runner's workspace, which is gone by the time the report arrives.
+   */
+  review: { system: string; brief: string; schema: Record<string, unknown> };
   remote: { cloneUrl: string; baseBranch: string };
   ticketKey: string;
   // Carried through to finalize(), which opens the review surface once the

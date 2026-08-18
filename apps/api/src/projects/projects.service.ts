@@ -10,7 +10,7 @@ import {
   specs,
   type Db,
 } from '@specd/db';
-import { isModelId, slugify, type ProjectSummary, type VcsProvider } from '@specd/shared';
+import { isModelId, slugify, type ProjectSummary, type VcsProvider, isEffort } from '@specd/shared';
 import { RunsInFlight } from '../common/errors.js';
 import { DB } from '../db/db.module.js';
 
@@ -103,6 +103,8 @@ export class ProjectsService {
       description?: string | null;
       spendCapCents?: number;
       defaultModel?: string;
+      /** null clears the override; undefined leaves it alone. */
+      effort?: string | null;
       agentsPaused?: boolean;
       setupComplete?: boolean;
     },
@@ -119,6 +121,11 @@ export class ProjectsService {
     }
     if (patch.defaultModel !== undefined && isModelId(patch.defaultModel)) {
       values.defaultModel = patch.defaultModel;
+    }
+    // `null` is a value here, not an absence: it is how a project goes back to
+    // per-station defaults after having had an override.
+    if (patch.effort !== undefined && (patch.effort === null || isEffort(patch.effort))) {
+      values.effort = patch.effort;
     }
     if (Object.keys(values).length === 0) return this.byId(projectId);
 

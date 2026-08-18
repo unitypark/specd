@@ -68,6 +68,25 @@ cross-package imports go through the `@specd/*` workspace names, which is why
   headless loop (`apps/api/src/e2e-loop.ts`).
 - Postgres is on **5433** on the host (non-default, to avoid clashing with local installs). It is the only runtime dependency — Redis was removed with the unused queue (`decisions/0008-remove-unused-queue.md`).
 
+## Asking a model to do something
+
+Every model call names its station's effort — never a literal level at the call
+site. `effortFor(station, project.effort)` resolves it; `STATION_EFFORT` holds
+the defaults. Both paths carry it: `output_config.effort` on the API and
+`--effort` on the Claude Code CLI, including in the runner, so a dispatched job
+is not quietly cheaper than a local one.
+
+The three CLI modes are distinct on purpose and should stay that way:
+
+| Mode | Tools | For |
+| --- | --- | --- |
+| `call()` | none | a text transform that answers in a schema |
+| `code()` | Read/Write/Edit/Glob/Grep | the build station, which changes the repository |
+| `review()` | Read/Glob/Grep, `--permission-mode plan` | reading a diff without being able to "fix" it |
+
+A reviewer that can edit is not a reviewer. `Write` and `Edit` are denied
+rather than merely unused.
+
 ## Talking to somebody else's server
 
 Every outbound HTTP call goes through `apps/api/src/common/http-failures.ts`.

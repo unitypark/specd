@@ -21,6 +21,8 @@ Domain terms mined from code and docs.
 | **approver / actor** | The named human recorded on an approval; a DB CHECK constraint rejects an approved row without one. |
 | **EARS** | Easy Approach to Requirements Syntax — acceptance criteria rendered as "WHEN «trigger» THE SYSTEM SHALL «response»" with keywords `WHEN / WHILE / IF / WHERE` (`EARS_KEYWORDS`, `packages/shared/src/spec.ts`). |
 | **rate card** | Per-model token pricing table used to meter run cost in integer EUR cents. |
+| **effort** | How hard the model works per call (`output_config.effort` on the API, `--effort` on the CLI): `low`…`max`. Per station by default — builds and reviews at `xhigh`, spec and grounding at `high`, indexing at `low` (`STATION_EFFORT` in `@specd/shared`); `projects.effort` moves all of them, and NULL means "no preference", not `low`. |
+| **review pass** | Station 05b: a read-only pass over the build's own diff, between verify and publish, whose findings land in the PR body. Advisory — it never fails a build (`knowledge/decisions/0021-…`). |
 | **cap** | Spend limit checked before a run starts rather than after it overspends. |
 | **subscription_runner** | AI-connection mode (`connections.settings.mode`) that drives a locally logged-in Claude Code CLI instead of an API key. Executed on a paired self-hosted runner (`apps/runner`), so hosted specd can use it too — the credential never reaches the platform. The `SPECD_AI_MODE` env var sets it only for the headless loop. |
 | **loop (`pnpm --filter @specd/api loop`)** | Headless end-to-end exercise of every station over the real HTTP API, reporting pass/skip per station. |

@@ -10,7 +10,16 @@ import {
   type ClaudeCodeEnvelope,
   type ModelId,
   type TokenUsage,
+  STATION_EFFORT,
+  type Effort,
 } from '@specd/shared';
+
+const EMPTY_USAGE: TokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheCreationInputTokens: 0,
+};
 import { AiNotConfigured } from '../common/errors.js';
 import type { ModelCallOptions, ModelCallResult } from './anthropic.service.js';
 
@@ -131,6 +140,8 @@ export class ClaudeCodeProvider {
     system: string;
     user: string;
     workspaceDir: string;
+    /** Defaults to the build station's level — the highest of any station. */
+    effort?: Effort;
     timeoutMs?: number;
   }): Promise<{ text: string; usage: TokenUsage; model: ModelId | null }> {
     if (!(await this.isAvailable())) {
@@ -145,6 +156,11 @@ export class ClaudeCodeProvider {
       'json',
       '--model',
       input.model,
+      // The CLI takes the same five levels the API does. Omitting it left
+      // subscription-mode builds running at whatever the CLI defaulted to,
+      // regardless of what specd had decided for the station.
+      '--effort',
+      input.effort ?? STATION_EFFORT.build,
       '--append-system-prompt',
       input.system,
       '--permission-mode',
@@ -207,6 +223,96 @@ export class ClaudeCodeProvider {
     };
   }
 
+  /**
+   * A read-only pass over a workspace, answering in a schema.
+   *
+   * Between `call()` (no tools — a text transform) and `code()` (editing tools
+   * — it changes the repository), because a reviewer needs the third thing:
+   * it must open files the diff only alludes to, and it must not be able to
+   * "fix" what it finds. `Write` and `Edit` are denied rather than merely
+   * unused, so an over-helpful pass cannot quietly amend the branch it was
+   * asked to assess.
+   */
+  async review<T>(input: {
+    model: ModelId;
+    effort?: Effort;
+    system: string;
+    user: string;
+    schema: Record<string, unknown>;
+    workspaceDir: string;
+    timeoutMs?: number;
+  }): Promise<{ parsed: T | null; usage: TokenUsage; model: ModelId | null }> {
+    if (!(await this.isAvailable())) {
+      throw new AiNotConfigured(
+        'Reviewing a build drives the Claude Code CLI, and `claude` is not on PATH on this machine.',
+      );
+    }
+
+    const args = [
+      '--print',
+      '--output-format',
+      'json',
+      '--model',
+      input.model,
+      '--effort',
+      input.effort ?? STATION_EFFORT.review,
+      '--append-system-prompt',
+      `${input.system}\n${schemaInstruction(input.schema)}`,
+      '--permission-mode',
+      'plan',
+      '--allowedTools',
+      'Read',
+      'Glob',
+      'Grep',
+      '--disallowed-tools',
+      'Write',
+      'Edit',
+      'Bash',
+      'WebFetch',
+      'WebSearch',
+      'Task',
+      'NotebookEdit',
+    ];
+
+    const { stdout, stderr, code, timedOut } = await this.exec(
+      args,
+      input.user,
+      input.timeoutMs ?? 600_000,
+      input.workspaceDir,
+    );
+
+    // Every failure here is soft. The branch is built and verified; a review
+    // that could not run is a missing opinion, not a broken build.
+    if (timedOut || code !== 0) {
+      this.logger.warn(
+        `review pass did not complete: ${timedOut ? 'timed out' : `exit ${code}`} ${(stderr || '').slice(0, 200)}`,
+      );
+      return { parsed: null, usage: EMPTY_USAGE, model: null };
+    }
+
+    let envelope: ClaudeCodeEnvelope;
+    try {
+      envelope = JSON.parse(stdout) as ClaudeCodeEnvelope;
+    } catch {
+      this.logger.warn('review pass returned no readable envelope');
+      return { parsed: null, usage: EMPTY_USAGE, model: null };
+    }
+
+    const usage: TokenUsage = {
+      inputTokens: envelope.usage?.input_tokens ?? 0,
+      outputTokens: envelope.usage?.output_tokens ?? 0,
+      cacheReadInputTokens: envelope.usage?.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: envelope.usage?.cache_creation_input_tokens ?? 0,
+    };
+
+    try {
+      return { parsed: parseAgainstSchema<T>(envelope.result ?? '', input.schema), usage, model: null };
+    } catch {
+      this.logger.warn('review pass did not answer in the requested shape');
+      return { parsed: null, usage, model: null };
+    }
+  }
+
   private async invoke(
     opts: ModelCallOptions,
     system: string,
@@ -229,6 +335,8 @@ export class ClaudeCodeProvider {
         'json',
         '--model',
         opts.model,
+        '--effort',
+        opts.effort ?? STATION_EFFORT.spec,
         '--system-prompt',
         system,
         // Drop the environment/cwd preamble — this is a text transform.

@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Injectable } from '@nestjs/common';
-import { MODELS, type ModelId, type TokenUsage } from '@specd/shared';
+import { MODELS, type ModelId, type TokenUsage, STATION_EFFORT, type Effort } from '@specd/shared';
 import { AiNotConfigured } from '../common/errors.js';
 
 export interface ModelCallOptions {
@@ -11,7 +11,7 @@ export interface ModelCallOptions {
   /** JSON Schema. When set, the reply is guaranteed to match it. */
   schema?: Record<string, unknown>;
   maxTokens?: number;
-  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  effort?: Effort;
   /** Called with every text delta, so a run log can stream while it thinks. */
   onDelta?: (text: string) => void;
 }
@@ -71,7 +71,7 @@ export class AnthropicService {
       // `effort` sets the ceiling on total spend.
       thinking: { type: 'adaptive' },
       output_config: {
-        effort: opts.effort ?? 'high',
+        effort: opts.effort ?? STATION_EFFORT.spec,
         ...(opts.schema
           ? { format: { type: 'json_schema' as const, schema: opts.schema } }
           : {}),

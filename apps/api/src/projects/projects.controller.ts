@@ -21,7 +21,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { MODEL_IDS, MODELS } from '@specd/shared';
+import { EFFORT_LEVELS, MODEL_IDS, MODELS } from '@specd/shared';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { TokenClaims } from '../auth/auth.service.js';
 import { ProjectsService } from './projects.service.js';
@@ -51,6 +51,12 @@ class UpdateProjectDto {
   @IsOptional() @IsString() @MaxLength(500) description?: string;
   @IsOptional() @IsInt() @Min(0) spendCapCents?: number;
   @IsOptional() @IsIn(MODEL_IDS) defaultModel?: string;
+  /**
+   * `null` clears the override and puts every station back on its own
+   * default — which is why this is nullable rather than merely optional: an
+   * omitted field means "unchanged", and there has to be a way to say "none".
+   */
+  @IsOptional() @IsIn([...EFFORT_LEVELS, null]) effort?: string | null;
   @IsOptional() @IsBoolean() agentsPaused?: boolean;
   /** One-way: true marks setup finished; false is ignored. */
   @IsOptional() @IsBoolean() setupComplete?: boolean;

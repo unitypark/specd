@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { SpecView } from '@specd/shared';
 import { buildPrBody, looksUnrunnable } from './build.agent.js';
 
 /**
@@ -97,5 +98,73 @@ describe('the PR body when evidence moved', () => {
     // Advisory, and it says so — otherwise a reader assumes the build was
     // gated on this and that somebody already decided it was fine.
     expect(body).toContain('did not');
+  });
+});
+
+
+describe('the review section of a pull request body', () => {
+  const spec = {
+    ticketKey: 'E-101',
+    title: 'Add CSV export',
+    version: 2,
+    approvedBy: 'jpark',
+    approvedAt: '2026-08-18T00:00:00.000Z',
+    content: { requirements: [], design: [], tasks: [] },
+  } as unknown as SpecView;
+
+  const base = { commits: 3, verifyPassed: true, verifyCommand: 'pnpm test', asBuilt: 'k/s/E-101.md' };
+
+  it('says nothing at all when the pass could not run', () => {
+    // An absent review must read as absent. A "no findings" banner for a pass
+    // that never happened is the same lie as a green verify for tests that
+    // never ran.
+    expect(buildPrBody(spec, base)).not.toMatch(/Review pass/);
+    expect(buildPrBody(spec, { ...base, review: null })).not.toMatch(/Review pass/);
+    expect(
+      buildPrBody(spec, { ...base, review: { verdict: 'unreviewed', findings: [] } }),
+    ).not.toMatch(/Review pass/);
+  });
+
+  it('reports a clean pass, because silence would be indistinguishable from not running', () => {
+    const body = buildPrBody(spec, {
+      ...base,
+      review: { verdict: 'clean', summary: 'Does what the spec approved.', findings: [] },
+    });
+    expect(body).toMatch(/found nothing to raise/);
+    expect(body).toContain('Does what the spec approved.');
+  });
+
+  it('leads with blocking findings and says they did not block', () => {
+    const body = buildPrBody(spec, {
+      ...base,
+      review: {
+        verdict: 'findings',
+        summary: 'Exports, but drops a column.',
+        findings: [
+          { where: 'src/a.ts:12', severity: 'nit', what: 'Stray import.' },
+          { where: 'src/b.ts:40', severity: 'blocking', what: 'Header row omitted.', against: 'SHALL include a header' },
+          { where: 'src/c.ts:7', severity: 'consider', what: 'Could stream instead.' },
+        ],
+      },
+    });
+
+    // Ordered by severity: a reviewer scanning the top of the list must hit
+    // the blocking one first, whatever order the model emitted them in.
+    expect(body.indexOf('src/b.ts:40')).toBeLessThan(body.indexOf('src/c.ts:7'));
+    expect(body.indexOf('src/c.ts:7')).toBeLessThan(body.indexOf('src/a.ts:12'));
+
+    expect(body).toMatch(/3 finding\(s\), 1 of them blocking/);
+    expect(body).toMatch(/advisory — they did not stop the build/);
+    expect(body).toContain('SHALL include a header');
+  });
+
+  it('keeps the acceptance criteria below the findings', () => {
+    // The findings are the new reading; the criteria are what the reader
+    // checks them against. Reversing that buries the part nobody has seen.
+    const body = buildPrBody(spec, {
+      ...base,
+      review: { verdict: 'findings', summary: 's', findings: [{ where: 'a:1', severity: 'nit', what: 'x' }] },
+    });
+    expect(body.indexOf('### Review pass')).toBeLessThan(body.indexOf('### Acceptance criteria'));
   });
 });

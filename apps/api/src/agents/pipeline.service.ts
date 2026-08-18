@@ -7,8 +7,7 @@ import {
   specBranchName,
   type CitationDrift,
   type ModelId,
-  type SpecView,
-} from '@specd/shared';
+  type SpecView, effortFor, type Effort } from '@specd/shared';
 import { SpecNotApproved } from '../common/errors.js';
 import { ProjectsService } from '../projects/projects.service.js';
 import { RepositoriesService } from '../projects/repositories.service.js';
@@ -160,6 +159,7 @@ export class PipelineService {
       const repo = await this.repositories.get(input.projectId, input.repositoryId);
       const ai = await this.connections.resolveAi(project.id, project.defaultModel);
       const model = this.resolveModel(ai.model, project.defaultModel);
+      const effort = effortFor('ground', project.effort as Effort | null);
       // The row was queued before anything knew which model it would use.
       await this.runs.setModel(input.runId, model);
 
@@ -191,6 +191,7 @@ export class PipelineService {
         apiKey: ai.apiKey,
         model,
         mode: ai.mode,
+        effort,
         run,
       });
       await this.runs.finish(input.runId, {
@@ -278,7 +279,7 @@ export class PipelineService {
           schema: prepared.schema,
           model,
           maxTokens: 32_000,
-          effort: 'high',
+          effort: effortFor('spec', project.effort as Effort | null),
           chunks: prepared.chunks,
           coverage: prepared.coverage,
           slug: prepared.slug,
@@ -311,6 +312,7 @@ export class PipelineService {
         apiKey: ai.apiKey,
         model,
         mode: ai.mode,
+        effort: effortFor('spec', project.effort as Effort | null),
         run,
         revisionNotes,
         previousContent,
@@ -368,6 +370,9 @@ export class PipelineService {
 
     const ai = await this.connections.resolveAi(project.id, project.defaultModel);
     const model = this.resolveModel(ai.model, project.defaultModel);
+    // The highest of any station by default: this one writes code a human is
+    // about to review and merge.
+    const effort = effortFor('build', project.effort as Effort | null);
 
     // Ground the build in the same knowledge the spec was drafted against.
     const { chunks } = await this.knowledge.retrieve(
@@ -481,6 +486,7 @@ export class PipelineService {
           projectName: project.name,
           knowledgeExcerpts,
           model,
+          effort,
           drifted,
         });
 
@@ -489,6 +495,8 @@ export class PipelineService {
             kind: 'build',
             model,
             system: prepared.system,
+            effort: prepared.effort,
+            review: prepared.review,
             branch: prepared.branch,
             asBuiltPath: prepared.asBuiltPath,
             asBuiltCommitMessage: prepared.asBuiltCommitMessage,
@@ -536,6 +544,7 @@ export class PipelineService {
       projectName: project.name,
       knowledgeExcerpts,
       model,
+      effort,
       drifted,
       run,
     });
@@ -557,6 +566,7 @@ export class PipelineService {
     projectName: string;
     knowledgeExcerpts: string;
     model: ModelId;
+    effort: Effort;
     run: Awaited<ReturnType<RunsService['start']>>;
   }): Promise<void> {
     const { run, spec } = input;

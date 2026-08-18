@@ -171,3 +171,20 @@ export async function pushBranch(dir: string, cloneUrl: string, branch: string):
     600_000,
   );
 }
+
+
+/**
+ * The change as a reviewer will see it, capped — mirrors
+ * `WorkspaceService.diff()` on the API side, for the same reason and with the
+ * same cap: a generated bundle should not eat the review budget, and a review
+ * of half a change must not claim to be a review of the change.
+ */
+export async function diffAgainst(dir: string, baseBranch: string, limit = 120_000): Promise<string> {
+  const out = await gitOrThrow(
+    ['diff', `${baseBranch}...HEAD`, '--', '.', ':(exclude)*.lock', ':(exclude)*-lock.json'],
+    dir,
+    'Could not read the diff',
+  ).catch(() => '');
+  if (out.length <= limit) return out;
+  return `${out.slice(0, limit)}\n\n[diff truncated at ${limit} characters — ${out.length - limit} more not shown]`;
+}

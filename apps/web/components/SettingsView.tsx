@@ -42,6 +42,7 @@ export function SettingsView({
   const [description, setDescription] = useState(project.description ?? '');
   const [cap, setCap] = useState((project.spendCapCents / 100).toFixed(0));
   const [model, setModel] = useState(project.defaultModel);
+  const [effort, setEffort] = useState<string>(project.effort ?? '');
   // Seeded from the server, and only flipped once the server confirms — a
   // kill switch whose label can disagree with reality is worse than none.
   const [paused, setPaused] = useState(project.agentsPaused);
@@ -326,6 +327,35 @@ export function SettingsView({
           </select>
           {saveBusy === 'model' && <span className="spinner" />}
           {saved === 'model' && <span className="ok">saved ✓</span>}
+        </div>
+      </div>
+
+      <div className="card">
+        <h5>Effort</h5>
+        <p className="sub">
+          How hard the model works per call — the intelligence, latency and cost dial. Each
+          station has its own default: builds and reviews run at <code>xhigh</code>, spec and
+          grounding at <code>high</code>, indexing at <code>low</code>. Set this only to move the
+          whole project off those.
+        </p>
+        <div className="inline">
+          <select
+            value={effort}
+            disabled={saveBusy === 'effort'}
+            onChange={(e) => {
+              setEffort(e.target.value);
+              save('effort', { effort: e.target.value === '' ? null : e.target.value });
+            }}
+          >
+            <option value="">Per station (recommended)</option>
+            <option value="low">low · cheapest, for routine work</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh · what coding agents want</option>
+            <option value="max">max · correctness over cost</option>
+          </select>
+          {saveBusy === 'effort' && <span className="spinner" />}
+          {saved === 'effort' && <span className="ok">saved ✓</span>}
         </div>
       </div>
 

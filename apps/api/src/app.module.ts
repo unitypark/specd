@@ -40,6 +40,7 @@ import { ModelRouter } from './agents/model.router.js';
 import { OnboardingAgent } from './agents/onboarding.agent.js';
 import { SpecAgent } from './agents/spec.agent.js';
 import { BuildAgent } from './agents/build.agent.js';
+import { ReviewAgent } from './agents/review.agent.js';
 import { WorkspaceService } from './vcs/workspace.js';
 import { PipelineService } from './agents/pipeline.service.js';
 import { IndexQueueService } from './agents/index-queue.service.js';
@@ -96,6 +97,7 @@ import { RunnersController } from './runners/runners.controller.js';
     OnboardingAgent,
     SpecAgent,
     BuildAgent,
+    ReviewAgent,
     WorkspaceService,
     PipelineService,
     IndexQueueService,

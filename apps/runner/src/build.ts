@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { renderAsBuiltMarkdown, type ModelId, type SpecContent, type TokenUsage } from '@specd/shared';
-import { callClaudeCode } from './claude.js';
+import { renderAsBuiltMarkdown, type ModelId, type SpecContent, type TokenUsage, type Effort } from '@specd/shared';
+import { callClaudeCode, reviewWithClaude } from './claude.js';
 import {
   canReachRemote,
   changedFiles,
@@ -13,6 +13,7 @@ import {
   pushBranch,
   shallowClone,
   startBranch,
+  diffAgainst,
 } from './git.js';
 
 /**
@@ -34,10 +35,13 @@ export interface BuildJob {
   model: ModelId;
   system: string;
   branch: string;
+  effort?: Effort;
   asBuiltPath: string;
   asBuiltCommitMessage: string;
   verifyCommand: string | null;
   tasks: { id: string; title: string; prompt: string; commitMessage: string }[];
+  /** Rendered by the API; run here, because the diff is here. */
+  review?: { system: string; brief: string; schema: Record<string, unknown> };
   remote: { cloneUrl: string; baseBranch: string };
   ticketKey: string;
   ctx: {
@@ -61,6 +65,8 @@ export interface BuildOutcome {
     commits: number;
     verifyPassed: boolean | null;
     verifyOutput: string | null;
+    /** Findings from the read-only pass, or null when it could not run. */
+    review: unknown;
   };
   usage: TokenUsage;
   model: ModelId;
@@ -110,6 +116,7 @@ export async function runBuildJob(job: BuildJob, narrate: Narrate): Promise<Buil
 
       const result = await callClaudeCode({
         model: job.model,
+        effort: job.effort,
         system: job.system,
         user: task.prompt,
         workspaceDir: dir,
@@ -189,8 +196,31 @@ export async function runBuildJob(job: BuildJob, narrate: Narrate): Promise<Buil
     await narrate(`pushing ${job.branch} as this machine's git user`);
     await pushBranch(dir, job.remote.cloneUrl, job.branch);
 
+    // Station 05b, on this machine — see `reviewWithClaude`. Advisory: a
+    // review that cannot run leaves the report without one rather than
+    // failing a build whose commits already exist.
+    let review: unknown = null;
+    if (job.review) {
+      const diff = await diffAgainst(dir, job.remote.baseBranch);
+      if (diff.trim()) {
+        await narrate('reviewing the diff');
+        const outcome = await reviewWithClaude<unknown>({
+          model: job.model,
+          effort: job.effort,
+          system: job.review.system,
+          user: `${job.review.brief}\n\n=== THE DIFF ===\n${diff}\n\nReview it. Open the files you need.`,
+          schema: job.review.schema,
+          workspaceDir: dir,
+        });
+        review = outcome.parsed;
+        usage.inputTokens += outcome.usage.inputTokens;
+        usage.outputTokens += outcome.usage.outputTokens;
+        await narrate(review ? 'review complete' : 'the review pass did not answer — reporting without it');
+      }
+    }
+
     return {
-      report: { tasksAttempted, tasksCommitted, commits, verifyPassed, verifyOutput },
+      report: { tasksAttempted, tasksCommitted, commits, verifyPassed, verifyOutput, review },
       usage,
       model: observedModel ?? job.model,
     };

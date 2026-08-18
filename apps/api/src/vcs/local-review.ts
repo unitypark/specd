@@ -527,8 +527,12 @@ function short(err: unknown): string {
  * No shell on purpose: `title` and `body` are repository- and project-derived
  * strings, and the moment they reach a shell they are code. As argv entries
  * they are data.
+ *
+ * Exported for one test: the stdin race below is a property of this function
+ * and not of any caller, and reproducing it through `openLocalReview` means
+ * depending on which binaries the machine happens to have.
  */
-function run(
+export function run(
   bin: string,
   args: string[],
   opts: { cwd: string; stdin?: string; timeoutMs?: number },
@@ -575,6 +579,16 @@ function run(
     child.on('error', () => done(null));
     child.on('close', (code) => done(code));
 
+    // `gh` and `git` both exit before reading stdin in the common failure
+    // cases — a missing binary, a rejected push — leaving the pipe with nobody
+    // on the other end. Node reports that write as an `error` on the stream,
+    // and unhandled it is an uncaught exception rather than a failed call.
+    // Same guard the runner arrived at (`apps/runner/src/claude.ts`); the exit
+    // code and stderr already carry the outcome.
+    child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') return;
+      stderr += `\n[specd] could not write to ${bin}'s stdin: ${err.message}`;
+    });
     child.stdin.end(opts.stdin ?? '');
   });
 }

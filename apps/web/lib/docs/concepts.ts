@@ -171,7 +171,7 @@ export const CONCEPTS: DocCategory = {
         },
         {
           k: 'p',
-          text: 'If the repository already has an `AGENTS.md` or `CLAUDE.md`, **nothing in it is rewritten.** Your file stays exactly as it is and specd\'s rules are appended below it, fenced by `<!-- specd:begin -->` markers so a later grounding run updates only that block. Where the two sets disagree, yours came first and a human decides — the setup pull request says so, and `knowledge/open-questions.md` carries it as an item.',
+          text: 'If the repository already has an `AGENTS.md`, **nothing in it is rewritten** — and specd does not append a second set of engineering rules underneath. A team that wrote its own agreements has usually already said "read the docs first" and "docs ride the change"; restating that is worse than either copy, because an agent follows whichever it reads first. So specd appends a short block instead: the four rules its own machinery enforces, and where the knowledge base lives. It is fenced by `<!-- specd:begin -->` markers, so a later grounding run updates only that block.',
         },
         {
           k: 'ol',

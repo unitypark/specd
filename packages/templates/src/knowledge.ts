@@ -1,5 +1,5 @@
 import { type DetectedStack, describeStack } from './stack.js';
-import { mergeAgentsMd, mergeClaudeMd } from './agents-md.js';
+import { mergeAgentsMd, mergeClaudeMd, renderAgentsSupplement } from './agents-md.js';
 import {
   hasDataEvidence,
   hasIntegrationEvidence,
@@ -634,8 +634,8 @@ export function renderOpenQuestions(input: DocContext): string {
   const merged = mergedAgentDocs(evidence);
   if (merged.length) {
     items.push({
-      question: `This repo already had ${merged.join(' and ')} — read ${merged.length === 1 ? 'it' : 'them'} against the specd block appended below yours and reconcile anything that disagrees.`,
-      why: "Your rules were kept and specd's were added under a marked fence, so nothing was lost — but two rules that contradict each other are worse than either alone: an agent follows whichever it reads first.",
+      question: `This repo already had ${merged.join(' and ')} — check the short specd block appended below yours does not contradict what you already say.`,
+      why: "Your rules were kept untouched, and specd appended only the four things its own machinery enforces rather than a second set of engineering rules. Anything the two do both mention, yours wins — but only a human can say which is which.",
       doc: 'conventions.md',
     });
   }
@@ -1005,7 +1005,13 @@ export function renderScaffold(input: {
   const docs = scaffoldDocPaths(evidence);
   const ctx: DocContext = { repoName, projectName, stack, evidence, drafted, docs };
 
-  const mergedAgents = mergeAgentsMd(existing?.agentsMd, agentsMd);
+  // A repository with its own agreements gets the short specd-specific block,
+  // not the whole document — see `renderAgentsSupplement`.
+  const mergedAgents = mergeAgentsMd(
+    existing?.agentsMd,
+    agentsMd,
+    renderAgentsSupplement({ isPrimary: input.isPrimary, projectName }),
+  );
   const mergedClaude = mergeClaudeMd(existing?.claudeMd);
 
   const files: ScaffoldFile[] = [
@@ -1077,7 +1083,7 @@ export function renderSetupPrBody(input: {
         merged.length === 1 ? 'was' : 'were'
       } kept.** Nothing in ${
         merged.length === 1 ? 'it' : 'them'
-      } was rewritten — specd's agreements are appended below yours, fenced by\n> \`<!-- specd:begin -->\` markers so a later setup run updates only that block.\n> Where the two sets disagree, yours came first and a human decides.`
+      } was rewritten. specd appended a short block — the four rules its own\n> machinery enforces, and where the knowledge base lives — rather than a second\n> set of engineering rules on top of yours. It is fenced by\n> \`<!-- specd:begin -->\` markers, so a later setup run updates only that block.`
     : '';
 
   return `## specd setup — review me, then merge to adopt

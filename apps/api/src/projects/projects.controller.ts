@@ -32,6 +32,8 @@ import { ModelRouter } from '../agents/model.router.js';
 import { Vault } from '../common/vault.js';
 import { JiraAdapter } from '../tracker/jira.adapter.js';
 import { VcsError, normalizeInstanceUrl } from '../vcs/vcs.types.js';
+import { instanceUrlFromRemote, resolveGitLabRoot } from '../vcs/local-review.js';
+import { LocalGitAdapter } from '../vcs/local-git.adapter.js';
 import { GitHubAdapter } from '../vcs/github.adapter.js';
 import { GitLabAdapter } from '../vcs/gitlab.adapter.js';
 
@@ -105,6 +107,7 @@ export class ProjectsController {
     private readonly connections: ConnectionsService,
     private readonly knowledge: KnowledgeService,
     private readonly modelRouter: ModelRouter,
+    private readonly local: LocalGitAdapter,
   ) {}
 
   @Get()
@@ -324,21 +327,38 @@ export class ProjectsController {
     // wrong.
     let connectedAs: string | undefined;
     const reviewProvider = dto.provider === 'local' ? dto.reviewProvider ?? null : null;
-    if (reviewProvider) {
-      if (!dto.token) {
+    if (reviewProvider === 'github' && !dto.token) {
+      // GitHub has no way to open a pull request except the API.
+      throw new BadRequestException(
+        'A GitHub token is needed to open pull requests from local mode. Leave the review host ' +
+          'unset to keep local mode credential-free.',
+      );
+    }
+
+    // A GitLab project with no token is a supported, and preferred, setup:
+    // push options open the merge request over the git transport. There is
+    // nothing to verify in that case, so nothing is checked.
+    if (reviewProvider && dto.token) {
+      // Verified against the host the repository names, not against whatever
+      // the adapter would default to. A check that passes against gitlab.com
+      // for a self-managed project is worse than no check at all.
+      const root = instanceUrl ?? (await this.derivedReviewHost(project.id, reviewProvider));
+      if (!root) {
         throw new BadRequestException(
-          `A ${reviewProvider === 'gitlab' ? 'GitLab' : 'GitHub'} token is needed to open reviews from local mode. Leave the review host unset to keep local mode credential-free.`,
+          'specd could not work out which host to open reviews on. Add a repository with an ' +
+            '`origin` remote first, or give the instance URL explicitly.',
         );
       }
+
       try {
         const identity =
           reviewProvider === 'gitlab'
-            ? await new GitLabAdapter(dto.token, instanceUrl ?? undefined).verify()
+            ? await new GitLabAdapter(dto.token, root).verify()
             : await new GitHubAdapter(
                 dto.token,
-                instanceUrl ? `${instanceUrl}/api/v3` : undefined,
+                /^https:\/\/github\.com$/.test(root) ? undefined : `${root}/api/v3`,
               ).verify();
-        connectedAs = identity.username;
+        connectedAs = `${identity.username} on ${root}`;
       } catch (err) {
         throw new BadRequestException(
           err instanceof VcsError ? err.message : err instanceof Error ? err.message : String(err),
@@ -355,6 +375,31 @@ export class ProjectsController {
       secret: dto.token ?? null,
     });
     return connectedAs ? { ok: true, connectedAs } : { ok: true };
+  }
+
+  /**
+   * The review host a project's own checkouts point at.
+   *
+   * Local mode already holds a clone, and a clone knows its origin — so the
+   * instance URL is something specd can read rather than something a person
+   * has to retype. Only *which software* the host runs cannot be read off a
+   * remote, which is why the provider is still chosen by hand.
+   */
+  private async derivedReviewHost(
+    projectId: string,
+    provider: 'github' | 'gitlab',
+  ): Promise<string | null> {
+    const repos = await this.repositories.list(projectId);
+    for (const repo of repos) {
+      if (!repo.localPath) continue;
+      const origin = await this.local.originUrl(repo.localPath);
+      const derived = origin ? instanceUrlFromRemote(origin) : null;
+      if (!derived) continue;
+      // A subpath-hosted instance is indistinguishable from a group by string
+      // alone, so GitLab is asked rather than guessed at.
+      return provider === 'gitlab' ? resolveGitLabRoot(derived, origin!) : derived;
+    }
+    return null;
   }
 
   @Post(':slug/connections/tracker')

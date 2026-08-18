@@ -72,7 +72,12 @@ export interface RepoTarget {
  */
 export interface LocalReviewCredential {
   provider: 'github' | 'gitlab';
-  token: string;
+  /**
+   * Null is a real answer, not a missing one: GitLab opens merge requests from
+   * a push option, so naming the provider is sometimes all specd needs. GitHub
+   * has no equivalent and does require one.
+   */
+  token: string | null;
   /** The instance root. gitlab.com / api.github.com when not self-managed. */
   instanceUrl: string | null;
 }

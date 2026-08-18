@@ -62,7 +62,17 @@ export const GUIDES: DocCategory = {
         },
         {
           k: 'p',
-          text: 'For a **self-managed** GitLab or GitHub Enterprise, that is not enough: specd refuses to guess what software a host runs from its URL, and the host\'s CLI is often not on a corporate machine. So the local step takes an optional **review credential** — pick the host, give the instance URL and a token, and specd opens the merge request with it. The token is checked on the spot, and is used for that one thing.',
+          text: 'For a **self-managed** GitLab or GitHub Enterprise, that is not enough: specd refuses to guess what software a host runs from its URL, and the host\'s CLI is often not on a corporate machine. So the local step asks which host to open reviews on — and for GitLab, that is usually all it needs.',
+        },
+        {
+          k: 'note',
+          tone: 'good',
+          title: 'GitLab needs no token here',
+          text: 'GitLab can open the merge request as part of the push (`git push -o merge_request.create`). That travels over the git transport — the connection you already clone and push through — so it needs no API call, no credential, and works where an access portal intercepts `/api/v4`. specd tries it first. A token stays available as a fallback, and GitHub still requires one because pull requests there are API-only.',
+        },
+        {
+          k: 'p',
+          text: 'The instance URL is derived from your repository\'s `origin`, so it is normally left blank. Set it only for an instance served from a subpath (`https://host/gitlab`), plain http, or a non-standard API port — and give the instance **root**, never a group or project page. Where the two readings are genuinely ambiguous, specd asks the instance rather than guessing.',
         },
         {
           k: 'note',

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { SimpleGit } from 'simple-git';
+import { fetchOrExplain } from '../common/http-failures.js';
 import { GitHubAdapter } from './github.adapter.js';
 import { GitLabAdapter } from './gitlab.adapter.js';
 import type { LocalReviewCredential } from './vcs.types.js';
@@ -94,8 +95,40 @@ export async function openLocalReview(input: {
     };
   }
 
+  // GitLab first, and without asking for anything: push options open the merge
+  // request over the git transport, so this path needs no credential, no CLI
+  // and no reachable API. It is the only strategy that survives an access
+  // portal in front of `/api/v4`.
+  if (kind === 'gitlab') {
+    const viaPush = await pushOpeningMergeRequest(cwd, { branch, base, title, body });
+    if (viaPush.url) {
+      return {
+        url: viaPush.url,
+        note: 'pushed, and GitLab opened the merge request from the push itself — no API call, no token',
+      };
+    }
+    if (viaPush.pushed) {
+      // The branch is published; only the announcement is missing. An older
+      // GitLab, or a project with merge requests disabled, lands here — and
+      // the API path below may still succeed where the push option did not.
+      if (!credential?.token) {
+        return {
+          url: null,
+          note:
+            'pushed the branch, but GitLab did not report a merge request from the push ' +
+            '(push options need GitLab 11.10 or newer, and merge requests enabled on the project)',
+        };
+      }
+      return openWithToken(
+        { ...credential, token: credential.token },
+        { remoteUrl: input.remoteUrl, branch, base, title, body },
+      );
+    }
+    return { url: null, note: `pushing to origin failed (${viaPush.detail})` };
+  }
+
   const bin = kind === 'github' ? 'gh' : 'glab';
-  const viaCli = !credential;
+  const viaCli = !credential?.token;
   if (viaCli && !(await hostCliReady(kind, cwd))) {
     return {
       url: null,
@@ -107,13 +140,16 @@ export async function openLocalReview(input: {
   // token below opens the review and does nothing else — it never fetches a
   // file, scans a tree, or writes a commit.
   try {
-    await git.push('origin', branch);
+    await git.push(['--force-with-lease', 'origin', branch]);
   } catch (err) {
     return { url: null, note: `pushing to origin failed (${short(err)})` };
   }
 
-  if (credential) {
-    return openWithToken(credential, { remoteUrl: input.remoteUrl, branch, base, title, body });
+  if (credential?.token) {
+    return openWithToken(
+      { ...credential, token: credential.token },
+      { remoteUrl: input.remoteUrl, branch, base, title, body },
+    );
   }
 
   const created = await createReview(kind, { cwd, branch, base, title, body });
@@ -132,6 +168,147 @@ export async function openLocalReview(input: {
 }
 
 /**
+ * Which URL is the instance root: the host, or the host plus one path segment?
+ *
+ * `https://host/ET130/services/api` is two deployments wearing one string —
+ * GitLab at the root with `ET130` a group, or GitLab served from `/ET130`
+ * with `services/api` the project. Nothing in the remote distinguishes them,
+ * and both are legitimate, so specd asks instead of guessing: one unauthenticated
+ * `GET {candidate}/api/v4/version`, which answers 401 when GitLab is there and
+ * 404 when it is not.
+ *
+ * Root wins on a tie because subpath installs are rare. Returns the candidate
+ * unchanged when neither answers — a wrong instance URL is then reported by
+ * `describeApiBase404`, which says which half to drop.
+ */
+export async function resolveGitLabRoot(
+  candidateRoot: string,
+  remoteUrl: string,
+  probe: (url: string) => Promise<number | null> = probeStatus,
+): Promise<string> {
+  if (await looksLikeGitLab(candidateRoot, probe)) return candidateRoot;
+
+  const firstSegment = (projectPathFromRemote(remoteUrl) ?? '').split('/')[0];
+  if (!firstSegment) return candidateRoot;
+
+  const nested = `${candidateRoot}/${firstSegment}`;
+  return (await looksLikeGitLab(nested, probe)) ? nested : candidateRoot;
+}
+
+async function looksLikeGitLab(
+  root: string,
+  probe: (url: string) => Promise<number | null>,
+): Promise<boolean> {
+  // 401 is the *expected* answer: /version needs auth, and only a GitLab
+  // answers it that way. 200 covers instances that allow it unauthenticated.
+  const status = await probe(`${root}/api/v4/version`);
+  return status === 200 || status === 401;
+}
+
+async function probeStatus(url: string): Promise<number | null> {
+  try {
+    const res = await fetchOrExplain(url, {}, { host: url, wrap: (m) => new Error(m) });
+    return res.status;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask GitLab to open the merge request as part of the push itself.
+ *
+ * This is the only strategy here that needs no credential and no reachable
+ * API. Push options travel over the git transport — the same SSH connection
+ * the person already pushes through every day — so it works where an access
+ * portal intercepts `/api/v4` and answers with a login page, which is the one
+ * failure a token cannot solve.
+ *
+ * GitLab announces the result in the push's remote messages, which is why
+ * `run()` keeps stderr. Both "created" and "an MR already exists" print a URL,
+ * and either is the right answer for a re-run.
+ *
+ * GitHub has no equivalent: pull requests there are API-only.
+ */
+async function pushOpeningMergeRequest(
+  cwd: string,
+  pr: { branch: string; base: string; title: string; body: string },
+): Promise<{ pushed: boolean; url: string | null; detail: string }> {
+  const { code, stderr, stdout } = await run(
+    'git',
+    [
+      'push',
+      '-o',
+      'merge_request.create',
+      '-o',
+      `merge_request.target=${pr.base}`,
+      '-o',
+      `merge_request.title=${pr.title}`,
+      '-o',
+      `merge_request.description=${describeForPushOption(pr.body)}`,
+      // The branch belongs to this spec, and a re-run resets it — the same
+      // reason the hosted adapters force-push. `--force-with-lease` refuses if
+      // the remote moved in a way we have not seen, which is the safe half of
+      // that bargain.
+      '--force-with-lease',
+      'origin',
+      pr.branch,
+    ],
+    { cwd },
+  );
+
+  const output = `${stderr}\n${stdout}`;
+  if (code === 0) {
+    return { pushed: true, url: firstUrl(pickMergeRequestLine(output) ?? output), detail: '' };
+  }
+
+  // A remote that does not take push options rejects the whole push and sends
+  // nothing — GitLab before 11.10, and every non-GitLab remote. The branch
+  // still has to get there, so it goes again without them and the merge
+  // request is left to whatever strategy comes next.
+  const plain = await run(
+    'git',
+    ['push', '--force-with-lease', 'origin', pr.branch],
+    { cwd },
+  );
+  if (plain.code === 0) return { pushed: true, url: null, detail: '' };
+
+  return {
+    pushed: false,
+    url: null,
+    detail: firstLine(`${plain.stderr}\n${plain.stdout}`) || firstLine(output) || 'git push failed',
+  };
+}
+
+/**
+ * GitLab prints several URLs on a push. The one on the merge-request line is
+ * the merge request; the others are the project and, on a first push, the
+ * "create a merge request" form. Taking the first URL anywhere in the output
+ * would hand someone the form instead of the thing that was just opened.
+ */
+function pickMergeRequestLine(output: string): string | null {
+  return (
+    output
+      .split('\n')
+      .find((line) => /merge[ _]request/i.test(line) && /https?:\/\//.test(line)) ?? null
+  );
+}
+
+/**
+ * A push option is one argv string, and a build's description is a page of
+ * markdown. Git imposes no limit but servers do, and a push rejected for a
+ * long description would lose the merge request over its own body — so it is
+ * trimmed, and says that it was.
+ */
+export function describeForPushOption(body: string, limit = 1500): string {
+  if (body.length <= limit) return body;
+  return `${body.slice(0, limit).trimEnd()}\n\n_(truncated — specd sent this description over a git push option, which cannot carry the whole body.)_`;
+}
+
+function firstLine(output: string): string {
+  return output.split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? '';
+}
+
+/**
  * Open the review over the provider's API with the project's own token.
  *
  * Both adapters already know how to open one *or* update the one that is
@@ -139,10 +316,21 @@ export async function openLocalReview(input: {
  * genuinely just picking which of them to call.
  */
 async function openWithToken(
-  credential: LocalReviewCredential,
+  credential: LocalReviewCredential & { token: string },
   pr: { remoteUrl: string; branch: string; base: string; title: string; body: string },
 ): Promise<LocalReview> {
-  const path = projectPathFromRemote(pr.remoteUrl, credential.instanceUrl);
+  // The host the clone already names. Without this, a blank instance URL fell
+  // through to the adapter's `https://gitlab.com` default and quietly sent a
+  // self-managed project's path and token to gitlab.com.
+  const root = credential.instanceUrl ?? instanceUrlFromRemote(pr.remoteUrl);
+  if (!root) {
+    return {
+      url: null,
+      note: `pushed the branch, but could not work out which host to open a review on from \`origin\` (${pr.remoteUrl})`,
+    };
+  }
+
+  const path = projectPathFromRemote(pr.remoteUrl, root);
   if (!path) {
     return {
       url: null,
@@ -153,13 +341,15 @@ async function openWithToken(
   try {
     const opened =
       credential.provider === 'gitlab'
-        ? await new GitLabAdapter(credential.token, credential.instanceUrl ?? undefined).openMergeRequest(
+        ? await new GitLabAdapter(credential.token, root).openMergeRequest(
             path,
             { branch: pr.branch, base: pr.base, title: pr.title, body: pr.body },
           )
         : await new GitHubAdapter(
             credential.token,
-            credential.instanceUrl ? `${credential.instanceUrl}/api/v3` : undefined,
+            // github.com's API lives on its own host; an Enterprise Server
+            // serves it under /api/v3 on the instance itself.
+            /^https:\/\/github\.com$/.test(root) ? undefined : `${root}/api/v3`,
           ).openPullRequest(path, {
             branch: pr.branch,
             base: pr.base,
@@ -188,12 +378,42 @@ async function openWithToken(
  * the subpath through would address a project that does not exist.
  */
 export function projectPathFromRemote(remoteUrl: string, instanceRoot?: string | null): string | null {
+  let path = remotePath(remoteUrl);
+  if (path === null) return null;
+
+  if (instanceRoot) {
+    const root = (() => {
+      try {
+        return new URL(instanceRoot).pathname.replace(/^\/+|\/+$/g, '');
+      } catch {
+        return '';
+      }
+    })();
+    // Compared without leading slashes on either side. They used to be
+    // compared as-is, and `URL.pathname` has a leading slash while the
+    // scp-syntax branch does not — so a subpath-hosted instance stripped its
+    // prefix from an https remote and silently kept it on an ssh one, which is
+    // the syntax a corporate clone actually uses.
+    if (root && (path === root || path.startsWith(`${root}/`))) {
+      path = path.slice(root.length).replace(/^\/+/, '');
+    }
+  }
+
+  return path.includes('/') ? path : null;
+}
+
+/**
+ * The path part of a remote, in either syntax git accepts, without leading or
+ * trailing slashes and without `.git`.
+ */
+function remotePath(remoteUrl: string): string | null {
   const trimmed = remoteUrl.trim().replace(/\.git\/?$/, '');
+  if (!trimmed) return null;
 
   // scp-like syntax (`git@host:group/project`) is not a URL, so it is matched
   // rather than parsed. Everything else goes through URL.
   const scp = trimmed.match(/^[^/]+@([^:]+):(.+)$/);
-  let path = scp
+  const raw = scp
     ? scp[2]!
     : (() => {
         try {
@@ -203,19 +423,39 @@ export function projectPathFromRemote(remoteUrl: string, instanceRoot?: string |
         }
       })();
 
-  if (instanceRoot) {
-    const root = (() => {
-      try {
-        return new URL(instanceRoot).pathname.replace(/\/+$/, '');
-      } catch {
-        return '';
-      }
-    })();
-    if (root && path.startsWith(root)) path = path.slice(root.length);
-  }
+  return raw.replace(/^\/+|\/+$/g, '');
+}
 
-  path = path.replace(/^\/+|\/+$/g, '');
-  return path.includes('/') ? path : null;
+/**
+ * The instance a clone already names.
+ *
+ * A local checkout knows its host — asking someone to retype it is asking for
+ * something the repository is holding. What cannot be read off a remote is
+ * *which software* the host runs, so the provider is still chosen by hand
+ * ([[0020-local-mode-borrows-the-host-cli]]); this only supplies the address.
+ *
+ * https is assumed, and any port is dropped. An ssh remote's port is the SSH
+ * port — carrying `:2222` onto an API URL would be confidently wrong, and a
+ * genuinely non-standard API port is what the override field is for.
+ */
+export function instanceUrlFromRemote(remoteUrl: string): string | null {
+  const trimmed = remoteUrl.trim();
+  if (!trimmed) return null;
+
+  const scp = trimmed.match(/^[^/]+@([^:]+):/);
+  if (scp) return `https://${scp[1]!.toLowerCase()}`;
+
+  try {
+    const url = new URL(trimmed);
+    if (!url.hostname) return null;
+    // An https remote's port is the web port and worth keeping; ssh:// carries
+    // the SSH one, which is not.
+    const port = url.protocol === 'ssh:' ? '' : url.port ? `:${url.port}` : '';
+    const scheme = url.protocol === 'http:' ? 'http' : 'https';
+    return `${scheme}://${url.hostname.toLowerCase()}${port}`;
+  } catch {
+    return null;
+  }
 }
 
 function label(kind: HostKind): string {
@@ -292,7 +532,7 @@ function run(
   bin: string,
   args: string[],
   opts: { cwd: string; stdin?: string; timeoutMs?: number },
-): Promise<{ code: number | null; stdout: string }> {
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,
@@ -308,12 +548,13 @@ function run(
     });
 
     let stdout = '';
+    let stderr = '';
     let settled = false;
     const done = (code: number | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ code, stdout });
+      resolve({ code, stdout, stderr });
     };
 
     const timer = setTimeout(() => {
@@ -324,10 +565,13 @@ function run(
     child.stdout.on('data', (d: Buffer) => {
       stdout += d.toString();
     });
-    // stderr is drained but not kept: it is where both CLIs put their
-    // "a pull request already exists" message, which is not an error worth
-    // repeating to a user — `findReview` answers it with the URL instead.
-    child.stderr.on('data', () => undefined);
+    // Kept, not discarded. For the CLIs it holds "a pull request already
+    // exists", which `findReview` answers with a URL instead — but for `git
+    // push` it is where the server's own messages arrive, and GitLab announces
+    // the merge request it just opened in exactly that channel.
+    child.stderr.on('data', (d: Buffer) => {
+      stderr += d.toString();
+    });
     child.on('error', () => done(null));
     child.on('close', (code) => done(code));
 

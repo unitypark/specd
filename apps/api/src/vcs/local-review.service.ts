@@ -37,7 +37,7 @@ export class LocalReviewService {
     if (!projectId) return null;
 
     const conn = await this.connections.get(projectId, 'vcs').catch(() => null);
-    if (!conn || conn.provider !== 'local' || !conn.encryptedSecret) return null;
+    if (!conn || conn.provider !== 'local') return null;
 
     const settings = (conn.settings ?? {}) as { reviewProvider?: string; instanceUrl?: string | null };
     const provider = settings.reviewProvider;
@@ -45,19 +45,21 @@ export class LocalReviewService {
 
     // A credential that cannot be decrypted is not a reason to fail a run —
     // the branch is the work, and the review surface is best-effort by
-    // construction everywhere else in this path.
-    const token = (() => {
-      try {
-        return this.vault.decrypt(conn.encryptedSecret!, `${projectId}:vcs`);
-      } catch {
-        return '';
-      }
-    })();
-    if (!token) return null;
+    // construction everywhere else in this path. Nor is its absence: naming
+    // the provider is enough for GitLab's push-option route.
+    const token = conn.encryptedSecret
+      ? (() => {
+          try {
+            return this.vault.decrypt(conn.encryptedSecret!, `${projectId}:vcs`);
+          } catch {
+            return null;
+          }
+        })()
+      : null;
 
     return {
       provider,
-      token,
+      token: token || null,
       instanceUrl: settings.instanceUrl ? normalizeInstanceUrl(settings.instanceUrl) : null,
     };
   }

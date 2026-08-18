@@ -119,3 +119,56 @@ for your host" to "specd holds no credential for your host unless you give it
 one, and then only to open reviews". That is a real change to the sentence, and
 it is why the credential is opt-in, single-purpose, and named as such in the
 UI rather than folded into the repository form.
+
+## Amendment, 2026-08-18 — GitLab opens the merge request from the push
+
+The credential added above assumed the review has to be opened over an API.
+For GitLab it does not. Push options —
+`git push -o merge_request.create -o merge_request.title=…` — create the merge
+request over the **git transport**, on the same connection the person already
+pushes through.
+
+That matters more than convenience. The failure that prompted this was an
+access portal answering `/api/v4` with its own login page at 200: a request
+that never reaches GitLab, which no token can fix. The git transport is not
+intercepted — it is how the repository was cloned in the first place — so the
+push route works precisely where the API route cannot.
+
+So the order is now: **push options, then a token, then the host CLI.** The
+first needs nothing configured beyond naming the provider, and for GitLab a
+token is no longer required at all. GitHub keeps needing one; it has no
+push-option equivalent.
+
+Three things this had to get right:
+
+1. **A remote that refuses push options rejects the entire push.** GitLab
+   before 11.10, and every non-GitLab remote, send nothing at all. The branch
+   still has to arrive, so the push is retried without them and the merge
+   request falls to the next strategy.
+2. **The description is one argv string**, and a build's body is a page of
+   markdown. It is trimmed to 1,500 characters and says that it was, rather
+   than risking a push rejected over its own description.
+3. **Re-runs.** Push options create; they do not rewrite an open merge
+   request's description. A rebuild therefore pushes new commits under a
+   description written for the previous run — the staleness `reviewHint` warns
+   about elsewhere, and the reason the token path is still worth having.
+
+### The instance URL stopped being something to type
+
+A clone knows its origin, so the host is derivable (`instanceUrlFromRemote`)
+and the field is now an override for the three cases a remote cannot express:
+a subpath install, plain http, and a non-standard API port. Two bugs were
+closed on the way:
+
+- A blank field used to fall through to the adapter default, which sent a
+  self-managed project's path and token to **gitlab.com**. It now derives, and
+  never falls back to a public host the remote did not name.
+- `projectPathFromRemote` compared the instance subpath against `URL.pathname`,
+  which has a leading slash, while its scp-syntax branch produced one without.
+  A subpath-hosted instance therefore stripped its prefix from an https remote
+  and silently kept it on an ssh one — the syntax corporate clones use.
+
+Where a URL is genuinely ambiguous — `https://host/ET130/services/api` is
+either a group on a root install or a project on a subpath one — specd asks
+instead of guessing: one `GET {candidate}/api/v4/version`, root first, one
+segment in on a 404 (`resolveGitLabRoot`).

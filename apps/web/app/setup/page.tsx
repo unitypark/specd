@@ -1019,36 +1019,43 @@ function SetupWizard() {
                       <option value="github">GitHub (github.com or Enterprise Server)</option>
                     </select>
                     <span className="hint">
-                      specd reads and writes your code on disk either way. A token here is used
-                      for one thing — opening the review — and never to fetch a file or push a
-                      commit; your own git credentials do the push.
+                      specd reads and writes your code on disk either way, and your own git
+                      credentials do the push. This only decides how the review gets opened.
                     </span>
                   </div>
 
                   {reviewProvider && (
                     <>
+                      {reviewProvider === 'gitlab' && (
+                        <div className={styles.info}>
+                          <b>You may not need a token at all.</b> GitLab can open the merge
+                          request as part of the push itself, over the same SSH connection you
+                          already use — no API call, which is what makes it work behind an
+                          access portal. specd tries that first and only falls back to a token
+                          if your instance does not answer. Leave the fields below empty to rely
+                          on it.
+                        </div>
+                      )}
                       <div className="field">
-                        <label htmlFor="revurl">
-                          Instance URL {reviewProvider === 'gitlab' ? '(self-managed only)' : '(Enterprise Server only)'}
-                        </label>
+                        <label htmlFor="revurl">Instance URL — override (optional)</label>
                         <input
                           id="revurl"
                           value={reviewInstanceUrl}
                           onChange={(e) => setReviewInstanceUrl(e.target.value)}
-                          placeholder={
-                            reviewProvider === 'gitlab'
-                              ? 'https://gitlab.example.com — blank for gitlab.com'
-                              : 'https://github.example.com — blank for github.com'
-                          }
+                          placeholder="taken from your repository's origin"
                           spellCheck={false}
                         />
                         <span className="hint">
-                          The instance root, not a project page. specd reaches it from the machine
-                          it runs on, so a host behind a VPN needs this machine on that VPN.
+                          Normally blank: specd reads the host out of the clone&apos;s{' '}
+                          <code>origin</code>. Set it only for an instance served from a subpath
+                          (<code>https://host/gitlab</code>), plain http, or a non-standard API
+                          port. It is the instance <em>root</em>, never a group or project page.
                         </span>
                       </div>
                       <div className="field">
-                        <label htmlFor="revtoken">Access token</label>
+                        <label htmlFor="revtoken">
+                          Access token {reviewProvider === 'gitlab' ? '(optional)' : ''}
+                        </label>
                         <input
                           id="revtoken"
                           type="password"
@@ -1059,8 +1066,8 @@ function SetupWizard() {
                         />
                         <span className="hint">
                           {reviewProvider === 'gitlab'
-                            ? 'Needs the api scope, and permission to open merge requests on the project.'
-                            : 'A token with pull-request write access on the repository.'}
+                            ? 'Only used if the push-option route does not open the merge request. Needs the api scope — and an access portal in front of /api/v4 will defeat it, which the push route sidesteps.'
+                            : 'A token with pull-request write access on the repository. GitHub has no push-option equivalent, so this is required.'}
                         </span>
                       </div>
                       {reviewCheck && (

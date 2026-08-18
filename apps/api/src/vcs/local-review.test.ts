@@ -6,6 +6,7 @@ import { simpleGit } from 'simple-git';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   describeForPushOption,
+  run,
   detectHost,
   instanceUrlFromRemote,
   openLocalReview,
@@ -371,5 +372,56 @@ describe('the push-option route against a remote that does not take them', () =>
     ).toContain('spec/E-9-thing');
     expect(result.url).toBeNull();
     expect(result.note).toMatch(/did not report a merge request from the push/);
+  });
+});
+
+describe('a child that exits before it reads stdin', () => {
+  /**
+   * The CI failure this pins. `openLocalReview` shells out to `gh`, `glab` and
+   * `git`, and in the common failure cases — no such binary, a rejected push —
+   * the child is gone before the prompt is written. Node reports that write as
+   * an `error` on the stdin stream, and unhandled it is an *uncaught
+   * exception*: every test in the run passed and the run still failed.
+   *
+   * Made deterministic by writing far more than any pipe buffer to a command
+   * that exits at once, so the write always outlives the process rather than
+   * usually winning the race.
+   */
+  const withoutUncaught = async (fn: () => Promise<unknown>) => {
+    const uncaught: unknown[] = [];
+    const onUncaught = (err: unknown) => uncaught.push(err);
+    process.on('uncaughtException', onUncaught);
+    try {
+      await fn();
+      await new Promise((r) => setTimeout(r, 50)); // let an async EPIPE surface
+      return uncaught;
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+  };
+
+  it('answers instead of raising, when the pipe is already closed', async () => {
+    let result: { code: number | null } | undefined;
+    const uncaught = await withoutUncaught(async () => {
+      result = await run('git', ['--version'], { cwd: process.cwd(), stdin: 'x'.repeat(8_000_000) });
+    });
+
+    expect(uncaught).toEqual([]);
+    // The call still reports the child's outcome — a pipe nobody read is not
+    // a failure of the command.
+    expect(result?.code).toBe(0);
+  });
+
+  it('does not raise when the binary does not exist at all', async () => {
+    // The CI shape: no `gh` on the runner, so the spawn fails and there is no
+    // process to receive the write.
+    const uncaught = await withoutUncaught(async () => {
+      const out = await run('specd-no-such-binary', ['--version'], {
+        cwd: process.cwd(),
+        stdin: 'x'.repeat(8_000_000),
+      });
+      expect(out.code).toBeNull();
+    });
+    expect(uncaught).toEqual([]);
   });
 });

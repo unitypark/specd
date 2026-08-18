@@ -479,6 +479,16 @@ export class ClaudeCodeProvider {
 
       // Large prompts go over stdin — argv would hit the platform limit once a
       // spec carries a dozen knowledge excerpts.
+      // A child that exited — or never started — leaves a stdin pipe with
+      // nobody on the other end, and Node reports the write as an `error` on
+      // the stream rather than on the child. Unhandled, that is an uncaught
+      // exception for a prompt the callee was never going to read. The runner
+      // hit this first (`apps/runner/src/claude.ts`) and this is the same
+      // guard: the exit code and stderr below already describe the outcome.
+      child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') return;
+        stderr += `\n[specd] could not write to claude's stdin: ${err.message}`;
+      });
       child.stdin.write(stdin);
       child.stdin.end();
     });

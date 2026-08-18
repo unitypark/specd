@@ -319,6 +319,22 @@ export class LocalGitAdapter implements VcsAdapter {
     }
   }
 
+  /**
+   * The `origin` a registered checkout points at, if it has one.
+   *
+   * Read at connect time so a review credential can be checked against the
+   * host the repository actually names, rather than against whatever the
+   * adapter would have defaulted to.
+   */
+  async originUrl(localPath: string): Promise<string | null> {
+    try {
+      const url = await simpleGit({ baseDir: resolve(localPath) }).remote(['get-url', 'origin']);
+      return (url || '').trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
   async describe(path: string): Promise<{ clean: boolean; branch: string; head: string } | null> {
     const root = await this.repoRootOf(path);
     if (!root) return null;

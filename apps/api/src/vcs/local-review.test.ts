@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { detectHost, openLocalReview, projectPathFromRemote } from './local-review.js';
+import {
+  describeForPushOption,
+  detectHost,
+  instanceUrlFromRemote,
+  openLocalReview,
+  projectPathFromRemote,
+  resolveGitLabRoot,
+} from './local-review.js';
 
 describe('detectHost', () => {
   it('recognizes github and gitlab over ssh and https alike', () => {
@@ -221,5 +228,148 @@ describe('a configured review credential', () => {
       rmSync(remote, { recursive: true, force: true });
       git('remote', 'remove', 'origin');
     }
+  });
+});
+
+describe('instanceUrlFromRemote', () => {
+  it('reads the host a clone already names, in either remote syntax', () => {
+    expect(instanceUrlFromRemote('git@gitlab.example.com:acme/services/api.git')).toBe(
+      'https://gitlab.example.com',
+    );
+    expect(instanceUrlFromRemote('https://gitlab.example.com/acme/services/api.git')).toBe(
+      'https://gitlab.example.com',
+    );
+  });
+
+  it('drops an ssh port and keeps a web one', () => {
+    // `:2222` on an ssh remote is the SSH port. Carrying it onto an API URL
+    // would be confidently wrong, which is worse than asking.
+    expect(instanceUrlFromRemote('ssh://git@gitlab.example.com:2222/acme/api.git')).toBe(
+      'https://gitlab.example.com',
+    );
+    expect(instanceUrlFromRemote('https://gitlab.example.com:8443/acme/api.git')).toBe(
+      'https://gitlab.example.com:8443',
+    );
+  });
+
+  it('has no answer for a remote with no host', () => {
+    expect(instanceUrlFromRemote('/srv/git/bare.git')).toBeNull();
+    expect(instanceUrlFromRemote('')).toBeNull();
+  });
+});
+
+describe('a subpath-hosted instance', () => {
+  const instance = 'https://intranet.example.com/gitlab';
+
+  it('strips the instance prefix from both remote syntaxes', () => {
+    // The regression: the prefix was compared against `URL.pathname`, which
+    // carries a leading slash, while the scp branch produced one without —
+    // so an ssh remote silently kept the instance path inside the project
+    // path, and ssh is what a corporate clone actually uses.
+    expect(projectPathFromRemote('https://intranet.example.com/gitlab/group/project.git', instance)).toBe(
+      'group/project',
+    );
+    expect(projectPathFromRemote('git@intranet.example.com:gitlab/group/project.git', instance)).toBe(
+      'group/project',
+    );
+  });
+
+  it('leaves a path alone when it merely starts with similar letters', () => {
+    // `gitlab-runner/...` is not inside `/gitlab`, and a prefix match without
+    // the separator would eat four characters off a real group name.
+    expect(
+      projectPathFromRemote('git@intranet.example.com:gitlab-runner/project.git', instance),
+    ).toBe('gitlab-runner/project');
+  });
+});
+
+describe('resolveGitLabRoot', () => {
+  const remote = 'git@gitlab.example.com:ET130/services/api.git';
+
+  it('keeps the root when GitLab answers there — the leading segment is a group', () => {
+    const probe = async (url: string) => (url === 'https://gitlab.example.com/api/v4/version' ? 401 : 404);
+    return expect(resolveGitLabRoot('https://gitlab.example.com', remote, probe)).resolves.toBe(
+      'https://gitlab.example.com',
+    );
+  });
+
+  it('walks one segment in when GitLab is served from a subpath', async () => {
+    const probe = async (url: string) =>
+      url === 'https://gitlab.example.com/ET130/api/v4/version' ? 200 : 404;
+    await expect(resolveGitLabRoot('https://gitlab.example.com', remote, probe)).resolves.toBe(
+      'https://gitlab.example.com/ET130',
+    );
+  });
+
+  it('prefers the root, and returns it unchanged when neither answers', async () => {
+    // A wrong instance URL is then reported by describeApiBase404, which says
+    // which half to drop — better than silently addressing a group.
+    await expect(resolveGitLabRoot('https://gitlab.example.com', remote, async () => 404)).resolves.toBe(
+      'https://gitlab.example.com',
+    );
+  });
+});
+
+describe('describeForPushOption', () => {
+  it('passes a short body through untouched', () => {
+    expect(describeForPushOption('short')).toBe('short');
+  });
+
+  it('trims a long one and says that it did', () => {
+    const out = describeForPushOption('x'.repeat(4000));
+    expect(out.length).toBeLessThan(1700);
+    expect(out).toMatch(/truncated/);
+  });
+});
+
+describe('the push-option route against a remote that does not take them', () => {
+  // A local bare repo refuses push options exactly as GitLab before 11.10
+  // does: it rejects the whole push and sends nothing. The branch still has to
+  // arrive, so the retry is what keeps a working setup working.
+  let dir = '';
+  let remote = '';
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: dir, encoding: 'utf8' as const });
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'specd-pushopt-'));
+    remote = mkdtempSync(join(tmpdir(), 'specd-pushopt-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', remote]);
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t.dev');
+    git('config', 'user.name', 'T');
+    git('remote', 'add', 'origin', remote);
+    writeFileSync(join(dir, 'README.md'), '# x\n');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+    git('checkout', '-q', '-b', 'spec/E-9-thing');
+    writeFileSync(join(dir, 'f.txt'), 'work\n');
+    git('add', '-A');
+    git('commit', '-qm', 'work');
+    git('checkout', '-q', 'main');
+  });
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(remote, { recursive: true, force: true });
+  });
+
+  it('still publishes the branch, and says the merge request did not come from the push', async () => {
+    const result = await openLocalReview({
+      git: simpleGit({ baseDir: dir }),
+      cwd: dir,
+      remoteUrl: 'git@gitlab.example.com:acme/services/api.git',
+      branch: 'spec/E-9-thing',
+      base: 'main',
+      title: '[E-9] - Thing',
+      body: 'body',
+      credential: { provider: 'gitlab', token: null, instanceUrl: null },
+    });
+
+    expect(
+      execFileSync('git', ['branch', '--list', 'spec/E-9-thing'], { cwd: remote, encoding: 'utf8' }),
+    ).toContain('spec/E-9-thing');
+    expect(result.url).toBeNull();
+    expect(result.note).toMatch(/did not report a merge request from the push/);
   });
 });

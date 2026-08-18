@@ -85,8 +85,15 @@ back as a sentence naming the cause, rather than as "Internal server error":
 | `answered with an HTML page rather than JSON` | An SSO or access portal sits in front of the instance and served its login page at **200**. See below. |
 | `→ 401` | The instance answered. The token is the problem, not the network. |
 
-**An access portal in front of the API.** This is the one failure specd cannot
-work around. A portal that intercepts `/api/v4` and answers with a sign-in page
+**An access portal in front of the API.** For a *local-mode* repository there
+is a way around it: GitLab can open the merge request from the push itself
+(`git push -o merge_request.create`), which travels over the git transport and
+is never seen by an HTTP portal. specd tries that first, so a local-mode
+project on a portal-protected instance needs no token at all. What follows
+applies to a repository connected in **GitLab mode**, which does read and write
+over the API.
+
+This is the one failure specd cannot work around there. A portal that intercepts `/api/v4` and answers with a sign-in page
 means the request never reached GitLab, so no token specd holds can help: it
 speaks the API directly and cannot complete a browser sign-in. The symptom used
 to be `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` — a JSON parser

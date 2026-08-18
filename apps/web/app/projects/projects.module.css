@@ -17,6 +17,13 @@
   padding: clamp(1.25rem, 2.5vw, 2rem);
 }
 
+/* Drafts sit above live projects, and two panels with no air between them read
+   as one panel with a rule through it. Adjacent-sibling so the common case —
+   a single group — keeps its original spacing against the shell. */
+.group + .group {
+  margin-top: clamp(1.25rem, 2.5vw, 2rem);
+}
+
 .grouphead {
   display: flex;
   align-items: center;
